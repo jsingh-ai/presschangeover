@@ -37,7 +37,7 @@ function observation(
   return {
     machineId,
     eventType,
-    statusCode: null,
+    statusCode: statusDescription === production ? '150' : null,
     statusDescription,
     fetchedAtUtc: plus(seconds),
     sourceGeneration: 'legacy',

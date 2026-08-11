@@ -499,7 +499,7 @@ export interface RadiusStateClassification {
   operationalGroupId: string; operationalGroupKey: OperationalGroupKey; processFamilyId: string; processFamilyKey: ProcessFamilyKey
   displayLabel: string | null; explanation: string; confidence: MappingConfidence; needsReview: boolean; defaultTimelineVisibility: boolean; obsolete: boolean
 }
-export interface ClassificationDraft { baseVersion: number; revision: number; updatedAtUtc: string; updatedBy: string; groups: OperationalGroup[]; classifications: RadiusStateClassification[]; changes: Array<{ action: string; target: string; summary: string; atUtc: string; actor: string }> }
+export interface ClassificationDraft { baseVersion: number; revision: number; updatedAtUtc: string; updatedBy: string; groups: OperationalGroup[]; families: ProcessFamily[]; classifications: RadiusStateClassification[]; changes: Array<{ action: string; target: string; summary: string; atUtc: string; actor: string }> }
 export interface ClassificationSnapshot { version: number; publishedAtUtc: string | null; publishedBy: string | null; groups: OperationalGroup[]; families: ProcessFamily[]; classifications: RadiusStateClassification[] }
 export interface ClassificationWorkspace {
   published: ClassificationSnapshot; draft: ClassificationDraft | null; effectiveGroups: OperationalGroup[]

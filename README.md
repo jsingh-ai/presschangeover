@@ -55,7 +55,7 @@ The server reads:
 - PLANT_TIME_ZONE — defaults to and is configured as America/Chicago
 - RADIUS_STALE_SECONDS — defaults to 180; accepts an integer from 1 through 86400 seconds
 - RADIUS_DB_* / RADIUS_RUN_PRODUCTION_STATUS / RADIUS_PRESS_MAPPINGS — optional as a complete verified set; any partial set is rejected
-- APP_DB_* — optional as a complete set and accepted only for the separate `processintelligence_db`, `processintelligence_app` role, and `process_intelligence` schema. When absent, classification administration is read-only.
+- APP_DB_* — optional as a complete set and accepted only for the separate `processintelligence_db` and `processintelligence_app` runtime login. Classification documents always use `public.classification_documents`. When absent, classification administration is read-only.
 
 Use [server/.env.example](server/.env.example) and [config/processintelligence.env.example](config/processintelligence.env.example) as documentation. Real environment files and database credentials are ignored by Git. Only a dedicated SELECT-only Radius password may be supplied externally.
 

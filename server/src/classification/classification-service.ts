@@ -126,7 +126,7 @@ export class ClassificationService {
     if (expectedVersion !== undefined && expectedVersion !== published.version) throw new ClassificationConflictError()
     const atUtc = new Date().toISOString()
     const change = nowChange(actor, 'DRAFT_CREATED', `version:${published.version}`, 'Created a classification draft.')
-    const draft: ClassificationDraft = { baseVersion: published.version, revision: 1, updatedAtUtc: atUtc, updatedBy: actor.id, groups: structuredClone(published.groups), classifications: structuredClone(published.classifications), changes: [change] }
+    const draft: ClassificationDraft = { baseVersion: published.version, revision: 1, updatedAtUtc: atUtc, updatedBy: actor.id, groups: structuredClone(published.groups), families: structuredClone(published.families), classifications: structuredClone(published.classifications), changes: [change] }
     return this.repository.saveDraft(draft, null, change)
   }
 

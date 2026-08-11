@@ -31,7 +31,7 @@ export interface ServerConfig {
 
 export type AppDatabaseConfig =
   | { enabled: false }
-  | { enabled: true; host: '127.0.0.1' | 'localhost'; port: number; database: 'processintelligence_db'; user: 'processintelligence_app'; password: string; schema: 'process_intelligence' }
+  | { enabled: true; host: '127.0.0.1' | 'localhost'; port: number; database: 'processintelligence_db'; user: 'processintelligence_app'; password: string }
 
 export interface ClassificationAuthorizationConfig {
   trustedProxy: boolean
@@ -318,7 +318,7 @@ function parseRadiusConfig(environment: NodeJS.ProcessEnv): RadiusConfig {
 }
 
 function parseClassificationDatabase(environment: NodeJS.ProcessEnv): AppDatabaseConfig {
-  const names = ['APP_DB_HOST', 'APP_DB_PORT', 'APP_DB_NAME', 'APP_DB_USER', 'APP_DB_PASSWORD', 'APP_DB_SCHEMA']
+  const names = ['APP_DB_HOST', 'APP_DB_PORT', 'APP_DB_NAME', 'APP_DB_USER', 'APP_DB_PASSWORD']
   const configured = names.filter((name) => environment[name]?.trim())
   if (configured.length === 0) return { enabled: false }
   if (configured.length !== names.length) throw new Error('APP_DB_* configuration must be complete or entirely absent')
@@ -328,8 +328,7 @@ function parseClassificationDatabase(environment: NodeJS.ProcessEnv): AppDatabas
   if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error('APP_DB_PORT must be a valid port')
   if (environment.APP_DB_NAME!.trim() !== 'processintelligence_db') throw new Error('APP_DB_NAME must be processintelligence_db and must not reference a source database')
   if (environment.APP_DB_USER!.trim() !== 'processintelligence_app') throw new Error('APP_DB_USER must be the restricted processintelligence_app runtime role')
-  if (environment.APP_DB_SCHEMA!.trim() !== 'process_intelligence') throw new Error('APP_DB_SCHEMA must be process_intelligence')
-  return { enabled: true, host, port, database: 'processintelligence_db', user: 'processintelligence_app', password: environment.APP_DB_PASSWORD!.trim(), schema: 'process_intelligence' }
+  return { enabled: true, host, port, database: 'processintelligence_db', user: 'processintelligence_app', password: environment.APP_DB_PASSWORD!.trim() }
 }
 
 function parseClassificationAuthorization(environment: NodeJS.ProcessEnv): ClassificationAuthorizationConfig {

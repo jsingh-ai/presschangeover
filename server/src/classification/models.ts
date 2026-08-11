@@ -83,6 +83,7 @@ export interface ClassificationDraft {
   updatedAtUtc: string
   updatedBy: string
   groups: OperationalGroup[]
+  families: ProcessFamily[]
   classifications: RadiusStateClassification[]
   changes: ClassificationAuditChange[]
 }

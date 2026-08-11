@@ -9,6 +9,8 @@ import type {
   RadiusStatusSegment,
 } from './models.js'
 
+export const VERIFIED_PRODUCTION_STATUS_CODE = '150'
+
 function secondsBetween(fromMs: number, toMs: number): number {
   return Math.max(0, (toMs - fromMs) / 1_000)
 }
@@ -43,6 +45,7 @@ function radiusSegment(
   endMs: number,
   productionStatusDescription: string,
   productionEventType: string,
+  productionStatusCode: string,
   isOpen: boolean,
 ): RadiusStateSegment {
   return {
@@ -58,6 +61,7 @@ function radiusSegment(
     durationSeconds: secondsBetween(startMs, endMs),
     isProduction:
       observation.eventType === productionEventType &&
+      observation.statusCode === productionStatusCode &&
       observation.statusDescription === productionStatusDescription,
     isOpen,
     sourceGeneration:
@@ -116,6 +120,7 @@ export function buildRadiusAvailabilityTimeline(
   heartbeats?: Array<{ fetchedAtUtc: string }>,
   terminalIsOpen = true,
   productionEventType = 'G',
+  productionStatusCode = VERIFIED_PRODUCTION_STATUS_CODE,
 ): RadiusStatusSegment[] {
   const startMs = Date.parse(timelineStartUtc)
   const endMs = Date.parse(timelineEndUtc)
@@ -203,6 +208,7 @@ export function buildRadiusAvailabilityTimeline(
             intervalEndMs,
             productionStatusDescription,
             productionEventType,
+            productionStatusCode,
             isTerminal,
           )
         : offlineSegment(
@@ -237,6 +243,7 @@ export function deriveCurrentRadiusAvailability(
   currentState?: RadiusObservation | null,
   isPresent = true,
   productionEventType = 'G',
+  productionStatusCode = VERIFIED_PRODUCTION_STATUS_CODE,
 ): CurrentRadiusAvailability {
   const evaluationMs = Date.parse(evaluationUtc)
   const currentObservation = [...observations]
@@ -283,6 +290,7 @@ export function deriveCurrentRadiusAvailability(
     currentStatusAtUtc: isFresh ? stateObservation.fetchedAtUtc : null,
     isCurrentlyProduction: isFresh
       ? stateObservation.eventType === productionEventType &&
+        stateObservation.statusCode === productionStatusCode &&
         stateObservation.statusDescription === productionStatusDescription
       : null,
   }

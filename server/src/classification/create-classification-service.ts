@@ -14,7 +14,7 @@ export function createClassificationService(config: AppDatabaseConfig) {
     max: 3, connectionTimeoutMillis: 2_000, idleTimeoutMillis: 10_000, query_timeout: 6_000,
     statement_timeout: 5_000, application_name: 'ProcessIntelligenceClassification', allowExitOnIdle: true,
   })
-  return new ClassificationService(new PostgresClassificationRepository(pool, config.schema))
+  return new ClassificationService(new PostgresClassificationRepository(pool))
 }
 
 export type ClassificationAuthorizer = (request: Request) => ClassificationActor

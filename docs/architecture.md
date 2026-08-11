@@ -21,7 +21,7 @@ The browser never calls MARKUSPRODSVR or TelemetryQueryApi directly. Process Int
 
 ## Writable application-data boundary
 
-Radius and telemetry are never writable application stores. State classifications, drafts, published versions, and audits use only the optional future `processintelligence_db` boundary with a distinct restricted `processintelligence_app` role and `APP_DB_*` configuration. The application refuses source database names and remains read-only when that boundary is absent. Migration provisioning is documented in `docs/state-classification-storage.md`.
+Radius and telemetry are never writable application stores. State-classification drafts and published versions use only `public.classification_documents` in the optional `processintelligence_db` boundary, with the restricted `processintelligence_app` login and `APP_DB_*` configuration. The application refuses source database names and remains read-only when that boundary is absent. Migration provisioning is documented in `docs/state-classification-storage.md`.
 
 The existing Radius/opc-radius production application on FORMPRODSVR02 remains isolated and untouched. Process Intelligence now contains an optional Radius boundary in the Node backend. It remains disabled until live schema, timestamp semantics, exact production status, machine mappings, and a dedicated SELECT-only role are verified and configured externally. React never connects to PostgreSQL.
 

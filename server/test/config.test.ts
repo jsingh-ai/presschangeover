@@ -12,6 +12,7 @@ test('configuration normalizes the telemetry base URL and defaults timeout', () 
   assert.equal(config.host, 'localhost')
   assert.equal(config.plantTimeZone, 'America/Chicago')
   assert.deepEqual(config.radius, { enabled: false, staleSeconds: 180 })
+  assert.deepEqual(config.classificationDatabase, { enabled: false })
 })
 
 test('configuration validates explicit plant timezone and complete Radius settings', () => {
@@ -142,13 +143,13 @@ test('application writes require the separate processintelligence_db boundary an
   const config = loadServerConfig({
     TELEMETRY_API_BASE_URL: 'http://telemetry.internal',
     APP_DB_HOST: '127.0.0.1', APP_DB_PORT: '5432', APP_DB_NAME: 'processintelligence_db',
-    APP_DB_USER: 'processintelligence_app', APP_DB_PASSWORD: 'test-only-app-password', APP_DB_SCHEMA: 'process_intelligence',
+    APP_DB_USER: 'processintelligence_app', APP_DB_PASSWORD: 'test-only-app-password',
   })
   assert.equal(config.classificationDatabase.enabled, true)
   assert.throws(() => loadServerConfig({
     TELEMETRY_API_BASE_URL: 'http://telemetry.internal',
     APP_DB_HOST: '127.0.0.1', APP_DB_PORT: '5432', APP_DB_NAME: 'press_radius_db',
-    APP_DB_USER: 'processintelligence_readonly', APP_DB_PASSWORD: 'wrong-boundary', APP_DB_SCHEMA: 'public',
+    APP_DB_USER: 'processintelligence_readonly', APP_DB_PASSWORD: 'wrong-boundary',
   }), /APP_DB_NAME must be processintelligence_db/)
   assert.throws(() => loadServerConfig({ TELEMETRY_API_BASE_URL: 'http://telemetry.internal', APP_DB_HOST: '127.0.0.1' }), /APP_DB_\* configuration must be complete/)
 })

@@ -29,7 +29,7 @@ function state(
     fetchedAtUtc,
     statusDescription,
     eventType,
-    statusCode: null,
+    statusCode: statusDescription === production ? '150' : null,
     sourceGeneration: Date.parse(fetchedAtUtc) < Date.parse('2026-08-10T14:29:00.415Z')
       ? 'legacy'
       : 'compact',
@@ -209,11 +209,16 @@ test('matching legacy and seed event states do not duplicate the cutover segment
   assert.equal(segments[0].kind, 'radius')
 })
 
-test('production requires the verified event-type and description pair', () => {
+test('production requires the verified G / 150 / Run Production identity', () => {
   const startUtc = '2026-08-10T15:00:00.000Z'
   const wrongType = buildRadiusAvailabilityTimeline(
     [state(startUtc, production, 'M')], mapping, production, startUtc,
     '2026-08-10T15:01:00.000Z', 180, [heartbeat(startUtc)],
   )[0]
   assert.equal(wrongType.kind === 'radius' && wrongType.isProduction, false)
+  const wrongCode = buildRadiusAvailabilityTimeline(
+    [{ ...state(startUtc), statusCode: '20' }], mapping, production, startUtc,
+    '2026-08-10T15:01:00.000Z', 180, [heartbeat(startUtc)],
+  )[0]
+  assert.equal(wrongCode.kind === 'radius' && wrongCode.isProduction, false)
 })

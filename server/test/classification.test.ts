@@ -42,6 +42,19 @@ describe('Radius semantic classification', () => {
     assert.equal(fallback.needsReview, true)
   })
 
+  it('merges a newly observed identity as Needs classification without persisting it', async () => {
+    const repository = new InMemoryClassificationRepository()
+    const service = new ClassificationService(repository)
+    const unknown = identity('Z', null, 'New exact Radius value')
+    const workspace = await service.getWorkspace([{ ...unknown, eventCount: 1, lastSeenUtc: '2026-08-11T18:00:00.000Z' }], viewer)
+    const merged = workspace.effectiveClassifications.find(({ identity: key }) => key === unknown.identity)
+    assert.equal(merged?.operationalGroupKey, 'ADMIN_UNKNOWN')
+    assert.equal(merged?.confidence, 'LOW')
+    assert.equal(merged?.needsReview, true)
+    assert.equal(merged?.isFallback, true)
+    assert.equal((await repository.getPublished()).classifications.some(({ identity: key }) => key === unknown.identity), false)
+  })
+
   it('keeps group rename and state movement draft-only until atomic publication', async () => {
     const repository = new InMemoryClassificationRepository()
     const service = new ClassificationService(repository)
