@@ -16,6 +16,10 @@ staging/*
 !staging/.gitkeep
 backups/*
 !backups/.gitkeep
+exports/
+releases/
+deployment-packages/
+screenshots/
 
 # External production configuration
 config/*
@@ -40,10 +44,34 @@ pnpm-debug.log*
 .env
 .env.*
 !.env.example
+appsettings.Production.json
+credentials/
+secrets/
 *.pem
 *.key
 *.pfx
 *.crt
+*.cer
+*.der
+*.p12
+*.p7b
+*.jks
+*.keystore
+
+# Database exports and packaged artifacts
+*.dump
+*.backup
+*.sql.gz
+*.sql.bz2
+*.sqlite
+*.sqlite3
+*.bak
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+*.rar
 
 # Editor and operating-system artifacts
 .vscode/
