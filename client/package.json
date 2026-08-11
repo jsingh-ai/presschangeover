@@ -1,0 +1,26 @@
+{
+  "name": "process-intelligence-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "test": "tsx --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "latest",
+    "luxon": "^3.7.2",
+    "react": "latest",
+    "react-dom": "latest",
+    "vite": "latest"
+  },
+  "devDependencies": {
+    "@types/luxon": "^3.7.4",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "tsx": "^4.23.12",
+    "typescript": "latest"
+  }
+}

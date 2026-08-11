@@ -1,0 +1,26 @@
+{
+  "name": "process-intelligence-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "set TELEMETRY_API_BASE_URL=http://10.0.1.157:5080&& tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
+  },
+  "dependencies": {
+    "express": "latest",
+    "luxon": "^3.7.2",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@types/express": "latest",
+    "@types/luxon": "^3.7.4",
+    "@types/node": "latest",
+    "@types/pg": "^8.21.0",
+    "tsx": "latest",
+    "typescript": "latest"
+  }
+}

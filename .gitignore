@@ -1,0 +1,60 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+.vite/
+coverage/
+
+# Future deployment and runtime content
+app/*
+!app/.gitkeep
+logs/*
+!logs/.gitkeep
+staging/*
+!staging/.gitkeep
+backups/*
+!backups/.gitkeep
+
+# External production configuration
+config/*
+!config/.gitkeep
+!config/*.example
+!config/README.md
+!config/iis/
+!config/iis/ProcessIntelligence.web.config
+
+# Logs
+*.log
+logs/
+!logs/
+logs/*
+!logs/.gitkeep
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.crt
+
+# Editor and operating-system artifacts
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+*.code-workspace
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+Thumbs.db
+Desktop.ini
+.DS_Store

@@ -1,0 +1,203 @@
+\set ON_ERROR_STOP on
+\pset pager off
+SET statement_timeout = '15s';
+SET lock_timeout = '2s';
+SET TIME ZONE 'America/Chicago';
+
+-- Run only while connected to press_radius_db with an approved PostgreSQL
+-- administrator. This script is read-only and never displays passwords.
+SELECT
+  version() AS postgres_version,
+  current_database() AS database_name,
+  inet_server_addr() AS server_address,
+  inet_server_port() AS server_port,
+  current_setting('TimeZone') AS session_timezone;
+
+SELECT
+  namespace.nspname AS radius_schema,
+  relation.relname AS radius_table
+FROM pg_catalog.pg_class AS relation
+JOIN pg_catalog.pg_namespace AS namespace
+  ON namespace.oid = relation.relnamespace
+WHERE relation.relname = 'machine_status_history'
+  AND relation.relkind IN ('r', 'p')
+  AND namespace.nspname NOT IN ('pg_catalog', 'information_schema')
+\gset
+
+\if :{?radius_schema}
+  \echo Discovered :radius_schema.:radius_table
+\else
+  \echo Expected a unique machine_status_history table; discovery stopped.
+  \quit 3
+\endif
+
+SELECT
+  column_name,
+  data_type,
+  udt_name,
+  is_nullable,
+  ordinal_position
+FROM information_schema.columns
+WHERE table_schema = :'radius_schema'
+  AND table_name = :'radius_table'
+ORDER BY ordinal_position;
+
+SELECT
+  constraint_info.conname AS primary_key_name,
+  pg_catalog.pg_get_constraintdef(constraint_info.oid) AS definition
+FROM pg_catalog.pg_constraint AS constraint_info
+WHERE constraint_info.conrelid = format('%I.%I', :'radius_schema', :'radius_table')::regclass
+  AND constraint_info.contype = 'p';
+
+SELECT
+  index_info.indexname,
+  index_info.indexdef
+FROM pg_catalog.pg_indexes AS index_info
+WHERE index_info.schemaname = :'radius_schema'
+  AND index_info.tablename = :'radius_table'
+ORDER BY index_info.indexname;
+
+SELECT
+  stats.n_live_tup AS approximate_live_rows,
+  stats.n_dead_tup AS approximate_dead_rows,
+  stats.last_analyze,
+  stats.last_autoanalyze
+FROM pg_catalog.pg_stat_user_tables AS stats
+WHERE stats.relid = format('%I.%I', :'radius_schema', :'radius_table')::regclass;
+
+-- Bounded recent dictionary. Exact status text and casing are preserved.
+SELECT
+  event_type,
+  status_description,
+  count(*) AS recent_occurrence_count,
+  min(fetched_at) AS first_recent_occurrence,
+  max(fetched_at) AS last_recent_occurrence
+FROM :"radius_schema".:"radius_table"
+WHERE fetched_at >= CURRENT_TIMESTAMP - INTERVAL '7 days'
+GROUP BY event_type, status_description
+ORDER BY recent_occurrence_count DESC, event_type, status_description;
+
+SELECT
+  status_description,
+  count(*) AS exact_match_count
+FROM :"radius_schema".:"radius_table"
+WHERE fetched_at >= CURRENT_TIMESTAMP - INTERVAL '31 days'
+  AND status_description ILIKE 'run production'
+GROUP BY status_description
+ORDER BY status_description;
+
+-- Bounded machine inventory for the current operational window.
+SELECT
+  machine_id,
+  count(*) AS recent_rows,
+  min(fetched_at) AS first_recent_occurrence,
+  max(fetched_at) AS last_recent_occurrence
+FROM :"radius_schema".:"radius_table"
+WHERE fetched_at >= CURRENT_TIMESTAMP - INTERVAL '31 days'
+GROUP BY machine_id
+ORDER BY machine_id;
+
+-- Polling interval estimate from at most 10,000 newest observations.
+WITH recent AS (
+  SELECT machine_id, fetched_at
+  FROM :"radius_schema".:"radius_table"
+  WHERE fetched_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
+  ORDER BY fetched_at DESC
+  LIMIT 10000
+), intervals AS (
+  SELECT
+    machine_id,
+    EXTRACT(EPOCH FROM fetched_at - lag(fetched_at) OVER (
+      PARTITION BY machine_id ORDER BY fetched_at
+    )) AS interval_seconds
+  FROM recent
+)
+SELECT
+  machine_id,
+  percentile_disc(0.5) WITHIN GROUP (ORDER BY interval_seconds)
+    AS median_poll_seconds,
+  min(interval_seconds) AS minimum_poll_seconds,
+  max(interval_seconds) AS maximum_poll_seconds
+FROM intervals
+WHERE interval_seconds > 0
+GROUP BY machine_id
+ORDER BY machine_id;
+
+-- Candidate metadata tables/columns that may establish machine-to-press mapping.
+SELECT table_schema, table_name, column_name, data_type
+FROM information_schema.columns
+WHERE table_schema NOT IN ('pg_catalog', 'information_schema')
+  AND (
+    column_name = 'machine_id'
+    OR column_name ~* 'machine.*(name|description|number|press)'
+    OR column_name ~* 'press.*(name|number|id)'
+  )
+ORDER BY table_schema, table_name, ordinal_position;
+
+-- Existing candidate role and exact relevant grants. Password hashes are never read.
+SELECT
+  role.rolname,
+  role.rolcanlogin,
+  role.rolsuper,
+  role.rolcreatedb,
+  role.rolcreaterole,
+  role.rolinherit,
+  role.rolreplication,
+  role.rolbypassrls
+FROM pg_catalog.pg_roles AS role
+WHERE role.rolname = 'processintelligence_readonly';
+
+SELECT grantee, privilege_type
+FROM information_schema.role_table_grants
+WHERE table_schema = :'radius_schema'
+  AND table_name = :'radius_table'
+ORDER BY grantee, privilege_type;
+
+-- Representative bounded plans. Review for an index beginning with machine_id
+-- and fetched_at before enabling the live integration.
+SELECT machine_id AS sample_machine_id
+FROM :"radius_schema".:"radius_table"
+WHERE fetched_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
+GROUP BY machine_id
+ORDER BY count(*) DESC
+LIMIT 1
+\gset
+
+EXPLAIN (COSTS, VERBOSE, SETTINGS)
+SELECT machine_id, event_type, fetched_at, status_description
+FROM :"radius_schema".:"radius_table"
+WHERE machine_id = :'sample_machine_id'
+  AND fetched_at >= CURRENT_TIMESTAMP - INTERVAL '24 hours'
+  AND fetched_at < CURRENT_TIMESTAMP
+ORDER BY fetched_at ASC;
+
+EXPLAIN (COSTS, VERBOSE, SETTINGS)
+SELECT machine_id, event_type, fetched_at, status_description
+FROM :"radius_schema".:"radius_table"
+WHERE machine_id = :'sample_machine_id'
+  AND fetched_at >= date_trunc('day', CURRENT_TIMESTAMP)
+  AND fetched_at < CURRENT_TIMESTAMP
+ORDER BY fetched_at ASC;
+
+EXPLAIN (COSTS, VERBOSE, SETTINGS)
+SELECT machine_id, event_type, fetched_at, status_description
+FROM :"radius_schema".:"radius_table"
+WHERE machine_id = :'sample_machine_id'
+  AND fetched_at >= CURRENT_TIMESTAMP - INTERVAL '7 days'
+  AND fetched_at < CURRENT_TIMESTAMP - INTERVAL '24 hours'
+ORDER BY fetched_at DESC
+LIMIT 1;
+
+-- Run these only after reviewing index support above. They use ordered LIMIT 1
+-- rather than an unbounded COUNT(*).
+SELECT fetched_at AS newest_timestamp
+FROM :"radius_schema".:"radius_table"
+ORDER BY fetched_at DESC
+LIMIT 1;
+
+SELECT fetched_at AS oldest_timestamp
+FROM :"radius_schema".:"radius_table"
+ORDER BY fetched_at ASC
+LIMIT 1;
+
+
