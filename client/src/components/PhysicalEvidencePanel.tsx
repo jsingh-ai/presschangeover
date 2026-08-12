@@ -3,7 +3,7 @@ import { formatPlantDateTime } from '../time-ranges'
 import type { RadiusPressKey } from '../types/api'
 import type { ProductionContextEvidence, SignalCapability } from '../types/evidence'
 import { SynchronizedTimeline } from './SynchronizedTimeline'
-import { actualSpeedTrack, boundedEvidenceRange, CONTEXT_LABELS, contextDisplayValue, contextEventTrack, contextIntervalTracks, motionIntervalTrack, physicalEventTrack, usePressTelemetryEvidence, type PressTelemetryEvidenceState } from './TelemetryEvidenceTimeline'
+import { actualSpeedTrack, boundedEvidenceRange, CONTEXT_LABELS, contextDisplayValue, contextEventTrack, contextIntervalTracks, motionIntervalTrack, physicalEventTrack, usePressTelemetryEvidence, VISIBLE_CONTEXT_FIELDS, type PressTelemetryEvidenceState } from './TelemetryEvidenceTimeline'
 
 export { boundedEvidenceRange }
 
@@ -41,7 +41,8 @@ export function PhysicalEvidencePanel({ pressKey, fromUtc, toUtc, evidence, show
   const [expandedSignals, setExpandedSignals] = useState<Set<string>>(() => new Set())
   const speedCapability = capabilities?.capabilities.find(({ canonicalId }) => canonicalId === 'machine.speed.actual')
   const motionCapability = capabilities?.capabilities.find(({ canonicalId }) => canonicalId === 'physical.motion_state')
-  const contextValues = context ? (Object.keys(CONTEXT_LABELS) as Array<keyof typeof CONTEXT_LABELS>).map((field) => ({ field, value: currentContext(context, field) })).filter((item): item is { field: keyof typeof CONTEXT_LABELS; value: string } => item.value !== undefined) : []
+  const contextValues = context ? VISIBLE_CONTEXT_FIELDS.map((field) => ({ field, value: currentContext(context, field) })).filter((item): item is { field: (typeof VISIBLE_CONTEXT_FIELDS)[number]; value: string } => item.value !== undefined) : []
+  const visibleContextChanges = context?.changes.filter(({ field }) => field !== 'job') ?? []
   const motionTrack = motionIntervalTrack(motion, motionCapability)
   const speedTrack = actualSpeedTrack(speed, speedCapability)
   const contextEvents = contextEventTrack(context)
@@ -58,7 +59,7 @@ export function PhysicalEvidencePanel({ pressKey, fromUtc, toUtc, evidence, show
       <dl className="compact-facts evidence-capabilities"><div><dt>Actual Speed</dt><dd>{capabilityLabel(speedCapability)}</dd></div><div><dt>Physical Motion</dt><dd>{capabilityLabel(motionCapability)}</dd></div><div><dt>Telemetry metadata</dt><dd>{capabilities.metadataStatus}</dd></div></dl>
       {showTimeline && <SynchronizedTimeline fromUtc={range.fromUtc} toUtc={range.toUtc} ariaLabel={`${capabilities.displayName} synchronized physical evidence`} intervalTracks={[...contextIntervalTracks(context), ...(motionTrack ? [motionTrack] : [])]} numericTracks={speedTrack ? [speedTrack] : []} eventTracks={[contextEvents, physicalEvents].filter((track): track is NonNullable<typeof track> => Boolean(track))} />}
       {speed && <p className="quiet-copy">Actual Speed: {speed.actual.samples.length ? `${speed.actual.samples.length} raw samples` : 'supported but no samples in range'}{speed.actual.sourceUnit ? ` · source metadata reports ${speed.actual.sourceUnit}; values are not converted` : ' · source units are unverified'}</p>}
-      {context && <section className="physical-evidence__section"><h4>Job / production context</h4>{contextValues.length ? <dl className="compact-facts">{contextValues.map(({ field, value }) => <div key={field}><dt>{CONTEXT_LABELS[field]}</dt><dd>{value}</dd></div>)}</dl> : <p className="empty-state">Supported context fields have no values in this range.</p>}{context.changes.length > 0 && <ol className="context-change-list">{context.changes.map((change, index) => <li key={`${change.atUtc}:${change.field}:${index}`}><time>{formatPlantDateTime(change.atUtc)} CT</time><strong>{CONTEXT_LABELS[change.field]}</strong><span>{String(change.previousValue)} → {String(change.value)}</span></li>)}</ol>}</section>}
+      {context && <section className="physical-evidence__section"><h4>Production context</h4>{contextValues.length ? <dl className="compact-facts">{contextValues.map(({ field, value }) => <div key={field}><dt>{CONTEXT_LABELS[field]}</dt><dd>{value}</dd></div>)}</dl> : <p className="empty-state">Supported context fields have no values in this range.</p>}{visibleContextChanges.length > 0 && <ol className="context-change-list">{visibleContextChanges.map((change, index) => <li key={`${change.atUtc}:${change.field}:${index}`}><time>{formatPlantDateTime(change.atUtc)} CT</time><strong>{CONTEXT_LABELS[change.field]}</strong><span>{String(change.previousValue)} → {String(change.value)}</span></li>)}</ol>}</section>}
       {physical && <section className="physical-evidence__section"><h4>Observed signal changes</h4>{changedSignals.length ? <ul className="physical-signal-list">{changedSignals.map((signal) => {
         const key = `${signal.canonicalId}:${signal.deckNumber ?? ''}`
         const expanded = expandedSignals.has(key)

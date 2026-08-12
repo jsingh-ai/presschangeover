@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { getCuratedPhysicalEvidence, getPressMotion, getPressSpeed, getPressTelemetryCapabilities, getProductionContext } from '../api/process-intelligence-api'
 import { formatPlantDateTime } from '../time-ranges'
 import type { RadiusPressKey } from '../types/api'
@@ -8,6 +8,26 @@ import type { TimelineEvent, TimelineEventTrack, TimelineIntervalTrack, Timeline
 const TWO_HOURS_MS = 2 * 60 * 60 * 1_000
 export const MAX_FULL_TELEMETRY_RANGE_MS = 24 * 60 * 60 * 1_000
 export const CONTEXT_LABELS: Record<ProductionContextField, string> = { job: 'Job', order: 'Order', recipe: 'Recipe', customer: 'Customer', material: 'Material', roll: 'Roll' }
+export const VISIBLE_CONTEXT_FIELDS = ['order', 'recipe', 'customer', 'material', 'roll'] as const satisfies readonly ProductionContextField[]
+type VisibleContextField = (typeof VISIBLE_CONTEXT_FIELDS)[number]
+
+const CONTEXT_BASE_HUES: Record<VisibleContextField, number> = { order: 212, recipe: 276, customer: 26, material: 162, roll: 332 }
+const CONTEXT_COLOR_VARIANTS = [
+  { hue: 0, saturation: 68, lightness: 38 },
+  { hue: 18, saturation: 72, lightness: 46 },
+  { hue: -15, saturation: 60, lightness: 34 },
+  { hue: 32, saturation: 75, lightness: 40 },
+  { hue: -28, saturation: 65, lightness: 47 },
+] as const
+
+export function contextIntervalStyle(field: VisibleContextField, variant: number): CSSProperties {
+  const color = CONTEXT_COLOR_VARIANTS[variant % CONTEXT_COLOR_VARIANTS.length]!
+  const hue = (CONTEXT_BASE_HUES[field] + color.hue + 360) % 360
+  return {
+    background: `hsl(${hue} ${color.saturation}% ${color.lightness}%)`,
+    color: color.lightness >= 46 ? '#14202b' : '#fff',
+  }
+}
 
 export function contextDisplayValue(value: unknown): { label: string; usable: boolean } {
   const raw = String(value ?? '')
@@ -241,19 +261,26 @@ export function usePressTelemetryEvidence(pressKey: RadiusPressKey | undefined, 
 export function contextIntervalTracks(context?: ProductionContextEvidence): TimelineIntervalTrack[] {
   if (!context) return []
   const end = Date.parse(context.toUtc)
-  return (Object.keys(CONTEXT_LABELS) as ProductionContextField[]).map((field) => {
+  return VISIBLE_CONTEXT_FIELDS.map((field) => {
     const evidence = context.fields[field]
     const values = [
       ...(evidence.seed ? [{ atUtc: context.fromUtc, value: evidence.seed.value }] : []),
       ...evidence.changes.map((change) => ({ atUtc: change.observedAtUtc, value: change.value })),
     ].sort((left, right) => Date.parse(left.atUtc) - Date.parse(right.atUtc)).map((value) => ({ ...value, display: contextDisplayValue(value.value) }))
+    const colorByValue = new Map<string, number>()
+    values.forEach(({ value, display }) => {
+      const key = `${typeof value}:${String(value)}`
+      if (display.usable && !colorByValue.has(key)) colorByValue.set(key, colorByValue.size)
+    })
     return { id: `context-${field}`, label: CONTEXT_LABELS[field], unavailableLabel: evidence.capabilityState === 'UNSUPPORTED' ? 'Unsupported for this press' : evidence.capabilityState === 'SUPPORTED' ? 'Supported, but no value observed in this range' : 'Capability unknown or temporarily unavailable', intervals: values.map((value, index) => ({
       id: `context:${field}:${value.atUtc}:${index}`,
       startUtc: value.atUtc,
       endUtc: new Date(Math.max(Date.parse(value.atUtc) + 1_000, Math.min(end, Date.parse(values[index + 1]?.atUtc ?? context.toUtc)))).toISOString(),
       label: value.display.label,
       details: `${CONTEXT_LABELS[field]} context: ${value.display.label}\nRaw source value: ${String(value.value)}\nObserved from ${formatPlantDateTime(value.atUtc)} CT`,
-      className: 'context-timeline-value', unavailable: !value.display.usable,
+      className: `context-timeline-value context-timeline-value--${field}`,
+      style: value.display.usable ? contextIntervalStyle(field, colorByValue.get(`${typeof value.value}:${String(value.value)}`) ?? 0) : undefined,
+      unavailable: !value.display.usable,
     })) }
   })
 }
@@ -262,10 +289,10 @@ export function contextEventTrack(context?: ProductionContextEvidence): Timeline
   if (!context) return undefined
   return {
     id: 'context-changes', label: 'Context changes', unavailableLabel: 'No context changes observed in this range',
-    events: context.changes.map((change, index) => ({
+    events: context.changes.filter((change) => VISIBLE_CONTEXT_FIELDS.includes(change.field as VisibleContextField)).map((change, index) => ({
       id: `context-event:${change.field}:${change.atUtc}:${index}`,
       atUtc: change.atUtc,
-      category: 'context',
+      category: `context-${change.field}`,
       label: `${CONTEXT_LABELS[change.field]} changed`,
       detail: `${String(change.previousValue)} → ${String(change.value)}. Observed ${formatPlantDateTime(change.atUtc)} CT`,
     })),
@@ -335,7 +362,7 @@ export function telemetrySummary(evidence: PressTelemetryEvidenceState) {
     speedSamples: speedSamples.length,
     speedMinimum: speedValues.length ? Math.min(...speedValues) : null,
     speedMaximum: speedValues.length ? Math.max(...speedValues) : null,
-    contextChanges: evidence.context?.changes.length ?? 0,
+    contextChanges: evidence.context?.changes.filter(({ field }) => field !== 'job').length ?? 0,
     physicalChanges: evidence.physical?.signals.reduce((sum, signal) => sum + signal.changes.length, 0) ?? 0,
   }
 }

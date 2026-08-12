@@ -1763,6 +1763,11 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
 .synchronized-timeline__event::after { content: ''; display: block; width: 1px; height: .8rem; margin: 0 auto; background: var(--primary); }
 .synchronized-timeline__event b { position: absolute; top: -.2rem; left: .75rem; min-width: 1rem; padding: .05rem .2rem; border-radius: 999px; background: var(--text); color: var(--surface); font-size: .58rem; line-height: 1rem; }
 .synchronized-timeline__event--context i { background: #6f5ac7; box-shadow: 0 0 0 1px #6f5ac7; }
+.synchronized-timeline__event--context-order i { background: #2775b8; box-shadow: 0 0 0 1px #2775b8; }
+.synchronized-timeline__event--context-recipe i { background: #7954c7; box-shadow: 0 0 0 1px #7954c7; }
+.synchronized-timeline__event--context-customer i { background: #c66a26; box-shadow: 0 0 0 1px #c66a26; }
+.synchronized-timeline__event--context-material i { background: #218269; box-shadow: 0 0 0 1px #218269; }
+.synchronized-timeline__event--context-roll i { background: #b63f7a; box-shadow: 0 0 0 1px #b63f7a; }
 .synchronized-timeline__event--deck i { background: #2775a5; box-shadow: 0 0 0 1px #2775a5; }
 .synchronized-timeline__event--register i, .synchronized-timeline__event--impression i { background: #27805e; box-shadow: 0 0 0 1px #27805e; }
 .synchronized-timeline__event--wash i, .synchronized-timeline__event--pump i { background: #e1762c; box-shadow: 0 0 0 1px #e1762c; }

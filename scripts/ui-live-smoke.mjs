@@ -173,7 +173,7 @@ report.interactions.overviewTelemetry = await evaluate(`(() => {
   const timeline = document.querySelector('.overview-gantt .synchronized-timeline')
   const labels = [...timeline.querySelectorAll('[aria-label]')].map((item) => item.getAttribute('aria-label'))
   return {
-    context: ['Job', 'Order', 'Recipe', 'Customer', 'Material', 'Roll'].filter((name) => labels.includes(name + ' intervals')),
+    context: ['Order', 'Recipe', 'Customer', 'Material', 'Roll'].filter((name) => labels.includes(name + ' intervals')),
     contextMarkers: labels.includes('Context changes event markers'),
     radius: labels.includes('Radius recorded intervals'),
     group: labels.includes('Operational Group intervals'),
@@ -263,7 +263,7 @@ report.interactions.runTelemetry = await evaluate(`(() => {
   return {
     timelineCount: drawer.querySelectorAll('.synchronized-timeline').length,
     focusedLongRun: drawer.textContent.includes('Focused two-hour telemetry window'),
-    context: ['Job', 'Order', 'Recipe', 'Customer', 'Material', 'Roll'].filter((name) => labels.includes(name + ' intervals')),
+    context: ['Order', 'Recipe', 'Customer', 'Material', 'Roll'].filter((name) => labels.includes(name + ' intervals')),
     contextMarkers: labels.includes('Context changes event markers'),
     radius: labels.includes('Radius recorded intervals'),
     group: labels.includes('Operational Group intervals'),

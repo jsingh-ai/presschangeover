@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { runLayerIntervals } from '../src/components/RunEvidenceDrawer'
 import { radiusChangeTrack, timelineFamilyLabel } from '../src/components/RadiusOverview'
 import { clusterTimelineEvents, numericPaths, SynchronizedTimeline } from '../src/components/SynchronizedTimeline'
-import { actualSpeedTrack, contextDisplayValue, contextEventTrack, contextIntervalTracks, curatedCategoriesForCapabilities, mergeTelemetryEvidenceChunks, physicalChangeLabel, physicalEventTrack, telemetryEvidenceChunks, type PressTelemetryEvidenceState } from '../src/components/TelemetryEvidenceTimeline'
+import { actualSpeedTrack, contextDisplayValue, contextEventTrack, contextIntervalStyle, contextIntervalTracks, curatedCategoriesForCapabilities, mergeTelemetryEvidenceChunks, physicalChangeLabel, physicalEventTrack, telemetryEvidenceChunks, type PressTelemetryEvidenceState } from '../src/components/TelemetryEvidenceTimeline'
 import { UnifiedProcessTimeline } from '../src/components/UnifiedProcessTimeline'
 import type { OperationalRun, OverviewTimelineInterval } from '../src/types/api'
 import type { CuratedPhysicalEvidence, PressSpeedEvidence, ProductionContextEvidence, SemanticSignalEvidence, SignalCapability, TelemetryChange } from '../src/types/evidence'
@@ -56,11 +56,15 @@ describe('primary telemetry visual integration', () => {
 
   it('creates context intervals and explicit markers from actual observed timestamps', () => {
     const context = contextFixture()
-    assert.deepEqual(contextIntervalTracks(context).map(({ label }) => label), ['Job', 'Order', 'Recipe', 'Customer', 'Material', 'Roll'])
-    assert.equal(contextIntervalTracks(context).find(({ label }) => label === 'Order')?.intervals[1]?.startUtc, '2026-08-11T12:05:00.000Z')
+    const tracks = contextIntervalTracks(context)
+    assert.deepEqual(tracks.map(({ label }) => label), ['Order', 'Recipe', 'Customer', 'Material', 'Roll'])
+    assert.equal(tracks.find(({ label }) => label === 'Order')?.intervals[1]?.startUtc, '2026-08-11T12:05:00.000Z')
+    assert.equal(new Set((['order', 'recipe', 'customer', 'material', 'roll'] as const).map((field) => contextIntervalStyle(field, 0).background)).size, 5)
+    assert.notEqual(tracks.find(({ label }) => label === 'Order')?.intervals[0]?.style?.background, tracks.find(({ label }) => label === 'Order')?.intervals[1]?.style?.background)
     const marker = contextEventTrack(context)?.events[0]
     assert.equal(marker?.atUtc, '2026-08-11T12:05:00.000Z')
     assert.equal(marker?.label, 'Order changed')
+    assert.equal(marker?.category, 'context-order')
     assert.doesNotMatch(marker?.label ?? '', /started/i)
   })
 
