@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 import React, { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { GuidedActivityPicker, OccurrenceEvidenceDrawer, OperationalActivityExplorerView, activityGuidePath, fullRangeActivityTracks, guidedActivityOptions, occurrenceEvidenceTracks } from '../src/components/OperationalActivityExplorer'
-import { Builder, DiscoveredPatterns } from '../src/components/PatternExplorer'
+import { Builder, DiscoveredPatterns, RunEpisodes } from '../src/components/PatternExplorer'
 import type { ActivityAnalysis, OperationalAnalytics, PatternAnalysis } from '../src/types/api'
 
 Object.assign(globalThis, { React })
@@ -37,7 +37,7 @@ const pattern = {
   familyVariations: [{ orderedFamilyKeys: ['MAKE_READY', 'CLEANING_WASH', 'PRODUCTION'], orderedFamilyLabels: ['Make Ready', 'Cleaning / Wash', 'Production'], runCount: 17, runShareWithinPatternPercent: 40.5 }],
 }
 const run = { runId: 'r1', pressKey: 'press13', displayName: 'Press 13', startUtc: '2026-08-01T01:00:00.000Z', endUtc: '2026-08-01T03:00:00.000Z', totalDurationSeconds: 7_200, timeToProductionSeconds: 3_120, productionDurationSeconds: 4_080, shortRunAttemptCount: 1, transitionCount: 4, isPartial: false, dataInterrupted: false, eligible: true, groupSequence: pattern.orderedGroupLabels, familySequence: ['Make Ready', 'Cleaning / Wash', 'Production'], selectedActivitySeconds: 900, conditionDurations: [{ conditionKey: 'operational_group:MAINTENANCE_INTERVENTION', durationSeconds: 600 }, { conditionKey: 'process_family:CLEANING_WASH', durationSeconds: 300 }] }
-const patterns = { fromUtc: activity.fromUtc, toUtc: activity.toUtc, classificationVersion: 1, catalog, totalRuns: 200, eligibleRuns: 184, excludedPartialRuns: 9, excludedInterruptedRuns: 7, excludedOpenRuns: 3, uniquePatternCount: 17, shortAttemptRuns: 14, patterns: [pattern], selectedPattern: pattern, matchedRuns: [run], evidenceLimit: 200, builder: null } as PatternAnalysis
+const patterns = { fromUtc: activity.fromUtc, toUtc: activity.toUtc, classificationVersion: 1, catalog, totalRuns: 200, eligibleRuns: 184, excludedPartialRuns: 9, excludedInterruptedRuns: 7, excludedOpenRuns: 3, patternCriteria: { minimumSteps: 3, minimumRuns: 2 }, observedJourneyCount: 44, patternedRuns: 72, patternedRunSharePercent: 39.1, simpleJourneyRuns: 96, oneOffJourneyRuns: 16, uniquePatternCount: 17, shortAttemptRuns: 14, patterns: [pattern], selectedPattern: pattern, recentRuns: [run], matchedRuns: [run], evidenceLimit: 200, builder: null } as PatternAnalysis
 
 describe('one-activity explorer presentation', () => {
   it('guides Radius phase to explained group and family, with codes optional and the active choice explicit', () => {
@@ -181,17 +181,26 @@ describe('one-activity explorer presentation', () => {
 })
 
 describe('pattern-first presentation', () => {
-  it('shows discovered prevalence, rate denominators, family variations, and matched Runs', () => {
+  it('defines repeated three-step patterns in plain language and shows their evidence', () => {
     const html = renderToStaticMarkup(createElement(DiscoveredPatterns, { data: patterns, onPattern() {}, onPressFocus() {} }))
-    for (const copy of ['Eligible Runs', 'Unique patterns', 'Pattern prevalence', 'Selected pattern', 'Match rate by press', '9 / 24 · 37.5%', 'Process Family variations', 'Matched Run evidence']) assert.match(html, new RegExp(copy))
+    for (const copy of ['Discover repeated journeys', 'at least <b>3 chronological steps', 'at least <b>2 completed Runs', 'Meaningful patterns', 'Runs represented', 'Choose a pattern to understand it', 'Selected repeated journey', 'Pattern rate by press', 'More specific work used', 'Open any Run to see exactly when it happened']) assert.match(html, new RegExp(copy))
+    assert.match(html, /9 \/ 24 · 37.5%/)
     assert.match(html, /Changeover &amp; Setup.*Routine Process.*Production/)
   })
 
-  it('shows the multi-condition builder, modes, union-duration explanation, and matched-vs-other donut', () => {
-    const builderData = { ...patterns, builder: { conditions: [catalog[1], catalog[3]], matchMode: 'contains_all', redundantConditionMessage: null, matchedRuns: 12, matchSharePercent: 6.5, pressesObserved: 5, medianTimeToProductionSeconds: 3_780, medianSelectedActivitySeconds: 900, totalSelectedActivitySeconds: 16_620, pressStats: [{ pressKey: 'press11', displayName: 'Press 11', matchedRuns: 5, eligibleRuns: 19, matchRatePercent: 26.3, selectedActivitySeconds: 7_200, medianTimeToProductionSeconds: 4_000 }], topPatterns: [{ patternKey: pattern.patternKey, labels: pattern.orderedGroupLabels, runCount: 6, percentageOfMatches: 50 }] } } as PatternAnalysis
-    const html = renderToStaticMarkup(createElement(Builder, { data: builderData, conditions: [catalog[1], catalog[3]], mode: 'contains_all', onConditions() {}, onMode() {}, onRefresh() {} }))
-    for (const copy of ['Maintenance Intervention', 'Cleaning / Wash', 'Contains All', 'In This Order', 'Matched Runs', 'Matched Run evidence', 'union of matching intervals']) assert.match(html, new RegExp(copy))
+  it('guides a plain-language three-step builder and explains the answer', () => {
+    const selectedConditions = [catalog[1]!, catalog[3]!, catalog[0]!]
+    const builderData = { ...patterns, builder: { conditions: selectedConditions, matchMode: 'in_order', ready: true, minimumConditions: 3, redundantConditionMessage: null, matchedRuns: 12, matchSharePercent: 6.5, pressesObserved: 5, medianTimeToProductionSeconds: 3_780, medianSelectedActivitySeconds: 900, totalSelectedActivitySeconds: 16_620, pressStats: [{ pressKey: 'press11', displayName: 'Press 11', matchedRuns: 5, eligibleRuns: 19, matchRatePercent: 26.3, selectedActivitySeconds: 7_200, medianTimeToProductionSeconds: 4_000 }], topPatterns: [{ patternKey: pattern.patternKey, labels: pattern.orderedGroupLabels, runCount: 6, percentageOfMatches: 50 }] } } as PatternAnalysis
+    const html = renderToStaticMarkup(createElement(Builder, { data: builderData, conditions: selectedConditions, mode: 'in_order', onConditions() {}, onMode() {}, onRefresh() {} }))
+    for (const copy of ['Choose at least three steps', '3 / 3 minimum steps', 'Follow this order', 'Same Run, any order', 'Your question', 'Find matching Runs', '12 completed Runs matched', 'Where the answer came from', 'What the matching Runs usually looked like', 'Open the exact evidence']) assert.match(html, new RegExp(copy))
     assert.match(html, /5 \/ 19 · 26.3%/)
-    assert.doesNotMatch(html, /Good Pattern|Bad Pattern|Watch Pattern/)
+    assert.doesNotMatch(html, /Contains All|In This Order|deterministic|canonical|Good Pattern|Bad Pattern|Watch Pattern/)
+  })
+
+  it('keeps one-off and simple journeys available as individual Run episodes', () => {
+    const html = renderToStaticMarkup(createElement(RunEpisodes, { data: patterns, onSelectRun() {} }))
+    for (const copy of ['Browse the journeys behind the patterns', 'All completed Runs', '3\\+ steps', 'Two-step', 'Short production attempt', 'Completed Run episodes', 'Open evidence']) assert.match(html, new RegExp(copy))
+    assert.match(html, /Press 13/)
+    assert.match(html, /Changeover &amp; Setup → Routine Process → Production/)
   })
 })

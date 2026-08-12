@@ -688,15 +688,24 @@ export interface PatternAnalysis {
   excludedPartialRuns: number
   excludedInterruptedRuns: number
   excludedOpenRuns: number
+  patternCriteria: { minimumSteps: number; minimumRuns: number }
+  observedJourneyCount: number
+  patternedRuns: number
+  patternedRunSharePercent: number
+  simpleJourneyRuns: number
+  oneOffJourneyRuns: number
   uniquePatternCount: number
   shortAttemptRuns: number
   patterns: PatternSummary[]
   selectedPattern: PatternSummary | null
+  recentRuns: RunPatternEvidence[]
   matchedRuns: RunPatternEvidence[]
   evidenceLimit: number
   builder: null | {
     conditions: ActivityCatalogItem[]
     matchMode: PatternMatchMode
+    ready: boolean
+    minimumConditions: number
     redundantConditionMessage: string | null
     matchedRuns: number
     matchSharePercent: number

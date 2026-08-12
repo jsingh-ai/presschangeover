@@ -129,24 +129,36 @@ describe('canonical Operational Run pattern analysis', () => {
     const value = analyzeRunPatterns(fixture, snapshot)
     assert.equal(value.totalRuns, 3)
     assert.equal(value.eligibleRuns, 3)
-    assert.equal(value.uniquePatternCount, 2)
+    assert.deepEqual(value.patternCriteria, { minimumSteps: 3, minimumRuns: 2 })
+    assert.equal(value.observedJourneyCount, 2)
+    assert.equal(value.uniquePatternCount, 1)
+    assert.equal(value.patternedRuns, 2)
+    assert.equal(value.oneOffJourneyRuns, 1)
+    assert.equal(value.recentRuns.length, value.eligibleRuns)
+    assert.ok(value.recentRuns.every(({ eligible }) => eligible))
+    assert.ok(value.patterns.every(({ orderedGroupKeys, runCount }) => orderedGroupKeys.length >= 3 && runCount >= 2))
     assert.ok(value.patterns.every(({ classificationVersion, patternKey }) => classificationVersion === 1 && patternKey.startsWith('v1-')))
     assert.ok(value.patterns.every(({ runSharePercent }) => runSharePercent > 0))
     assert.ok(value.selectedPattern?.pressStats.every(({ matchedRuns, eligibleRuns, matchRatePercent }) => matchRatePercent === matchedRuns / eligibleRuns * 100))
   })
 
   it('collapses only contiguous duplicates, preserves re-entry and short attempts', () => {
-    const value = analyzeRunPatterns(fixture, snapshot)
-    const reentry = value.patterns.find(({ containsReentry }) => containsReentry)
+    const value = analyzeRunPatterns(fixture, snapshot, { conditions: [
+      { level: 'operational_group', key: 'CHANGEOVER_SETUP', label: '' },
+      { level: 'operational_group', key: 'ADJUSTMENT_QUALITY', label: '' },
+      { level: 'operational_group', key: 'PRODUCTION', label: '' },
+    ], matchMode: 'in_order' })
+    const reentry = value.matchedRuns[0]
     assert.ok(reentry)
-    assert.deepEqual(reentry?.orderedGroupLabels, ['Changeover & Setup', 'Run Production (short attempt)', 'Adjustment & Quality', 'Changeover & Setup', 'Production'])
-    assert.equal(reentry?.shortAttemptRunCount, 1)
+    assert.deepEqual(reentry?.groupSequence, ['Changeover & Setup', 'Run Production (short attempt)', 'Adjustment & Quality', 'Changeover & Setup', 'Production'])
+    assert.equal(reentry?.shortRunAttemptCount, 1)
   })
 
   it('supports Contains All and chronological In This Order', () => {
     const conditions = [
       { level: 'operational_group' as const, key: 'CHANGEOVER_SETUP', label: '' },
       { level: 'process_family' as const, key: 'CLEANING_WASH', label: '' },
+      { level: 'operational_group' as const, key: 'PRODUCTION', label: '' },
     ]
     const contains = analyzeRunPatterns(fixture, snapshot, { conditions, matchMode: 'contains_all' })
     const ordered = analyzeRunPatterns(fixture, snapshot, { conditions, matchMode: 'in_order' })
@@ -164,21 +176,24 @@ describe('canonical Operational Run pattern analysis', () => {
       segment('press3', 8, 5, 'B', '89', 'Ink: Wait On'),
       segment('press3', 13, 3, 'G', '150', 'Run Production'),
     ])])
-    const adjustment = analyzeRunPatterns(sharedFamily, snapshot, { conditions: [{ level: 'process_family', key: 'INK_COLOR', label: '', operationalGroupKey: 'ADJUSTMENT_QUALITY' }] })
-    const waiting = analyzeRunPatterns(sharedFamily, snapshot, { conditions: [{ level: 'process_family', key: 'INK_COLOR', label: '', operationalGroupKey: 'WAITING_IDLE_HOLD' }] })
-    assert.equal(adjustment.builder?.totalSelectedActivitySeconds, 300)
-    assert.equal(waiting.builder?.totalSelectedActivitySeconds, 300)
+    const adjustment = analyzeRunPatterns(sharedFamily, snapshot, { conditions: [{ level: 'process_family', key: 'INK_COLOR', label: '', operationalGroupKey: 'ADJUSTMENT_QUALITY' }, { level: 'operational_group', key: 'WAITING_IDLE_HOLD', label: '' }, { level: 'operational_group', key: 'PRODUCTION', label: '' }] })
+    const waiting = analyzeRunPatterns(sharedFamily, snapshot, { conditions: [{ level: 'process_family', key: 'INK_COLOR', label: '', operationalGroupKey: 'WAITING_IDLE_HOLD' }, { level: 'operational_group', key: 'ADJUSTMENT_QUALITY', label: '' }, { level: 'operational_group', key: 'PRODUCTION', label: '' }] })
+    assert.equal(adjustment.matchedRuns[0]?.conditionDurations[0]?.durationSeconds, 300)
+    assert.equal(waiting.matchedRuns[0]?.conditionDurations[0]?.durationSeconds, 300)
     assert.equal(adjustment.builder?.conditions[0]?.operationalGroupKey, 'ADJUSTMENT_QUALITY')
     assert.equal(waiting.builder?.conditions[0]?.operationalGroupKey, 'WAITING_IDLE_HOLD')
   })
 
   it('detects hierarchical redundancy and unions overlapping duration', () => {
     const value = analyzeRunPatterns(fixture, snapshot, { conditions: [
+      { level: 'operational_group', key: 'CHANGEOVER_SETUP', label: '' },
       { level: 'operational_group', key: 'ROUTINE_PROCESS', label: '' },
       { level: 'process_family', key: 'CLEANING_WASH', label: '' },
+      { level: 'operational_group', key: 'PRODUCTION', label: '' },
     ], matchMode: 'contains_all' })
     assert.match(value.builder?.redundantConditionMessage ?? '', /already implied/)
-    assert.equal(value.builder?.totalSelectedActivitySeconds, 900)
+    assert.equal(value.builder?.ready, true)
+    assert.equal(value.builder?.totalSelectedActivitySeconds, 3_180)
     assert.ok(value.matchedRuns.every(({ conditionDurations, selectedActivitySeconds }) => selectedActivitySeconds <= conditionDurations.reduce((sum, item) => sum + item.durationSeconds, 0)))
   })
 

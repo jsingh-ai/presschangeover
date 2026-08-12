@@ -332,6 +332,18 @@ report.interactions.operationalSevenDay = await evaluate(`({
 if (!report.interactions.operationalSevenDay.rangeCopy?.includes('exceeds 24 hours') || !report.interactions.operationalSevenDay.fullAxis || !report.interactions.operationalSevenDay.matchCount || !report.interactions.operationalSevenDay.contextCount || report.interactions.operationalSevenDay.physicalMotion || report.interactions.operationalSevenDay.focusedSubstitute) throw new Error(`Seven-day Operational signature did not preserve the complete range honestly: ${JSON.stringify(report.interactions.operationalSevenDay)}`)
 
 await navigate(routeUrl('/patterns-episodes', matrixRange), routes[2].ready, 'Pattern Run evidence')
+report.interactions.patternPurpose = await evaluate(`(() => ({
+  tabs: [...document.querySelectorAll('.pattern-tabs button strong')].map((item) => item.textContent),
+  definition: document.querySelector('.pattern-definition')?.textContent,
+  patternCards: document.querySelectorAll('.pattern-card-list > button').length,
+  meaningfulCards: [...document.querySelectorAll('.pattern-card-list > button .pattern-sequence')].every((sequence) => sequence.querySelectorAll(':scope > span').length >= 3),
+  purposeSteps: document.querySelectorAll('.pattern-purpose article').length,
+}))()`)
+if (report.interactions.patternPurpose.tabs.join('|') !== 'Discover Patterns|Build a Journey|Browse Run Episodes' || !report.interactions.patternPurpose.definition?.includes('at least 3 chronological steps') || !report.interactions.patternPurpose.definition?.includes('at least 2 completed Runs') || !report.interactions.patternPurpose.meaningfulCards || report.interactions.patternPurpose.purposeSteps !== 3) throw new Error(`Patterns page purpose or minimum meaningful-pattern rules are incomplete: ${JSON.stringify(report.interactions.patternPurpose)}`)
+await evaluate(`[...document.querySelectorAll('.pattern-tabs button')].find((item) => item.textContent.includes('Browse Run Episodes'))?.click()`)
+await waitFor(`Boolean(document.querySelector('.episode-browser-intro')) && Boolean(document.querySelector('tr[aria-label^="Open evidence for"]'))`, 'Run Episodes browser')
+report.interactions.runEpisodes = await evaluate(`({ filters: [...document.querySelectorAll('.episode-browser-controls > div:first-child button')].map((item) => item.textContent), pressOrder: [...document.querySelectorAll('.episode-browser-controls > div:last-child button')].slice(1).map((item) => Number(item.textContent.match(/\\d+/)?.[0])), rows: document.querySelectorAll('.pattern-evidence-table tbody tr').length })`)
+if (report.interactions.runEpisodes.filters.join('|') !== 'All completed Runs|3+ steps|Two-step|Short production attempt' || !report.interactions.runEpisodes.rows || !report.interactions.runEpisodes.pressOrder.every((value, index, values) => index === 0 || values[index - 1] <= value)) throw new Error(`Run Episodes browser is incomplete or press order is incorrect: ${JSON.stringify(report.interactions.runEpisodes)}`)
 await waitFor(`Boolean(document.querySelector('tr[aria-label^="Open evidence for"]'))`, 'matched Run row')
 await evaluate(`document.querySelector('tr[aria-label^="Open evidence for"]')?.click()`)
 await waitFor(`Boolean(document.querySelector('.evidence-drawer-shell'))`, 'Run Evidence Drawer')
@@ -367,6 +379,18 @@ await delay(300)
 await capture('1440-pattern-run-telemetry')
 await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
 await waitFor(`!document.querySelector('.evidence-drawer-shell')`, 'Run drawer close')
+await evaluate(`[...document.querySelectorAll('.pattern-tabs button')].find((item) => item.textContent.includes('Build a Journey'))?.click()`)
+await waitFor(`Boolean(document.querySelector('.pattern-builder-panel'))`, 'plain-language pattern builder')
+for (let step = 0; step < 3; step += 1) {
+  await evaluate(`document.querySelector('.pattern-add-step')?.click()`)
+  await waitFor(`Boolean(document.querySelector('.pattern-step-picker__menu section button'))`, `pattern step ${step + 1} choices`)
+  await evaluate(`document.querySelector('.pattern-step-picker__menu section button')?.click()`)
+  await waitFor(`document.querySelectorAll('.builder-steps > article').length === ${step + 1}`, `pattern step ${step + 1} selected`)
+}
+await evaluate(`document.querySelector('.builder-submit button')?.click()`)
+await waitFor(`Boolean(document.querySelector('.builder-answer')) && !document.querySelector('.scope-progress')`, 'three-step builder answer')
+report.interactions.patternBuilder = await evaluate(`({ steps: document.querySelectorAll('.builder-steps > article').length, orderMode: document.querySelector('.builder-question-mode label.active strong')?.textContent, question: document.querySelector('.builder-question-preview')?.textContent, answer: document.querySelector('.builder-answer h2')?.textContent, technicalLabelsAbsent: !document.body.textContent.includes('Contains All') && !document.body.textContent.includes('In This Order') })`)
+if (report.interactions.patternBuilder.steps < 3 || report.interactions.patternBuilder.orderMode !== 'Follow this order' || !report.interactions.patternBuilder.question?.includes('Your question') || !report.interactions.patternBuilder.answer || !report.interactions.patternBuilder.technicalLabelsAbsent) throw new Error(`Plain-language three-step builder is incomplete: ${JSON.stringify(report.interactions.patternBuilder)}`)
 
 await navigate(routeUrl('/intelligent-search', { q: 'Make Ready' }), `Boolean(document.querySelector('.search-result-list'))`, 'Search results')
 for (const [key, selector, path] of [

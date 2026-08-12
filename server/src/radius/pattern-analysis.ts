@@ -16,6 +16,8 @@ import type {
 
 export const PATTERN_EVIDENCE_LIMIT = 200
 export const PATTERN_DISPLAY_LIMIT = 20
+export const PATTERN_MINIMUM_STEPS = 3
+export const PATTERN_MINIMUM_RUNS = 2
 const SHORT_KEY = 'SHORT_RUN_PRODUCTION'
 const SHORT_LABEL = 'Run Production (short attempt)'
 
@@ -111,7 +113,7 @@ function durationsFor(run: OperationalRun, conditions: ActivityCatalogItem[]) {
   return { conditionDurations, selectedActivitySeconds }
 }
 
-function summarizePatterns(runs: OperationalRun[], eligibleRuns: OperationalRun[], classificationVersion: number): PatternSummary[] {
+function summarizeJourneys(eligibleRuns: OperationalRun[], classificationVersion: number): PatternSummary[] {
   const eligibleByPress = new Map<string, number>()
   for (const run of eligibleRuns) eligibleByPress.set(run.pressKey, (eligibleByPress.get(run.pressKey) ?? 0) + 1)
   const groups = new Map<string, { keys: string[]; labels: string[]; runs: OperationalRun[] }>()
@@ -149,8 +151,9 @@ export function analyzeRunPatterns(overview: RadiusOverview, snapshot: Classific
   const catalog = buildActivityCatalog(overview, snapshot)
   const runs = overview.presses.flatMap((press) => buildOperationalRuns({ pressKey: press.pressKey, displayName: press.displayName, segments: press.timelineSegments }, overview.fromUtc, overview.toUtc).map(({ run }) => run))
   const eligible = runs.filter(({ eligibleForBenchmark }) => eligibleForBenchmark)
-  const allPatterns = summarizePatterns(runs, eligible, snapshot.version)
-  const selectedPattern = allPatterns.find(({ patternKey }) => patternKey === input?.selectedPatternKey) ?? allPatterns[0] ?? null
+  const allJourneys = summarizeJourneys(eligible, snapshot.version)
+  const patterns = allJourneys.filter(({ orderedGroupKeys, runCount }) => orderedGroupKeys.length >= PATTERN_MINIMUM_STEPS && runCount >= PATTERN_MINIMUM_RUNS)
+  const selectedPattern = patterns.find(({ patternKey }) => patternKey === input?.selectedPatternKey) ?? patterns[0] ?? null
   const selectedRuns = selectedPattern ? runs.filter(({ runId }) => selectedPattern.matchedRunIds.includes(runId)) : []
   const requestedConditions = (input?.conditions ?? []).flatMap((condition) => {
     const item = catalog.find((candidate) => sameSelection(candidate, condition))
@@ -158,22 +161,23 @@ export function analyzeRunPatterns(overview: RadiusOverview, snapshot: Classific
   })
   const matchMode = input?.matchMode ?? 'contains_all'
   const redundancy = dedupeRedundant(requestedConditions, matchMode)
-  const builderRuns = redundancy.effective.length ? eligible.filter((run) => matchesConditions(run, redundancy.effective, matchMode)) : []
+  const builderReady = redundancy.effective.length >= PATTERN_MINIMUM_STEPS
+  const builderRuns = builderReady ? eligible.filter((run) => matchesConditions(run, redundancy.effective, matchMode)) : []
   const builderEvidence = builderRuns.map((run) => ({ run, ...durationsFor(run, requestedConditions) }))
   const eligibleByPress = new Map<string, number>()
   for (const run of eligible) eligibleByPress.set(run.pressKey, (eligibleByPress.get(run.pressKey) ?? 0) + 1)
   const builderByPress = new Map<string, typeof builderEvidence>()
   for (const item of builderEvidence) { const list = builderByPress.get(item.run.pressKey) ?? []; list.push(item); builderByPress.set(item.run.pressKey, list) }
   const topBuilderPatterns = new Map<string, { patternKey: string; labels: string[]; count: number }>()
-  for (const item of builderEvidence) { const pattern = allPatterns.find(({ matchedRunIds }) => matchedRunIds.includes(item.run.runId)); if (!pattern) continue; const current = topBuilderPatterns.get(pattern.patternKey) ?? { patternKey: pattern.patternKey, labels: pattern.orderedGroupLabels, count: 0 }; current.count += 1; topBuilderPatterns.set(pattern.patternKey, current) }
+  for (const item of builderEvidence) { const journey = allJourneys.find(({ matchedRunIds }) => matchedRunIds.includes(item.run.runId)); if (!journey) continue; const current = topBuilderPatterns.get(journey.patternKey) ?? { patternKey: journey.patternKey, labels: journey.orderedGroupLabels, count: 0 }; current.count += 1; topBuilderPatterns.set(journey.patternKey, current) }
   const builder = requestedConditions.length ? {
-    conditions: requestedConditions, matchMode, redundantConditionMessage: redundancy.message,
+    conditions: requestedConditions, matchMode, ready: builderReady, minimumConditions: PATTERN_MINIMUM_STEPS, redundantConditionMessage: redundancy.message,
     matchedRuns: builderRuns.length, matchSharePercent: percent(builderRuns.length, eligible.length), pressesObserved: builderByPress.size,
     medianTimeToProductionSeconds: median(builderRuns.flatMap(({ timeToProductionSeconds }) => timeToProductionSeconds === null ? [] : [timeToProductionSeconds])),
     medianSelectedActivitySeconds: median(builderEvidence.map(({ selectedActivitySeconds }) => selectedActivitySeconds)),
     totalSelectedActivitySeconds: builderEvidence.reduce((sum, { selectedActivitySeconds }) => sum + selectedActivitySeconds, 0),
     pressStats: [...builderByPress.entries()].map(([pressKey, values]) => ({ pressKey: pressKey as OperationalRun['pressKey'], displayName: values[0]!.run.displayName, matchedRuns: values.length, eligibleRuns: eligibleByPress.get(pressKey) ?? 0, matchRatePercent: percent(values.length, eligibleByPress.get(pressKey) ?? 0), selectedActivitySeconds: values.reduce((sum, { selectedActivitySeconds }) => sum + selectedActivitySeconds, 0), medianTimeToProductionSeconds: median(values.flatMap(({ run }) => run.timeToProductionSeconds === null ? [] : [run.timeToProductionSeconds])) })).sort((a, b) => b.matchRatePercent - a.matchRatePercent || b.matchedRuns - a.matchedRuns),
-    topPatterns: [...topBuilderPatterns.values()].map((value) => ({ patternKey: value.patternKey, labels: value.labels, runCount: value.count, percentageOfMatches: percent(value.count, builderRuns.length) })).sort((a, b) => b.runCount - a.runCount || a.patternKey.localeCompare(b.patternKey)).slice(0, 10),
+    topPatterns: [...topBuilderPatterns.values()].filter(({ labels, count }) => labels.length >= PATTERN_MINIMUM_STEPS && count >= PATTERN_MINIMUM_RUNS).map((value) => ({ patternKey: value.patternKey, labels: value.labels, runCount: value.count, percentageOfMatches: percent(value.count, builderRuns.length) })).sort((a, b) => b.runCount - a.runCount || a.patternKey.localeCompare(b.patternKey)).slice(0, 10),
   } : null
   const evidenceSource = builder ? builderEvidence.map(({ run, conditionDurations, selectedActivitySeconds }) => runEvidence(run, conditionDurations, selectedActivitySeconds)) : selectedRuns.map((run) => runEvidence(run))
   return {
@@ -182,8 +186,15 @@ export function analyzeRunPatterns(overview: RadiusOverview, snapshot: Classific
     excludedPartialRuns: runs.filter(({ isPartial, dataInterrupted }) => isPartial && !dataInterrupted).length,
     excludedInterruptedRuns: runs.filter(({ dataInterrupted }) => dataInterrupted).length,
     excludedOpenRuns: runs.filter(({ productionStartUtc, dataInterrupted }) => productionStartUtc === null && !dataInterrupted).length,
-    uniquePatternCount: allPatterns.length, shortAttemptRuns: eligible.filter(({ shortRunAttemptCount }) => shortRunAttemptCount > 0).length,
-    patterns: allPatterns.slice(0, PATTERN_DISPLAY_LIMIT), selectedPattern,
+    patternCriteria: { minimumSteps: PATTERN_MINIMUM_STEPS, minimumRuns: PATTERN_MINIMUM_RUNS },
+    observedJourneyCount: allJourneys.length,
+    patternedRuns: patterns.reduce((sum, pattern) => sum + pattern.runCount, 0),
+    patternedRunSharePercent: percent(patterns.reduce((sum, pattern) => sum + pattern.runCount, 0), eligible.length),
+    simpleJourneyRuns: allJourneys.filter(({ orderedGroupKeys }) => orderedGroupKeys.length < PATTERN_MINIMUM_STEPS).reduce((sum, journey) => sum + journey.runCount, 0),
+    oneOffJourneyRuns: allJourneys.filter(({ orderedGroupKeys, runCount }) => orderedGroupKeys.length >= PATTERN_MINIMUM_STEPS && runCount < PATTERN_MINIMUM_RUNS).reduce((sum, journey) => sum + journey.runCount, 0),
+    uniquePatternCount: patterns.length, shortAttemptRuns: eligible.filter(({ shortRunAttemptCount }) => shortRunAttemptCount > 0).length,
+    patterns: patterns.slice(0, PATTERN_DISPLAY_LIMIT), selectedPattern,
+    recentRuns: [...eligible].sort((a, b) => Date.parse(b.startUtc) - Date.parse(a.startUtc)).slice(0, PATTERN_EVIDENCE_LIMIT).map((run) => runEvidence(run)),
     matchedRuns: evidenceSource.slice(0, PATTERN_EVIDENCE_LIMIT), evidenceLimit: PATTERN_EVIDENCE_LIMIT, builder,
   }
 }
