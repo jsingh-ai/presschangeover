@@ -23,13 +23,23 @@ function response(results: ClassificationSearchResult[], observedIdentityStatus:
 }
 
 describe('Intelligent Search presentation', () => {
-  it('renders the accessible search input and deterministic retrieval language', () => {
+  it('explains the page purpose, offers examples, and exposes an optional press focus', () => {
     const html = renderToStaticMarkup(createElement(IntelligentSearchPage))
     assert.match(html, /Intelligent Search/)
     assert.match(html, /role="search"/)
-    assert.match(html, /Search statuses, Process Families, or Operational Groups/)
-    assert.match(html, /Make Ready, Plates: Wash, press problem/)
-    assert.match(html, /never changes a classification/)
+    assert.match(html, /What work, Radius wording, or code are you looking for/)
+    assert.match(html, /Try Make Ready, Cleaning, Register, or 150/)
+    assert.match(html, /What are you trying to find/)
+    assert.match(html, /Browse search examples/)
+    assert.match(html, /Type of work/)
+    assert.match(html, /Specific work/)
+    assert.match(html, /Radius wording or code/)
+    assert.match(html, /Browse repeated patterns/)
+    assert.match(html, /Optional press focus/)
+    assert.match(html, /All Presses/)
+    assert.match(html, /Press 3/)
+    assert.match(html, /Press 15/)
+    assert.doesNotMatch(html, /Deterministic retrieval/)
   })
 
   it('uses the encoded query API and returns typed search results', async () => {
@@ -54,14 +64,24 @@ describe('Intelligent Search presentation', () => {
     assert.match(html, /Radius recorded/)
     assert.match(html, /M \/ 16 \/ Make Ready/)
     assert.match(html, /Classified as Group/)
-    assert.match(html, /Analyze Activity/)
-    assert.match(html, /Find Runs/)
-    assert.match(html, /View Mapping/)
+    assert.match(html, /Analyze this activity/)
+    assert.match(html, /Start a pattern with this step/)
+    assert.match(html, /See how it is classified/)
     assert.match(html, /\/operational-analysis\?activityLevel=exact_status&amp;activityKey=M%1F16%1FMake\+Ready/)
-    assert.match(html, /\/patterns-episodes\?patternTab=builder&amp;patternMode=contains_all/)
+    assert.match(html, /\/patterns-episodes\?patternTab=builder&amp;patternMode=in_order/)
     assert.match(html, /\/administration\/state-classification\?identity=M%1F16%1FMake\+Ready/)
     assert.match(html, /Published v1/)
     assert.match(html, /tabindex="0"/)
+  })
+
+  it('carries a selected press into analysis and pattern destinations without hiding shared matches', () => {
+    const html = renderToStaticMarkup(createElement(IntelligentSearchResults, { response: response([result({})]), pressKey: 'press10' }))
+    assert.match(html, /Press 10/)
+    assert.match(html, /Actions will open with this press selected/)
+    assert.match(html, /Analyze on Press 10/)
+    assert.match(html, /\/operational-analysis\?press=press10&amp;activityLevel=exact_status/)
+    assert.match(html, /\/patterns-episodes\?press=press10&amp;patternTab=builder/)
+    assert.match(html, /does not hide shared classification matches/)
   })
 
   it('renders family and group relationships without fabricating a single parent', () => {
@@ -85,7 +105,7 @@ describe('Intelligent Search presentation', () => {
   })
 
   it('renders loading, error, unavailable-enrichment, and no-result states', () => {
-    assert.match(renderToStaticMarkup(createElement(IntelligentSearchResults, { loading: true })), /Searching the published classification/)
+    assert.match(renderToStaticMarkup(createElement(IntelligentSearchResults, { loading: true })), /Searching the operating language/)
     assert.match(renderToStaticMarkup(createElement(IntelligentSearchResults, { error: 'Try again' })), /role="alert"/)
     const empty = renderToStaticMarkup(createElement(IntelligentSearchResults, { response: response([], 'unavailable') }))
     assert.match(empty, /No classification matches/)

@@ -324,7 +324,7 @@ function App() {
   </>
 
   const administrationContext = <div className="context-summary administration-context"><div><span>Administration</span><strong>Radius semantics</strong><small>Published mappings govern Operations views; Raw Radius evidence remains unchanged.</small></div><span className="data-health data-health--healthy" role="status"><i aria-hidden="true" />Versioned configuration</span></div>
-  const searchContext = <div className="context-summary search-context"><div><span>Knowledge retrieval</span><strong>Intelligent Search</strong><small>Published classifications remain searchable without live Radius enrichment.</small></div><span className="data-health data-health--healthy" role="status"><i aria-hidden="true" />Deterministic search</span></div>
+  const searchContext = <div className="context-summary search-context"><div><span>Find and investigate</span><strong>Intelligent Search</strong><small>Search a work name or Radius code, then open it in the right analysis.</small></div><span className="data-health data-health--healthy" role="status"><i aria-hidden="true" />Search ready</span></div>
 
   const footer = <details className="system-status-drawer"><summary>System and dependency health</summary><SystemStatus items={[
     { label: 'ProcessIntelligence API', status: apiStatus },
