@@ -100,13 +100,14 @@ export function IntelligentSearchIndex({ onPick, initialData, initialKind = 'gro
   }, [initialData])
 
   const normalized = filter.trim().toLocaleLowerCase()
+  const usableIdentities = data.identities.filter((item) => Boolean(item.statusDescription.trim() || item.statusCode?.trim()))
   const items = kind === 'groups'
     ? [...data.groups].sort((a, b) => a.sortOrder - b.sortOrder).map((item) => ({ id: item.id, title: item.displayName, meta: item.description, search: item.displayName }))
     : kind === 'families'
       ? [...data.families].sort((a, b) => a.sortOrder - b.sortOrder || a.displayName.localeCompare(b.displayName)).map((item) => ({ id: item.id, title: item.displayName, meta: item.description, search: item.displayName }))
-      : [...data.identities].sort((a, b) => a.statusDescription.localeCompare(b.statusDescription) || (a.statusCode ?? '').localeCompare(b.statusCode ?? '', undefined, { numeric: true })).map((item) => ({ id: item.identity, title: item.statusDescription || '(empty Radius description)', meta: `${item.eventType || '—'} / ${item.statusCode || 'No code'} · observed ${item.eventCount.toLocaleString()} ${item.eventCount === 1 ? 'time' : 'times'}`, search: item.statusDescription || item.statusCode || item.eventType }))
+      : [...usableIdentities].sort((a, b) => a.statusDescription.localeCompare(b.statusDescription) || (a.statusCode ?? '').localeCompare(b.statusCode ?? '', undefined, { numeric: true })).map((item) => ({ id: item.identity, title: item.statusDescription || `Radius code ${item.statusCode}`, meta: `${item.eventType || '—'} / ${item.statusCode || 'No code'} · observed ${item.eventCount.toLocaleString()} ${item.eventCount === 1 ? 'time' : 'times'}`, search: item.statusDescription || item.statusCode! }))
   const visible = normalized ? items.filter((item) => `${item.title} ${item.meta}`.toLocaleLowerCase().includes(normalized)) : items
-  const counts = { groups: data.groups.length, families: data.families.length, identities: data.identities.length }
+  const counts = { groups: data.groups.length, families: data.families.length, identities: usableIdentities.length }
   const labels: Record<SearchIndexKind, string> = { groups: 'Types of Work', families: 'Specific Work', identities: 'Radius Codes' }
 
   return <div className="search-index">

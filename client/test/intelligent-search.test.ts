@@ -80,7 +80,7 @@ describe('Intelligent Search presentation', () => {
   it('renders every available index kind as understandable selectable entries', () => {
     const groups: OperationalGroup[] = [{ id: 'group-changeover', key: 'CHANGEOVER_SETUP', displayName: 'Changeover & Setup', description: 'Job setup work.', lightColor: '#123456', darkColor: '#abcdef', icon: 'changeover', sortOrder: 20 }]
     const families: ProcessFamily[] = [{ id: 'family-wash', key: 'CLEANING_WASH', displayName: 'Cleaning / Wash', description: 'Cleaning work.', sortOrder: 30 }]
-    const identities: ClassificationWorkspace['observedIdentities'] = [{ identity: 'M\u001f16\u001fMake Ready', eventType: 'M', statusCode: '16', statusDescription: 'Make Ready', eventCount: 42, lastSeenUtc: '2026-08-12T12:00:00.000Z' }]
+    const identities: ClassificationWorkspace['observedIdentities'] = [{ identity: 'M\u001f16\u001fMake Ready', eventType: 'M', statusCode: '16', statusDescription: 'Make Ready', eventCount: 42, lastSeenUtc: '2026-08-12T12:00:00.000Z' }, { identity: 'H\u001f\u001f', eventType: 'H', statusCode: null, statusDescription: '', eventCount: 5, lastSeenUtc: '2026-08-12T12:00:00.000Z' }]
     const initialData = { groups, families, identities }
     const groupHtml = renderToStaticMarkup(createElement(IntelligentSearchIndex, { initialData, initialKind: 'groups', onPick() {} }))
     const familyHtml = renderToStaticMarkup(createElement(IntelligentSearchIndex, { initialData, initialKind: 'families', onPick() {} }))
@@ -90,6 +90,8 @@ describe('Intelligent Search presentation', () => {
     assert.match(familyHtml, /Cleaning \/ Wash/)
     assert.match(identityHtml, /Make Ready/)
     assert.match(identityHtml, /M \/ 16 · observed 42 times/)
+    assert.match(identityHtml, /1 available/)
+    assert.doesNotMatch(identityHtml, /H \/ No code/)
   })
 
   it('renders exact-status hierarchy and preserved Radius identity metadata', () => {
