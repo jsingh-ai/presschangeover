@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import React, { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { GuidedActivityPicker, OperationalActivityExplorerView, activityGuidePath, fullRangeActivityTracks, guidedActivityOptions } from '../src/components/OperationalActivityExplorer'
+import { GuidedActivityPicker, OccurrenceEvidenceDrawer, OperationalActivityExplorerView, activityGuidePath, fullRangeActivityTracks, guidedActivityOptions, occurrenceEvidenceTracks } from '../src/components/OperationalActivityExplorer'
 import { Builder, DiscoveredPatterns } from '../src/components/PatternExplorer'
 import type { ActivityAnalysis, OperationalAnalytics, PatternAnalysis } from '../src/types/api'
 
@@ -114,6 +114,20 @@ describe('one-activity explorer presentation', () => {
       assert.match(track.intervals[0]!.className ?? '', /activity-range-segment--match/)
       assert.match(track.intervals[1]!.className ?? '', /activity-range-segment--context/)
     }
+  })
+
+  it('opens occurrence evidence with synchronized Radius and Operational Group tracks in the wider sidebar', () => {
+    const occurrence = activity.occurrences[0]!
+    const tracks = occurrenceEvidenceTracks(occurrence)
+    assert.deepEqual(tracks.radius.intervals.map(({ label }) => label), ['B / 123 / Maintenance'])
+    assert.deepEqual(tracks.group.intervals.map(({ label }) => label), ['Maintenance Intervention'])
+    const html = renderToStaticMarkup(createElement(OccurrenceEvidenceDrawer, { occurrence, classificationVersion: activity.classificationVersion, onClose() {} }))
+    assert.match(html, /Synchronized occurrence timeline/)
+    assert.match(html, /Radius and the corresponding Operational Group share this exact evidence axis/)
+    assert.match(html, /Radius recorded/)
+    assert.match(html, /Operational Group/)
+    const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
+    assert.match(css, /\.investigation-side-panel \{[^}]*width: min\(68rem, 96vw\)/)
   })
 
   it('highlights a shared family only inside its selected parent group', () => {

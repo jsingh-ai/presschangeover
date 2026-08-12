@@ -307,7 +307,13 @@ if (occurrence) {
   await capture('1440-operational-full-range-telemetry')
   await evaluate(`document.querySelector('.activity-evidence .secondary-action')?.click()`)
   await waitFor(`Boolean(document.querySelector('.evidence-drawer-shell'))`, 'occurrence drawer')
-  report.interactions.occurrenceDrawer = await evaluate(`({ exact: document.body.textContent.includes('Radius recorded'), semantic: document.body.textContent.includes('ProcessIntelligence'), physical: document.body.textContent.includes('Physical telemetry evidence') })`)
+  report.interactions.occurrenceDrawer = await evaluate(`(() => {
+    const drawer = document.querySelector('.evidence-drawer-shell')
+    const timeline = drawer?.querySelector('.occurrence-evidence-timeline .synchronized-timeline')
+    const labels = [...timeline?.querySelectorAll('[aria-label]') ?? []].map((item) => item.getAttribute('aria-label'))
+    return { exact: document.body.textContent.includes('Radius recorded'), semantic: document.body.textContent.includes('ProcessIntelligence'), physical: document.body.textContent.includes('Physical telemetry evidence'), synchronizedTimeline: Boolean(timeline), radius: labels.includes('Radius recorded intervals'), group: labels.includes('Operational Group intervals'), width: Math.round(drawer?.getBoundingClientRect().width ?? 0) }
+  })()`)
+  if (!report.interactions.occurrenceDrawer.synchronizedTimeline || !report.interactions.occurrenceDrawer.radius || !report.interactions.occurrenceDrawer.group || report.interactions.occurrenceDrawer.width < 1_000) throw new Error(`Occurrence evidence drawer does not show the wide Radius and Operational Group Gantt: ${JSON.stringify(report.interactions.occurrenceDrawer)}`)
   await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
   await waitFor(`!document.querySelector('.evidence-drawer-shell')`, 'occurrence drawer close')
 }

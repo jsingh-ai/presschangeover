@@ -5,8 +5,8 @@ import { formatPlantDateTime } from '../time-ranges'
 import type { ActivityAnalysis, ActivityCatalogItem, ActivityLevel, ActivityOccurrence, ActivitySelection, OperationalAnalytics, OverviewTimelineInterval, RadiusPressKey } from '../types/api'
 import { EvidenceDrawerShell } from './EvidenceDrawerShell'
 import { PhysicalEvidencePanel } from './PhysicalEvidencePanel'
-import type { TimelineIntervalItem, TimelineIntervalTrack } from './SynchronizedTimeline'
-import { MAX_FULL_TELEMETRY_RANGE_MS, telemetrySummary, usePressTelemetryEvidence, type PressTelemetryEvidenceState } from './TelemetryEvidenceTimeline'
+import { SynchronizedTimeline, type TimelineIntervalItem, type TimelineIntervalTrack } from './SynchronizedTimeline'
+import { boundedEvidenceRange, MAX_FULL_TELEMETRY_RANGE_MS, telemetrySummary, usePressTelemetryEvidence, type PressTelemetryEvidenceState } from './TelemetryEvidenceTimeline'
 import { UnifiedProcessTimeline } from './UnifiedProcessTimeline'
 import { timelineFamilyLabel } from './RadiusOverview'
 
@@ -222,6 +222,34 @@ function occurrenceTimelineIntervals(occurrences: ActivityOccurrence[], pressKey
   })))
 }
 
+export function occurrenceEvidenceTracks(occurrence: ActivityOccurrence, clip?: { fromUtc: string; toUtc: string }): { radius: TimelineIntervalTrack; group: TimelineIntervalTrack } {
+  const from = Date.parse(clip?.fromUtc ?? occurrence.startUtc)
+  const to = Date.parse(clip?.toUtc ?? occurrence.endUtc)
+  const intervals = occurrence.segments.flatMap((segment): Array<{ segment: ActivityOccurrence['segments'][number]; startUtc: string; endUtc: string }> => {
+    const start = Math.max(from, Date.parse(segment.startUtc))
+    const end = Math.min(to, Date.parse(segment.endUtc))
+    return end > start ? [{ segment, startUtc: new Date(start).toISOString(), endUtc: new Date(end).toISOString() }] : []
+  })
+  const interval = (layer: 'radius' | 'group'): TimelineIntervalTrack => ({
+    id: layer === 'radius' ? 'radius' : 'operational-group',
+    label: layer === 'radius' ? 'Radius recorded' : 'Operational Group',
+    unavailableLabel: 'No Radius evidence was available in this interval',
+    intervals: intervals.map(({ segment, startUtc, endUtc }) => {
+      const label = layer === 'radius' ? `${segment.eventType} / ${segment.statusCode ?? '—'} / ${segment.statusDescription}` : segment.operationalGroupName
+      return {
+        id: `occurrence:${layer}:${segment.segmentId}`,
+        startUtc,
+        endUtc,
+        label,
+        details: `${label}\n${formatPlantDateTime(startUtc)} – ${formatPlantDateTime(endUtc)} CT`,
+        className: `overview-gantt-segment overview-gantt-segment--${layer === 'radius' ? rangeStateClass(segment.eventType) : 'group'}`,
+        style: layer === 'group' ? { '--overview-light': '#64748b', '--overview-dark': '#94a3b8' } as CSSProperties : undefined,
+      }
+    }),
+  })
+  return { radius: interval('radius'), group: interval('group') }
+}
+
 function FullRangePhysicalSignature({ data, pressKey, displayName, intervals, evidence, telemetryAvailable, onPress }: { data: ActivityAnalysis; pressKey?: RadiusPressKey; displayName?: string; intervals: OverviewTimelineInterval[]; evidence: PressTelemetryEvidenceState; telemetryAvailable: boolean; onPress(key: RadiusPressKey): void }) {
   const tracks = fullRangeActivityTracks(intervals, data.selection)
   const summary = telemetrySummary(evidence)
@@ -244,11 +272,14 @@ function FullRangePhysicalSignature({ data, pressKey, displayName, intervals, ev
   </section>
 }
 
-function OccurrenceEvidenceDrawer({ occurrence, classificationVersion, evidence, onClose }: { occurrence: ActivityOccurrence; classificationVersion: number; evidence?: PressTelemetryEvidenceState; onClose(): void }) {
+export function OccurrenceEvidenceDrawer({ occurrence, classificationVersion, evidence, onClose }: { occurrence: ActivityOccurrence; classificationVersion: number; evidence?: PressTelemetryEvidenceState; onClose(): void }) {
   const needsClassification = occurrence.exactIdentities.some(({ needsClassification }) => needsClassification)
+  const evidenceRange = evidence?.range ?? boundedEvidenceRange(occurrence.startUtc, occurrence.endUtc)
+  const tracks = occurrenceEvidenceTracks(occurrence, evidenceRange)
   return <EvidenceDrawerShell eyebrow="Evidence · activity occurrence" title={`${occurrence.displayName} · ${occurrence.radiusStateLabel}`} context="Radius, ProcessIntelligence, context, and physical evidence" onClose={onClose}>
     <div className="drawer-content">
       <section className="drawer-section"><h3>Time</h3><dl className="drawer-interval-grid"><div><dt>Start</dt><dd>{formatPlantDateTime(occurrence.startUtc)} CT</dd></div><div><dt>End</dt><dd>{formatPlantDateTime(occurrence.endUtc)} CT</dd></div><div><dt>Duration</dt><dd>{compact(occurrence.durationSeconds)}</dd></div></dl></section>
+      <section className="drawer-section occurrence-evidence-timeline"><h3>Synchronized occurrence timeline</h3><p className="quiet-copy">Radius and the corresponding Operational Group share this exact evidence axis.</p><SynchronizedTimeline fromUtc={evidenceRange.fromUtc} toUtc={evidenceRange.toUtc} ariaLabel={`${occurrence.displayName} Radius and Operational Group evidence`} intervalTracks={[tracks.radius, tracks.group]} /></section>
       <section className="drawer-section"><h3>Radius recorded</h3>{occurrence.exactIdentities.map((identity) => <dl className="compact-facts" key={identity.identity}><div><dt>Event type</dt><dd>{identity.eventType}</dd></div><div><dt>Status code</dt><dd>{identity.statusCode ?? '—'}</dd></div><div><dt>Status description</dt><dd>{identity.statusDescription}</dd></div><div><dt>Observed Radius time</dt><dd>{compact(identity.durationSeconds)}</dd></div></dl>)}</section>
       <section className="drawer-section"><h3>ProcessIntelligence semantic interpretation</h3><dl className="compact-facts"><div><dt>Operational Group</dt><dd>{occurrence.operationalGroupName}</dd></div><div><dt>Process Family</dt><dd>{occurrence.processFamilyName}</dd></div><div><dt>Classification status</dt><dd>{needsClassification ? 'Needs Classification' : `Mapped · published v${classificationVersion}`}</dd></div></dl></section>
       <PhysicalEvidencePanel pressKey={occurrence.pressKey} fromUtc={occurrence.startUtc} toUtc={occurrence.endUtc} evidence={evidence} />
