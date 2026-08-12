@@ -1393,7 +1393,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .activity-quality { display: flex; flex-wrap: wrap; gap: .35rem 1rem; margin-top: .55rem; color: var(--muted); font-size: .6rem; }
 .activity-quality b { color: var(--text-strong); }
 .activity-two-column { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(18rem, .75fr); gap: .8rem; min-width: 0; }
-.activity-two-column > .panel, .activity-explorer > .panel, .pattern-explorer > .panel { min-width: 0; padding: .9rem; }
+.activity-analysis-summary-grid { display: grid; grid-template-columns: minmax(20rem, 1.2fr) minmax(15rem, .8fr) minmax(18rem, 1fr); gap: .8rem; min-width: 0; }
+.activity-analysis-summary-grid > .panel, .activity-two-column > .panel, .activity-explorer > .panel, .pattern-explorer > .panel { min-width: 0; padding: .9rem; }
 .segmented-control { display: inline-flex; padding: .15rem; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: .4rem; }
 .segmented-control button, .builder-mode button { padding: .32rem .48rem; color: var(--muted); background: none; border: 0; border-radius: .28rem; cursor: pointer; font-size: .57rem; font-weight: 800; }
 .segmented-control button.active, .builder-mode button.active { color: var(--primary); background: var(--surface); box-shadow: var(--shadow-sm); }
@@ -1465,7 +1466,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 @media (max-width: 980px) {
   .activity-metrics, .pattern-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .activity-metrics div:nth-child(3), .pattern-summary div:nth-child(3) { border-right: 0; }
-  .activity-two-column { grid-template-columns: 1fr; }
+  .activity-two-column, .activity-analysis-summary-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 700px) {

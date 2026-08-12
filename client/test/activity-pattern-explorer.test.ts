@@ -94,10 +94,12 @@ describe('one-activity explorer presentation', () => {
     assert.match(html, /Process Family/)
     assert.match(html, /Open evidence/)
     assert.doesNotMatch(html, /Stops &amp; Recovery/)
+    assert.ok(html.indexOf('Press comparison') < html.indexOf('Duration distribution'))
+    assert.ok(html.indexOf('Duration distribution') < html.indexOf('Semantic composition'))
+    assert.ok(html.indexOf('Semantic composition') < html.indexOf('Physical signature across the full time range'))
     assert.ok(html.indexOf('Physical signature across the full time range') < html.indexOf('Exact occurrences'))
-    assert.ok(html.indexOf('Exact occurrences') < html.indexOf('Press comparison'))
     assert.doesNotMatch(html, /Radius composition|Radius ↔ semantic meaning|Full-range activity trend|Daily line trend/)
-    assert.match(html, /Press comparison[\s\S]*Duration distribution/)
+    assert.match(html, /activity-analysis-summary-grid[\s\S]*Press comparison[\s\S]*Duration distribution[\s\S]*Semantic composition/)
   })
 
   it('plots complete-range Radius and semantic context while highlighting only the selected activity', () => {
