@@ -1393,8 +1393,14 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .activity-quality { display: flex; flex-wrap: wrap; gap: .35rem 1rem; margin-top: .55rem; color: var(--muted); font-size: .6rem; }
 .activity-quality b { color: var(--text-strong); }
 .activity-two-column { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(18rem, .75fr); gap: .8rem; min-width: 0; }
-.activity-analysis-summary-grid { display: grid; grid-template-columns: minmax(20rem, 1.2fr) minmax(15rem, .8fr) minmax(18rem, 1fr); gap: .8rem; min-width: 0; }
+.activity-analysis-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; min-width: 0; }
 .activity-analysis-summary-grid > .panel, .activity-two-column > .panel, .activity-explorer > .panel, .pattern-explorer > .panel { min-width: 0; padding: .9rem; }
+.activity-press-comparison { grid-column: 1 / -1; }
+.activity-press-metric-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75rem; min-width: 0; }
+.activity-press-metric-grid article { min-width: 0; padding: .65rem; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: .4rem; }
+.activity-press-metric-grid h3 { margin: 0 0 .45rem; color: var(--text-strong); font-size: .7rem; }
+.activity-press-metric-grid article > small { display: block; margin: -.32rem 0 .45rem; color: var(--muted); font-size: .5rem; }
+.activity-press-metric-grid .analysis-bars button { grid-template-columns: minmax(3.8rem, .65fr) minmax(3.5rem, 1fr) auto; gap: .35rem; padding: .3rem .25rem; }
 .segmented-control { display: inline-flex; padding: .15rem; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: .4rem; }
 .segmented-control button, .builder-mode button { padding: .32rem .48rem; color: var(--muted); background: none; border: 0; border-radius: .28rem; cursor: pointer; font-size: .57rem; font-weight: 800; }
 .segmented-control button.active, .builder-mode button.active { color: var(--primary); background: var(--surface); box-shadow: var(--shadow-sm); }
@@ -1466,7 +1472,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 @media (max-width: 980px) {
   .activity-metrics, .pattern-summary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .activity-metrics div:nth-child(3), .pattern-summary div:nth-child(3) { border-right: 0; }
-  .activity-two-column, .activity-analysis-summary-grid { grid-template-columns: 1fr; }
+  .activity-two-column, .activity-analysis-summary-grid, .activity-press-metric-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 700px) {

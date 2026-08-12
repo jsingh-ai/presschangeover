@@ -84,7 +84,7 @@ describe('one-activity explorer presentation', () => {
 
   it('shows magnitude, frequency, press, state, trend, distribution, semantic, and exact evidence', () => {
     const html = renderToStaticMarkup(createElement(OperationalActivityExplorerView, { data: activity, analytics }))
-    for (const copy of ['Total time', 'Occurrences', 'Median occurrence', 'Longest occurrence', 'Press comparison', 'Occurrence duration', 'Process families', 'Exact occurrences', 'B / 123 / Maintenance', 'Physical signature']) assert.match(html, new RegExp(copy))
+    for (const copy of ['Total time', 'Occurrences', 'Average', 'Total time ÷ occurrences', 'Median occurrence', 'Longest occurrence', 'Press comparison', 'Occurrence duration', 'Process families', 'Exact occurrences', 'B / 123 / Maintenance', 'Physical signature']) assert.match(html, new RegExp(copy))
     assert.match(html, /Radius Coverage/)
     assert.match(html, /Classification Coverage/)
     assert.match(html, /Load next 46/)
@@ -99,6 +99,7 @@ describe('one-activity explorer presentation', () => {
     assert.ok(html.indexOf('Semantic composition') < html.indexOf('Physical signature across the full time range'))
     assert.ok(html.indexOf('Physical signature across the full time range') < html.indexOf('Exact occurrences'))
     assert.doesNotMatch(html, /Radius composition|Radius ↔ semantic meaning|Full-range activity trend|Daily line trend/)
+    assert.doesNotMatch(html, /Observed Share|activity-press-comparison[\s\S]*segmented-control/)
     assert.match(html, /activity-analysis-summary-grid[\s\S]*Press comparison[\s\S]*Duration distribution[\s\S]*Semantic composition/)
   })
 
@@ -136,6 +137,20 @@ describe('one-activity explorer presentation', () => {
     assert.match(html, /Press 12/)
     assert.equal((html.match(/aria-pressed="true"/g) ?? []).length >= 1, true)
     assert.doesNotMatch(html, /<select/)
+  })
+
+  it('shows all three press measures simultaneously in numeric press order', () => {
+    const press3 = { ...activity.pressBreakdown[0]!, pressKey: 'press3' as const, displayName: 'Press 3', durationSeconds: 600, occurrenceCount: 3 }
+    const press15 = { ...activity.pressBreakdown[0]!, pressKey: 'press15' as const, displayName: 'Press 15', durationSeconds: 900, occurrenceCount: 3 }
+    const html = renderToStaticMarkup(createElement(OperationalActivityExplorerView, { data: { ...activity, pressBreakdown: [press15, activity.pressBreakdown[0]!, press3] }, analytics }))
+    const total = html.slice(html.indexOf('<h3>Total Time</h3>'), html.indexOf('<h3>Occurrences</h3>'))
+    const occurrences = html.slice(html.indexOf('<h3>Occurrences</h3>'), html.indexOf('<h3>Average</h3>'))
+    const average = html.slice(html.indexOf('<h3>Average</h3>'), html.indexOf('Duration distribution'))
+    for (const section of [total, occurrences, average]) {
+      assert.ok(section.indexOf('Press 3') < section.indexOf('Press 11'))
+      assert.ok(section.indexOf('Press 11') < section.indexOf('Press 15'))
+    }
+    assert.match(average, /Total time ÷ occurrences/)
   })
 
   it('provides local press focus and responsive theme-aware styling', () => {
