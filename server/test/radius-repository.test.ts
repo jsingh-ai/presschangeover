@@ -170,6 +170,37 @@ test('fleet Overview loads hybrid observations in four set-based read-only queri
   }
 })
 
+test('fleet Overview isolates malformed operational rows and retains a valid legacy seed', async () => {
+  const executor: RadiusQueryExecutor = {
+    query: async (sql) => {
+      if (sql.includes('machine_status_events') && sql.includes('AS seed')) return { rows: [{
+        machineId: '203', eventType: null, statusCode: null,
+        statusDescription: null, fetchedAtUtc: new Date('2026-08-10T14:30:00.000Z'),
+      }] }
+      if (sql.includes('machine_status_history') && sql.includes('AS seed')) return { rows: [{
+        machineId: '203', eventType: 'M', statusCode: '16',
+        statusDescription: 'Make Ready', fetchedAtUtc: new Date('2026-08-10T14:28:00.000Z'),
+      }] }
+      if (sql.includes('machine_status_history')) return { rows: [{
+        machineId: '205', eventType: null, statusCode: null,
+        statusDescription: null, fetchedAtUtc: new Date('2026-08-10T14:29:00.000Z'),
+      }] }
+      return { rows: [] }
+    },
+  }
+
+  const result = await new RadiusRepository(executor, config, 'America/Chicago').getObservationsForMachines(
+    [203, 205],
+    '2026-08-10T15:00:00.000Z',
+    '2026-08-10T16:00:00.000Z',
+  )
+
+  assert.equal(result.get(203)?.length, 1)
+  assert.equal(result.get(203)?.[0].sourceGeneration, 'legacy')
+  assert.equal(result.get(203)?.[0].statusDescription, 'Make Ready')
+  assert.deepEqual(result.get(205), [])
+})
+
 test('a prior compact event supersedes the legacy fallback seed', async () => {
   const executor: RadiusQueryExecutor = {
     query: async (sql) => {

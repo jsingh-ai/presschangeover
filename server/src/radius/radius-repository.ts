@@ -90,14 +90,14 @@ function nullableText(value: unknown, field: string): string | null {
 function mapObservation(
   row: Record<string, unknown>,
   sourceGeneration: RadiusObservation['sourceGeneration'],
-): RadiusObservation {
+): RadiusObservation | null {
   const machineId = positiveInteger(row.machineId, 'machine_id')
   if (machineId <= 0) throw new Error('Radius returned an invalid machine_id')
   if (
     typeof row.eventType !== 'string' ||
     typeof row.statusDescription !== 'string'
   ) {
-    throw new Error('Radius returned an invalid operational status')
+    return null
   }
   return {
     machineId,
@@ -107,6 +107,15 @@ function mapObservation(
     statusDescription: row.statusDescription,
     sourceGeneration,
   }
+}
+
+function mapObservations(
+  rows: Record<string, unknown>[],
+  sourceGeneration: RadiusObservation['sourceGeneration'],
+): RadiusObservation[] {
+  return rows
+    .map((row) => mapObservation(row, sourceGeneration))
+    .filter((observation): observation is RadiusObservation => observation !== null)
 }
 
 function mapPollRun(row: Record<string, unknown>): RadiusPollRun {
@@ -293,13 +302,14 @@ export class RadiusRepository {
         windowValues,
       ),
     ])
-    const seedRows = eventSeed.rows.length > 0
-      ? eventSeed.rows.map((row) => mapObservation(row, 'compact'))
-      : legacySeed.rows.map((row) => mapObservation(row, 'legacy'))
+    const compactSeedRows = mapObservations(eventSeed.rows, 'compact')
+    const seedRows = compactSeedRows.length > 0
+      ? compactSeedRows
+      : mapObservations(legacySeed.rows, 'legacy')
     return [
       ...seedRows,
-      ...legacyWindow.rows.map((row) => mapObservation(row, 'legacy')),
-      ...eventWindow.rows.map((row) => mapObservation(row, 'compact')),
+      ...mapObservations(legacyWindow.rows, 'legacy'),
+      ...mapObservations(eventWindow.rows, 'compact'),
     ]
       .sort(
         (left, right) =>
@@ -396,12 +406,13 @@ export class RadiusRepository {
         values,
       ),
     ])
-    const eventSeedMachines = new Set(eventSeeds.rows.map((row) => Number(row.machineId)))
+    const compactSeeds = mapObservations(eventSeeds.rows, 'compact')
+    const eventSeedMachines = new Set(compactSeeds.map(({ machineId }) => machineId))
     const rows = [
-      ...legacySeeds.rows.filter((row) => !eventSeedMachines.has(Number(row.machineId))).map((row) => mapObservation(row, 'legacy')),
-      ...eventSeeds.rows.map((row) => mapObservation(row, 'compact')),
-      ...legacyWindow.rows.map((row) => mapObservation(row, 'legacy')),
-      ...eventWindow.rows.map((row) => mapObservation(row, 'compact')),
+      ...mapObservations(legacySeeds.rows, 'legacy').filter(({ machineId }) => !eventSeedMachines.has(machineId)),
+      ...compactSeeds,
+      ...mapObservations(legacyWindow.rows, 'legacy'),
+      ...mapObservations(eventWindow.rows, 'compact'),
     ]
     for (const observation of rows) result.get(observation.machineId)?.push(observation)
     for (const observations of result.values()) observations.sort((left, right) => Date.parse(left.fetchedAtUtc) - Date.parse(right.fetchedAtUtc))
@@ -444,10 +455,10 @@ export class RadiusRepository {
        ORDER BY machine_id ASC`,
       [machineIds.map(String)],
     )
-    return result.rows.map((row) => ({
-      ...mapObservation(row, 'current'),
-      isPresent: row.isPresent === true,
-    }))
+    return result.rows.flatMap((row) => {
+      const observation = mapObservation(row, 'current')
+      return observation ? [{ ...observation, isPresent: row.isPresent === true }] : []
+    })
   }
 
   async getObservedIdentities(): Promise<ObservedRadiusIdentity[]> {

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import React, { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { GuidedActivityPicker, OperationalActivityExplorerView, activityGuidePath, guidedActivityOptions } from '../src/components/OperationalActivityExplorer'
+import { GuidedActivityPicker, OperationalActivityExplorerView, activityGuidePath, fullRangeActivityTracks, guidedActivityOptions } from '../src/components/OperationalActivityExplorer'
 import { Builder, DiscoveredPatterns } from '../src/components/PatternExplorer'
 import type { ActivityAnalysis, OperationalAnalytics, PatternAnalysis } from '../src/types/api'
 
@@ -75,11 +75,25 @@ describe('one-activity explorer presentation', () => {
     assert.match(html, /Radius Coverage/)
     assert.match(html, /Classification Coverage/)
     assert.match(html, /Load next 46/)
-    assert.match(html, /Focused occurrence/)
+    assert.match(html, /Complete selected range/)
+    assert.match(html, /exact selected-range axis/)
     assert.match(html, /Operational Group/)
     assert.match(html, /Process Family/)
-    assert.match(html, /Open full evidence/)
+    assert.match(html, /Open evidence/)
     assert.doesNotMatch(html, /Stops &amp; Recovery/)
+  })
+
+  it('plots complete-range Radius and semantic context while highlighting only the selected activity', () => {
+    const intervals = [
+      { intervalId: 'one', startUtc: activity.fromUtc, endUtc: '2026-08-02T00:00:00.000Z', durationSeconds: 86_400, isUnavailable: false, eventType: 'B', statusCode: '123', statusDescription: 'Maintenance', radiusStateLabel: 'Bad', operationalGroupKey: 'MAINTENANCE_INTERVENTION', operationalGroupLabel: 'Maintenance Intervention', operationalGroupLightColor: '#345678', operationalGroupDarkColor: '#89abcd', processFamilyKey: 'MAINTENANCE', processFamilyLabel: 'Maintenance', classificationNeedsReview: false, classificationStatus: 'mapped' },
+      { intervalId: 'two', startUtc: '2026-08-02T00:00:00.000Z', endUtc: activity.toUtc, durationSeconds: 518_400, isUnavailable: false, eventType: 'G', statusCode: '150', statusDescription: 'Run Production', radiusStateLabel: 'Good', operationalGroupKey: 'PRODUCTION', operationalGroupLabel: 'Production', operationalGroupLightColor: '#456789', operationalGroupDarkColor: '#9abcde', processFamilyKey: 'PRODUCTION', processFamilyLabel: 'Production', classificationNeedsReview: false, classificationStatus: 'mapped' },
+    ] as any
+    const tracks = fullRangeActivityTracks(intervals, { level: 'operational_group', key: 'MAINTENANCE_INTERVENTION', label: 'Maintenance Intervention' })
+    for (const track of [tracks.radius, tracks.group, tracks.family]) {
+      assert.equal(track.intervals.length, 2)
+      assert.match(track.intervals[0]!.className ?? '', /activity-range-segment--match/)
+      assert.match(track.intervals[1]!.className ?? '', /activity-range-segment--context/)
+    }
   })
 
   it('provides local press/state focus and responsive theme-aware styling', () => {

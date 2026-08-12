@@ -192,13 +192,13 @@ describe('primary telemetry visual integration', () => {
     assert.match(runSource, /showTimeline=\{false\}/)
   })
 
-  it('automatically focuses Operational evidence and keeps telemetry failure independent of Radius/PI tracks', () => {
+  it('keeps Operational evidence on the full selected range and keeps telemetry failure independent of Radius/PI tracks', () => {
     const source = readFileSync(new URL('../src/components/OperationalActivityExplorer.tsx', import.meta.url), 'utf8')
     assert.match(source, /sort\(\(left, right\) => Date\.parse\(left\.startUtc\) - Date\.parse\(right\.startUtc\)/)
     assert.match(source, /setFocusedOccurrenceId\(item\.occurrenceId\)/)
-    assert.match(source, /Focused occurrence/)
-    assert.match(source, /complete occurrence chronology/)
-    assert.match(source, /Focused two-hour telemetry window/)
+    assert.match(source, /Complete selected range/)
+    assert.match(source, /full selected-range activity and physical signature/)
+    assert.match(source, /Motion and speed are not replaced with an unrelated two-hour event window/)
     const emptyEvidence: PressTelemetryEvidenceState = { range: { fromUtc, toUtc, focused: false }, loading: false, error: true }
     const track = (id: string, label: string) => ({ id, label, intervals: [{ id, startUtc: fromUtc, endUtc: toUtc, label }] })
     const html = renderToStaticMarkup(createElement(UnifiedProcessTimeline, { fromUtc, toUtc, ariaLabel: 'Degraded', radiusTrack: track('radius', 'Radius recorded'), groupTrack: track('group', 'Operational Group'), familyTrack: track('family', 'Process Family'), telemetry: emptyEvidence }))

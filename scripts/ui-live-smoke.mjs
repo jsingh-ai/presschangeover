@@ -250,28 +250,28 @@ if (report.interactions.activityGuide.selectedProcessFamily.familyCount !== fami
 await navigate(routeUrl('/operational-analysis', matrixRange), routes[1].ready, 'Operational occurrence evidence after guide check')
 const occurrence = await evaluate(`Boolean(document.querySelector('.activity-evidence tbody tr'))`)
 if (occurrence) {
-  await waitFor(`Boolean(document.querySelector('.physical-signature-summary .synchronized-timeline[aria-label*="focused occurrence synchronized evidence"]'))`, 'default focused occurrence timeline')
+  await waitFor(`Boolean(document.querySelector('.physical-signature-summary .synchronized-timeline[aria-label*="full selected-range activity and physical signature"]'))`, 'full-range Operational physical signature')
   await waitFor(`(() => {
-    const timeline = document.querySelector('.physical-signature-summary .synchronized-timeline[aria-label*="focused occurrence synchronized evidence"]')
+    const timeline = document.querySelector('.physical-signature-summary .synchronized-timeline[aria-label*="full selected-range activity and physical signature"]')
     const labels = [...timeline.querySelectorAll('[aria-label]')].map((item) => item.getAttribute('aria-label'))
     return labels.includes('Radius recorded intervals')
       && labels.includes('Operational Group intervals')
       && labels.includes('Process Family intervals')
-      && labels.includes('Physical Motion intervals')
-      && labels.some((label) => label?.startsWith('Actual Speed.'))
-      && labels.includes('Physical Events event markers')
-  })()`, 'focused occurrence full synchronized telemetry tracks')
+      && Boolean(timeline.querySelector('.activity-range-segment--match'))
+      && Boolean(timeline.querySelector('.activity-range-segment--context'))
+  })()`, 'full-range selected-activity chronology and highlighted context')
   const firstFocus = await evaluate(`document.querySelector('.activity-evidence tbody tr[aria-pressed="true"]')?.getAttribute('aria-label')`)
   const occurrenceCount = await evaluate(`document.querySelectorAll('.activity-evidence tbody tr').length`)
   if (occurrenceCount > 1) {
+    const secondFocus = await evaluate(`document.querySelectorAll('.activity-evidence tbody tr')[1]?.getAttribute('aria-label')`)
     await evaluate(`document.querySelectorAll('.activity-evidence tbody tr')[1]?.click()`)
-    await waitFor(`document.querySelectorAll('.activity-evidence tbody tr')[1]?.getAttribute('aria-pressed') === 'true'`, 'occurrence focus switching')
+    await waitFor(`document.querySelector('.activity-evidence tbody tr[aria-pressed="true"]')?.getAttribute('aria-label') === ${JSON.stringify(secondFocus)}`, 'occurrence focus switching')
   }
   report.interactions.operationalTelemetry = await evaluate(`(() => {
-    const timeline = document.querySelector('.physical-signature-summary .synchronized-timeline[aria-label*="focused occurrence synchronized evidence"]')
+    const timeline = document.querySelector('.physical-signature-summary .synchronized-timeline[aria-label*="full selected-range activity and physical signature"]')
     const labels = [...timeline.querySelectorAll('[aria-label]')].map((item) => item.getAttribute('aria-label'))
     return {
-      focusedLabel: document.querySelector('.physical-signature-summary .eyebrow')?.textContent,
+      rangeLabel: document.querySelector('.physical-signature-summary .eyebrow')?.textContent,
       initialFocus: ${JSON.stringify(firstFocus)},
       currentFocus: document.querySelector('.activity-evidence tbody tr[aria-pressed="true"]')?.getAttribute('aria-label'),
       radius: labels.includes('Radius recorded intervals'),
@@ -285,13 +285,25 @@ if (occurrence) {
   })()`)
   await evaluate(`document.querySelector('.physical-signature-summary')?.scrollIntoView({ block: 'start' })`)
   await delay(300)
-  await capture('1440-operational-focused-telemetry')
-  await evaluate(`document.querySelector('.physical-signature-summary .primary-action')?.click()`)
+  await capture('1440-operational-full-range-telemetry')
+  await evaluate(`document.querySelector('.activity-evidence .secondary-action')?.click()`)
   await waitFor(`Boolean(document.querySelector('.evidence-drawer-shell'))`, 'occurrence drawer')
   report.interactions.occurrenceDrawer = await evaluate(`({ exact: document.body.textContent.includes('Radius recorded'), semantic: document.body.textContent.includes('ProcessIntelligence'), physical: document.body.textContent.includes('Physical telemetry evidence') })`)
   await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
   await waitFor(`!document.querySelector('.evidence-drawer-shell')`, 'occurrence drawer close')
 }
+const sevenDayStart = new Date(customEnd.getTime() - 7 * 24 * 60 * 60 * 1000)
+await navigate(routeUrl('/operational-analysis', { preset: 'custom', fromUtc: sevenDayStart.toISOString(), toUtc: customEnd.toISOString() }), routes[1].ready, 'seven-day Operational range')
+await waitFor(`Boolean(document.querySelector('.physical-signature-summary .synchronized-timeline[aria-label*="complete selected-range activity chronology"]'))`, 'seven-day complete activity chronology')
+report.interactions.operationalSevenDay = await evaluate(`({
+  rangeCopy: document.querySelector('.physical-signature-summary .telemetry-range-note')?.textContent,
+  fullAxis: Boolean(document.querySelector('.physical-signature-summary .synchronized-timeline[aria-label*="complete selected-range activity chronology"]')),
+  matchCount: document.querySelectorAll('.physical-signature-summary .activity-range-segment--match').length,
+  contextCount: document.querySelectorAll('.physical-signature-summary .activity-range-segment--context').length,
+  physicalMotion: Boolean(document.querySelector('.physical-signature-summary [aria-label="Physical Motion intervals"]')),
+  focusedSubstitute: Boolean(document.querySelector('.physical-signature-summary [aria-label*="focused"]')),
+})`)
+if (!report.interactions.operationalSevenDay.rangeCopy?.includes('exceeds 24 hours') || !report.interactions.operationalSevenDay.fullAxis || !report.interactions.operationalSevenDay.matchCount || !report.interactions.operationalSevenDay.contextCount || report.interactions.operationalSevenDay.physicalMotion || report.interactions.operationalSevenDay.focusedSubstitute) throw new Error(`Seven-day Operational signature did not preserve the complete range honestly: ${JSON.stringify(report.interactions.operationalSevenDay)}`)
 
 await navigate(routeUrl('/patterns-episodes', matrixRange), routes[2].ready, 'Pattern Run evidence')
 await waitFor(`Boolean(document.querySelector('tr[aria-label^="Open evidence for"]'))`, 'matched Run row')

@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { getActivityAnalysis } from '../api/process-intelligence-api'
 import { formatDuration } from '../episode-presentation'
 import { formatPlantDateTime } from '../time-ranges'
-import type { ActivityAnalysis, ActivityCatalogItem, ActivityLevel, ActivityOccurrence, ActivityOccurrenceSegment, ActivitySelection, OperationalAnalytics, RadiusPressKey } from '../types/api'
+import type { ActivityAnalysis, ActivityCatalogItem, ActivityLevel, ActivityOccurrence, ActivitySelection, OperationalAnalytics, OverviewTimelineInterval, RadiusOverview as RadiusOverviewModel, RadiusPressKey } from '../types/api'
 import type { TimedNumericSample } from '../types/evidence'
 import { EvidenceDrawerShell } from './EvidenceDrawerShell'
 import { PhysicalEvidencePanel } from './PhysicalEvidencePanel'
 import { SynchronizedTimeline, type TimelineIntervalItem, type TimelineIntervalTrack } from './SynchronizedTimeline'
-import { telemetrySummary, usePressTelemetryEvidence, type PressTelemetryEvidenceState } from './TelemetryEvidenceTimeline'
+import { MAX_FULL_TELEMETRY_RANGE_MS, telemetrySummary, usePressTelemetryEvidence, type PressTelemetryEvidenceState } from './TelemetryEvidenceTimeline'
 import { UnifiedProcessTimeline } from './UnifiedProcessTimeline'
+import { timelineFamilyLabel } from './RadiusOverview'
 
 const levelLabels: Record<ActivityLevel, string> = { radius_state: 'Radius State', operational_group: 'Operational Group', process_family: 'Process Family', exact_status: 'Exact Radius Status' }
 const levelOrder: ActivityLevel[] = ['radius_state', 'operational_group', 'process_family', 'exact_status']
@@ -185,49 +186,68 @@ function ActivityTrend({ data, metric }: { data: ActivityAnalysis; metric: 'dura
   return <SynchronizedTimeline fromUtc={data.fromUtc} toUtc={data.toUtc} ariaLabel={`${data.selection.label} ${data.trendBucket} ${metric} trend`} intervalTracks={[]} numericTracks={[{ id: `trend-${metric}`, label: metric === 'duration' ? 'Activity duration' : 'Occurrences', unit: metric === 'duration' ? 'seconds' : 'count', samples, unavailableLabel: 'No matching activity occurred in this range' }]} />
 }
 
-type OccurrenceLayer = 'radius' | 'group' | 'family'
-
-function occurrenceLayer(segment: ActivityOccurrenceSegment, layer: OccurrenceLayer) {
-  if (layer === 'radius') return { key: `${segment.eventType}:${segment.statusCode}:${segment.statusDescription}`, label: `${segment.eventType} / ${segment.statusCode ?? '—'} / ${segment.statusDescription}` }
-  if (layer === 'group') return { key: segment.operationalGroupKey, label: segment.operationalGroupName }
-  return { key: segment.processFamilyKey, label: segment.processFamilyName }
+function intervalMatchesSelection(interval: OverviewTimelineInterval, selection: ActivitySelection) {
+  if (interval.isUnavailable) return false
+  if (selection.level === 'radius_state') return interval.eventType === selection.key
+  if (selection.level === 'operational_group') return interval.operationalGroupKey === selection.key
+  if (selection.level === 'process_family') return interval.processFamilyKey === selection.key
+  return [interval.eventType ?? '', interval.statusCode ?? '', interval.statusDescription ?? ''].join('\u001f') === selection.key
 }
 
-export function occurrenceTrack(occurrence: ActivityOccurrence, layer: OccurrenceLayer, clip?: { fromUtc: string; toUtc: string }): TimelineIntervalTrack {
-  const from = Date.parse(clip?.fromUtc ?? occurrence.startUtc)
-  const to = Date.parse(clip?.toUtc ?? occurrence.endUtc)
-  const intervals: TimelineIntervalItem[] = []
-  for (const segment of occurrence.segments) {
-    const start = Math.max(from, Date.parse(segment.startUtc))
-    const end = Math.min(to, Date.parse(segment.endUtc))
-    if (end <= start) continue
-    const startUtc = new Date(start).toISOString()
-    const endUtc = new Date(end).toISOString()
-    const identity = occurrenceLayer(segment, layer)
-    const previous = intervals.at(-1)
-    if (layer !== 'radius' && previous?.endUtc === startUtc && previous.id.startsWith(`${layer}:${identity.key}:`)) {
-      previous.endUtc = endUtc
-      previous.details = `${identity.label}\n${formatPlantDateTime(previous.startUtc)} – ${formatPlantDateTime(previous.endUtc)} CT`
-      continue
-    }
-    intervals.push({ id: `${layer}:${identity.key}:${segment.segmentId}`, startUtc, endUtc, label: identity.label, details: `${identity.label}\n${formatPlantDateTime(startUtc)} – ${formatPlantDateTime(endUtc)} CT`, className: `run-relative-segment run-relative-segment--${layer === 'family' ? 'family' : segment.eventType === 'G' ? 'good' : segment.eventType === 'M' ? 'make-ready' : segment.eventType === 'B' ? 'bad' : 'other'}` })
-  }
-  return { id: layer === 'radius' ? 'radius' : layer === 'group' ? 'operational-group' : 'process-family', label: layer === 'radius' ? 'Radius recorded' : layer === 'group' ? 'Operational Group' : 'Process Family', intervals }
+function rangeStateClass(eventType: string | null) {
+  return eventType === 'G' ? 'good' : eventType === 'M' ? 'make-ready' : eventType === 'B' ? 'bad' : eventType === 'S' ? 'safety' : eventType ? 'other' : 'offline'
 }
 
-function FocusedOccurrenceTimeline({ occurrence, evidence, onOpen }: { occurrence: ActivityOccurrence; evidence: PressTelemetryEvidenceState; onOpen(): void }) {
+export function fullRangeActivityTracks(intervals: OverviewTimelineInterval[], selection: ActivitySelection) {
+  const track = (layer: 'radius' | 'group' | 'family'): TimelineIntervalTrack => ({
+    id: layer === 'radius' ? 'radius' : layer === 'group' ? 'operational-group' : 'process-family',
+    label: layer === 'radius' ? 'Radius recorded' : layer === 'group' ? 'Operational Group' : 'Process Family',
+    unavailableLabel: 'No Radius evidence was available in this range',
+    intervals: intervals.map((interval): TimelineIntervalItem => {
+      const label = interval.isUnavailable ? 'Data unavailable' : layer === 'radius' ? interval.radiusStateLabel : layer === 'group' ? interval.operationalGroupLabel : timelineFamilyLabel(interval)
+      const matched = intervalMatchesSelection(interval, selection)
+      return {
+        id: `activity-range:${layer}:${interval.intervalId}`,
+        startUtc: interval.startUtc,
+        endUtc: interval.endUtc,
+        label,
+        details: `${label}\n${formatPlantDateTime(interval.startUtc)} – ${formatPlantDateTime(interval.endUtc)} CT\n${matched ? `Matches selected ${levelLabels[selection.level]}: ${selection.label}` : `Context outside selected ${levelLabels[selection.level]}`}`,
+        unavailable: interval.isUnavailable,
+        className: `overview-gantt-segment overview-gantt-segment--${layer === 'radius' ? rangeStateClass(interval.eventType) : layer} activity-range-segment activity-range-segment--${matched ? 'match' : interval.isUnavailable ? 'unavailable' : 'context'}`,
+        style: layer === 'group' ? { '--overview-light': interval.operationalGroupLightColor ?? '#68727d', '--overview-dark': interval.operationalGroupDarkColor ?? '#9ca8b5' } as CSSProperties : undefined,
+      }
+    }),
+  })
+  return { radius: track('radius'), group: track('group'), family: track('family') }
+}
+
+function occurrenceTimelineIntervals(occurrences: ActivityOccurrence[], pressKey?: RadiusPressKey): OverviewTimelineInterval[] {
+  return occurrences.filter((occurrence) => !pressKey || occurrence.pressKey === pressKey).flatMap((occurrence) => occurrence.segments.map((segment) => ({
+    intervalId: segment.segmentId, startUtc: segment.startUtc, endUtc: segment.endUtc, durationSeconds: segment.durationSeconds, isUnavailable: false,
+    eventType: segment.eventType, statusCode: segment.statusCode, statusDescription: segment.statusDescription, radiusStateLabel: segment.eventType,
+    operationalGroupKey: segment.operationalGroupKey, operationalGroupLabel: segment.operationalGroupName, operationalGroupLightColor: null, operationalGroupDarkColor: null,
+    processFamilyKey: segment.processFamilyKey, processFamilyLabel: segment.processFamilyName, classificationNeedsReview: false,
+    classificationStatus: segment.needsClassification ? 'needs_classification' as const : 'mapped' as const,
+  })))
+}
+
+function FullRangePhysicalSignature({ data, pressKey, displayName, intervals, evidence, telemetryAvailable, onPress }: { data: ActivityAnalysis; pressKey?: RadiusPressKey; displayName?: string; intervals: OverviewTimelineInterval[]; evidence: PressTelemetryEvidenceState; telemetryAvailable: boolean; onPress(key: RadiusPressKey): void }) {
+  const tracks = fullRangeActivityTracks(intervals, data.selection)
   const summary = telemetrySummary(evidence)
   const sourceUnit = evidence.speed?.actual.sourceUnit ?? 'source units'
-  const fullTracks = { radius: occurrenceTrack(occurrence, 'radius'), group: occurrenceTrack(occurrence, 'group'), family: occurrenceTrack(occurrence, 'family') }
-  const focusedTracks = evidence.range.focused
-    ? { radius: occurrenceTrack(occurrence, 'radius', evidence.range), group: occurrenceTrack(occurrence, 'group', evidence.range), family: occurrenceTrack(occurrence, 'family', evidence.range) }
-    : fullTracks
-  return <section className="panel physical-signature-summary" aria-labelledby="physical-signature-title">
-    <div className="section-heading"><div><p className="eyebrow">Focused occurrence · not representative of every occurrence</p><h2 id="physical-signature-title">Physical signature for {occurrence.displayName}</h2><p>{formatPlantDateTime(occurrence.startUtc)} – {formatPlantDateTime(occurrence.endUtc)} CT · {compact(occurrence.durationSeconds)}</p></div><button type="button" className="primary-action" onClick={onOpen}>Open full evidence</button></div>
-    {evidence.range.focused && <><p className="telemetry-range-note">This occurrence exceeds two hours. Complete Radius and semantic chronology remains below; telemetry is not silently chunked or truncated.</p><SynchronizedTimeline fromUtc={occurrence.startUtc} toUtc={occurrence.endUtc} ariaLabel={`${occurrence.displayName} complete occurrence chronology`} intervalTracks={[fullTracks.radius, fullTracks.group, fullTracks.family]} /><h3>Focused two-hour telemetry window</h3><p className="quiet-copy">{formatPlantDateTime(evidence.range.fromUtc)} – {formatPlantDateTime(evidence.range.toUtc)} CT · midpoint-focused physical detail</p></>}
-    <UnifiedProcessTimeline fromUtc={evidence.range.fromUtc} toUtc={evidence.range.toUtc} ariaLabel={`${occurrence.displayName} focused occurrence synchronized evidence`} radiusTrack={focusedTracks.radius} groupTrack={focusedTracks.group} familyTrack={focusedTracks.family} telemetry={evidence} />
-    <dl className="compact-facts physical-signature-facts"><div><dt>Telemetry</dt><dd>{summary.availability}</dd></div><div><dt>Motion state changes</dt><dd>{summary.motionChanges}</dd></div><div><dt>Actual Speed</dt><dd>{summary.speedSamples} samples{summary.speedMinimum !== null && summary.speedMaximum !== null ? ` · ${summary.speedMinimum}–${summary.speedMaximum} ${sourceUnit}` : ''}</dd></div><div><dt>Context changes</dt><dd>{summary.contextChanges}</dd></div><div><dt>Physical signal changes</dt><dd>{summary.physicalChanges}</dd></div></dl>
-    {evidence.error && <p className="message message--warning">Some telemetry is temporarily unavailable. Radius, Operational Group, and Process Family evidence remain usable.</p>}
+  const pressChoices = data.pressBreakdown.filter(({ occurrenceCount }) => occurrenceCount > 0)
+  return <section className="panel physical-signature-summary activity-range-signature" aria-labelledby="physical-signature-title">
+    <div className="section-heading"><div><p className="eyebrow">Complete selected range · matching activity highlighted</p><h2 id="physical-signature-title">Physical signature across the full time range</h2><p>{formatPlantDateTime(data.fromUtc)} – {formatPlantDateTime(data.toUtc)} CT · {displayName ?? 'No matching press'}</p></div>{pressKey && pressChoices.length > 1 && <label className="activity-signature-press">Timeline press<select value={pressKey} onChange={(event) => onPress(event.target.value as RadiusPressKey)}>{pressChoices.map((press) => <option key={press.pressKey} value={press.pressKey}>{press.displayName} · {press.occurrenceCount} occurrences</option>)}</select></label>}</div>
+    <p className="activity-range-explanation"><strong>{data.selection.label}</strong> is emphasized; surrounding Radius and ProcessIntelligence states remain visible so its timing is not detached from the rest of the selected range.</p>
+    {!pressKey || !intervals.length ? <p className="empty-state">No matching activity is available to establish a press timeline in this range.</p> : telemetryAvailable ? <>
+      {evidence.loading && <div className="scope-progress" role="status"><i />Loading motion and speed for the complete selected range…</div>}
+      <UnifiedProcessTimeline fromUtc={data.fromUtc} toUtc={data.toUtc} ariaLabel={`${displayName} full selected-range activity and physical signature`} radiusTrack={tracks.radius} groupTrack={tracks.group} familyTrack={tracks.family} telemetry={evidence} />
+      <dl className="compact-facts physical-signature-facts"><div><dt>Telemetry</dt><dd>{summary.availability}</dd></div><div><dt>Motion state changes</dt><dd>{summary.motionChanges}</dd></div><div><dt>Actual Speed</dt><dd>{summary.speedSamples} samples{summary.speedMinimum !== null && summary.speedMaximum !== null ? ` · ${summary.speedMinimum}–${summary.speedMaximum} ${sourceUnit}` : ''}</dd></div><div><dt>Context changes</dt><dd>{summary.contextChanges}</dd></div><div><dt>Physical signal changes</dt><dd>{summary.physicalChanges}</dd></div></dl>
+      {evidence.error && <p className="message message--warning">Some telemetry is temporarily unavailable. The complete Radius and ProcessIntelligence chronology remains usable.</p>}
+    </> : <>
+      <p className="telemetry-range-note">This range exceeds 24 hours. Complete Radius and ProcessIntelligence chronology is shown on the exact selected-range axis. Motion and speed are not replaced with an unrelated two-hour event window.</p>
+      <UnifiedProcessTimeline fromUtc={data.fromUtc} toUtc={data.toUtc} ariaLabel={`${displayName} complete selected-range activity chronology`} radiusTrack={tracks.radius} groupTrack={tracks.group} familyTrack={tracks.family} />
+    </>}
   </section>
 }
 
@@ -247,12 +267,13 @@ function OccurrenceEvidenceDrawer({ occurrence, classificationVersion, evidence,
 interface OperationalActivityExplorerViewProps {
   data: ActivityAnalysis
   analytics?: OperationalAnalytics
+  overview?: RadiusOverviewModel
   occurrences?: ActivityOccurrence[]
   loadingMore?: boolean
   onLoadMore?(): void
 }
 
-export function OperationalActivityExplorerView({ data, occurrences = data.occurrences, loadingMore = false, onLoadMore }: OperationalActivityExplorerViewProps) {
+export function OperationalActivityExplorerView({ data, overview, occurrences = data.occurrences, loadingMore = false, onLoadMore }: OperationalActivityExplorerViewProps) {
   const [pressFocus, setPressFocus] = useState<RadiusPressKey>()
   const [stateFocus, setStateFocus] = useState<string>()
   const [pressMetric, setPressMetric] = useState<'duration' | 'occurrences' | 'share'>('duration')
@@ -262,7 +283,13 @@ export function OperationalActivityExplorerView({ data, occurrences = data.occur
   const evidence = occurrences.filter((item) => (!pressFocus || item.pressKey === pressFocus) && (!stateFocus || item.exactIdentities.some(({ eventType }) => eventType === stateFocus)))
   const focusedOccurrence = evidence.find(({ occurrenceId }) => occurrenceId === focusedOccurrenceId)
     ?? [...evidence].sort((left, right) => Date.parse(left.startUtc) - Date.parse(right.startUtc) || left.occurrenceId.localeCompare(right.occurrenceId))[0]
-  const focusedTelemetry = usePressTelemetryEvidence(focusedOccurrence?.pressKey, focusedOccurrence?.startUtc ?? data.fromUtc, focusedOccurrence?.endUtc ?? data.toUtc, { enabled: Boolean(focusedOccurrence) })
+  const signaturePressKey = pressFocus ?? focusedOccurrence?.pressKey ?? data.pressBreakdown.find(({ occurrenceCount }) => occurrenceCount > 0)?.pressKey
+  const signaturePress = data.pressBreakdown.find(({ pressKey }) => pressKey === signaturePressKey)
+  const overviewIntervals = overview?.decisionSupport?.pressAllocations.find(({ pressKey }) => pressKey === signaturePressKey)?.timelineIntervals
+  const signatureIntervals = overviewIntervals ?? occurrenceTimelineIntervals(occurrences, signaturePressKey)
+  const telemetryAvailable = Date.parse(data.toUtc) - Date.parse(data.fromUtc) <= MAX_FULL_TELEMETRY_RANGE_MS
+  const rangeTelemetry = usePressTelemetryEvidence(signaturePressKey, data.fromUtc, data.toUtc, { enabled: Boolean(signaturePressKey) && telemetryAvailable, fullRange: true, padShortRange: false })
+  const drawerTelemetry = usePressTelemetryEvidence(selectedOccurrence?.pressKey, selectedOccurrence?.startUtc ?? data.fromUtc, selectedOccurrence?.endUtc ?? data.toUtc, { enabled: Boolean(selectedOccurrence) })
   const maxSemantic = Math.max(0, ...data.semanticBreakdown.map(({ durationSeconds }) => durationSeconds))
   const maxBucket = Math.max(0, ...data.durationDistribution.map(({ occurrenceCount }) => occurrenceCount))
 
@@ -297,23 +324,23 @@ export function OperationalActivityExplorerView({ data, occurrences = data.occur
     window.history.replaceState({}, '', `${url.pathname}?${url.searchParams}`)
   }, [])
   const rowKey = (event: KeyboardEvent<HTMLTableRowElement>, occurrence: ActivityOccurrence) => {
-    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setFocusedOccurrenceId(occurrence.occurrenceId) }
+    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setFocusedOccurrenceId(occurrence.occurrenceId); setPressFocus(occurrence.pressKey) }
   }
 
   return <>
     <section className="panel activity-header"><p className="eyebrow">{levelLabels[data.selection.level]}</p><h2>{data.selection.label}</h2><p>{data.selection.description || 'Observed Radius activity in the selected scope.'}</p>{data.selection.level === 'exact_status' && <p><b>Radius recorded:</b> {data.selection.eventType} / {data.selection.statusCode ?? '—'} / {data.selection.statusDescription}<br /><b>Classified as:</b> {data.selection.operationalGroupName} → {data.selection.processFamilyName}</p>}<Metrics data={data} /><div className="activity-quality"><span>Radius Coverage <b>{data.summary.sourceCoveragePercent.toFixed(1)}%</b></span><span>Classification Coverage <b>{data.summary.classificationCoveragePercent.toFixed(1)}%</b></span><span>Published Classification <b>v{data.classificationVersion}</b></span></div></section>
+    <FullRangePhysicalSignature data={data} pressKey={signaturePressKey} displayName={signaturePress?.displayName ?? focusedOccurrence?.displayName} intervals={signatureIntervals} evidence={rangeTelemetry} telemetryAvailable={telemetryAvailable} onPress={setPressFocus} />
     <div className="activity-two-column"><section className="panel"><div className="section-heading"><div><p className="eyebrow">Press comparison</p><h2>Duration, occurrences, and share by press</h2></div><div className="segmented-control">{(['duration', 'occurrences', 'share'] as const).map((item) => <button type="button" key={item} className={pressMetric === item ? 'active' : ''} onClick={() => setPressMetric(item)}>{item === 'duration' ? 'Total Time' : item === 'occurrences' ? 'Occurrences' : 'Observed Share'}</button>)}</div></div><HorizontalBars values={data.pressBreakdown} metric={pressMetric} onPress={setPressFocus} /></section>
       <section className="panel"><div className="section-heading"><div><p className="eyebrow">Radius ↔ semantic meaning</p><h2>Radius composition</h2></div></div><StateComposition data={data} onState={setStateFocus} /><p className="annotation-disclaimer">Radius recorded the broad state; Published Classification supplies the operational meaning.</p></section></div>
-    <div className="activity-two-column"><section className="panel"><div className="section-heading"><div><p className="eyebrow">Time trend</p><h2>{data.trendBucket === 'day' ? 'Daily' : 'Hourly'} line trend</h2></div><div className="segmented-control"><button type="button" className={trendMetric === 'duration' ? 'active' : ''} onClick={() => setTrendMetric('duration')}>Duration</button><button type="button" className={trendMetric === 'occurrences' ? 'active' : ''} onClick={() => setTrendMetric('occurrences')}>Occurrences</button></div></div><ActivityTrend data={data} metric={trendMetric} /></section>
+    <div className="activity-two-column"><section className="panel"><div className="section-heading"><div><p className="eyebrow">Full-range activity trend</p><h2>{data.trendBucket === 'day' ? 'Daily' : 'Hourly'} line trend</h2><p>Uses the complete selected time range; only {data.selection.label} contributes to the line.</p></div><div className="segmented-control"><button type="button" className={trendMetric === 'duration' ? 'active' : ''} onClick={() => setTrendMetric('duration')}>Duration</button><button type="button" className={trendMetric === 'occurrences' ? 'active' : ''} onClick={() => setTrendMetric('occurrences')}>Occurrences</button></div></div><ActivityTrend data={data} metric={trendMetric} /></section>
       <section className="panel"><div className="section-heading"><div><p className="eyebrow">Duration distribution</p><h2>Occurrence duration</h2></div></div>{data.summary.occurrenceCount >= 5 ? <div className="distribution-bars">{data.durationDistribution.map((item) => <div key={item.key}><span>{item.label}</span><i><b style={{ width: barWidth(item.occurrenceCount, maxBucket) }} /></i><strong>{item.occurrenceCount}</strong></div>)}</div> : <p className="empty-state">At least five occurrences are required for a useful duration distribution.</p>}{data.summary.p95OccurrenceSeconds !== null && <p className="quiet-copy">P95 occurrence duration: {compact(data.summary.p95OccurrenceSeconds)} · shown because at least 20 occurrences are available.</p>}</section></div>
     <section className="panel"><div className="section-heading"><div><p className="eyebrow">Semantic composition</p><h2>{data.selection.level === 'radius_state' ? 'Operational groups' : data.selection.level === 'operational_group' ? 'Process families' : 'Exact supporting Radius evidence'}</h2></div></div><div className="semantic-bars">{data.semanticBreakdown.map((item) => <div key={`${item.level}:${item.key}`}><span>{item.label}</span><i><b style={{ width: barWidth(item.durationSeconds, maxSemantic) }} /></i><strong>{compact(item.durationSeconds)} · {item.percentage.toFixed(1)}%</strong></div>)}</div></section>
-    <section className="panel activity-evidence"><div className="section-heading"><div><p className="eyebrow">Exact occurrences</p><h2>Radius and classification evidence</h2><p>Select a row to update the focused physical signature. Use Open evidence for the complete detail drawer.</p></div>{(pressFocus || stateFocus) && <button type="button" className="clear-focus" onClick={() => { setPressFocus(undefined); setStateFocus(undefined) }}>Clear local evidence focus</button>}</div>{pressFocus && <p className="focus-chip">Local evidence focus: {data.pressBreakdown.find(({ pressKey }) => pressKey === pressFocus)?.displayName}</p>}{stateFocus && <p className="focus-chip">Local Radius-state focus: {data.radiusStateComposition.find(({ eventType }) => eventType === stateFocus)?.label}</p>}<div className="analysis-table-scroll"><table><thead><tr><th>Press</th><th>Start</th><th>End</th><th>Duration</th><th>Radius identity</th><th>Operational Group</th><th>Process Family</th><th>Classification status</th><th>Evidence</th></tr></thead><tbody>{evidence.map((item) => <tr key={item.occurrenceId} className={`clickable-row ${focusedOccurrence?.occurrenceId === item.occurrenceId ? 'is-focused' : ''}`} tabIndex={0} role="button" aria-pressed={focusedOccurrence?.occurrenceId === item.occurrenceId} aria-label={`Focus ${item.displayName} occurrence at ${formatPlantDateTime(item.startUtc)}`} onClick={() => setFocusedOccurrenceId(item.occurrenceId)} onKeyDown={(event) => rowKey(event, item)}><th>{item.displayName}</th><td>{formatPlantDateTime(item.startUtc)} CT</td><td>{formatPlantDateTime(item.endUtc)} CT</td><td>{compact(item.durationSeconds)}</td><td>{item.exactIdentities.map((identity) => <span className="exact-evidence" key={identity.identity}>{identity.eventType} / {identity.statusCode ?? '—'} / {identity.statusDescription}</span>)}</td><td>{item.operationalGroupName}</td><td>{item.processFamilyName}</td><td>{item.exactIdentities.some(({ needsClassification }) => needsClassification) ? 'Needs Classification' : `Mapped · v${data.classificationVersion}`}</td><td><button type="button" className="secondary-action" onClick={(event) => { event.stopPropagation(); openOccurrence(item) }}>Open evidence</button></td></tr>)}</tbody></table></div>{occurrences.length < data.totalOccurrenceCount && <div className="evidence-paging"><p>Showing {occurrences.length} of {data.totalOccurrenceCount} exact occurrences. Summaries use the full scope.</p><button type="button" disabled={loadingMore || !onLoadMore} onClick={onLoadMore}>{loadingMore ? 'Loading…' : `Load next ${Math.min(data.evidenceLimit, data.totalOccurrenceCount - occurrences.length)}`}</button></div>}</section>
-    {focusedOccurrence ? <FocusedOccurrenceTimeline occurrence={focusedOccurrence} evidence={focusedTelemetry} onOpen={() => openOccurrence(focusedOccurrence)} /> : <section className="panel empty-state"><h2>Physical signature</h2><p>No occurrence is available in the current evidence page and local focus.</p></section>}
-    {selectedOccurrence && <OccurrenceEvidenceDrawer occurrence={selectedOccurrence} classificationVersion={data.classificationVersion} evidence={selectedOccurrence.occurrenceId === focusedOccurrence?.occurrenceId ? focusedTelemetry : undefined} onClose={closeOccurrence} />}
+    <section className="panel activity-evidence"><div className="section-heading"><div><p className="eyebrow">Exact occurrences</p><h2>Radius and classification evidence</h2><p>Select a row to show that press across the complete time range above. Use Open evidence for this occurrence’s detail drawer.</p></div>{(pressFocus || stateFocus) && <button type="button" className="clear-focus" onClick={() => { setPressFocus(undefined); setStateFocus(undefined) }}>Clear local evidence focus</button>}</div>{pressFocus && <p className="focus-chip">Local evidence focus: {data.pressBreakdown.find(({ pressKey }) => pressKey === pressFocus)?.displayName}</p>}{stateFocus && <p className="focus-chip">Local Radius-state focus: {data.radiusStateComposition.find(({ eventType }) => eventType === stateFocus)?.label}</p>}<div className="analysis-table-scroll"><table><thead><tr><th>Press</th><th>Start</th><th>End</th><th>Duration</th><th>Radius identity</th><th>Operational Group</th><th>Process Family</th><th>Classification status</th><th>Evidence</th></tr></thead><tbody>{evidence.map((item) => <tr key={item.occurrenceId} className={`clickable-row ${focusedOccurrence?.occurrenceId === item.occurrenceId ? 'is-focused' : ''}`} tabIndex={0} role="button" aria-pressed={focusedOccurrence?.occurrenceId === item.occurrenceId} aria-label={`Show ${item.displayName} across the complete selected range`} onClick={() => { setFocusedOccurrenceId(item.occurrenceId); setPressFocus(item.pressKey) }} onKeyDown={(event) => rowKey(event, item)}><th>{item.displayName}</th><td>{formatPlantDateTime(item.startUtc)} CT</td><td>{formatPlantDateTime(item.endUtc)} CT</td><td>{compact(item.durationSeconds)}</td><td>{item.exactIdentities.map((identity) => <span className="exact-evidence" key={identity.identity}>{identity.eventType} / {identity.statusCode ?? '—'} / {identity.statusDescription}</span>)}</td><td>{item.operationalGroupName}</td><td>{item.processFamilyName}</td><td>{item.exactIdentities.some(({ needsClassification }) => needsClassification) ? 'Needs Classification' : `Mapped · v${data.classificationVersion}`}</td><td><button type="button" className="secondary-action" onClick={(event) => { event.stopPropagation(); openOccurrence(item) }}>Open evidence</button></td></tr>)}</tbody></table></div>{occurrences.length < data.totalOccurrenceCount && <div className="evidence-paging"><p>Showing {occurrences.length} of {data.totalOccurrenceCount} exact occurrences. Summaries use the full scope.</p><button type="button" disabled={loadingMore || !onLoadMore} onClick={onLoadMore}>{loadingMore ? 'Loading…' : `Load next ${Math.min(data.evidenceLimit, data.totalOccurrenceCount - occurrences.length)}`}</button></div>}</section>
+    {selectedOccurrence && <OccurrenceEvidenceDrawer occurrence={selectedOccurrence} classificationVersion={data.classificationVersion} evidence={drawerTelemetry} onClose={closeOccurrence} />}
   </>
 }
 
-export function OperationalActivityExplorer({ fromUtc, toUtc, pressKey, analytics: _analytics }: { fromUtc: string; toUtc: string; pressKey?: RadiusPressKey; analytics: OperationalAnalytics }) {
+export function OperationalActivityExplorer({ fromUtc, toUtc, pressKey, analytics: _analytics, overview }: { fromUtc: string; toUtc: string; pressKey?: RadiusPressKey; analytics: OperationalAnalytics; overview: RadiusOverviewModel }) {
   const [data, setData] = useState<ActivityAnalysis>()
   const [occurrences, setOccurrences] = useState<ActivityOccurrence[]>([])
   const [selection, setSelection] = useState<ActivitySelection>(() => activityFromUrl() ?? { level: 'radius_state', key: 'B', label: 'Bad' })
@@ -362,5 +389,5 @@ export function OperationalActivityExplorer({ fromUtc, toUtc, pressKey, analytic
     void getActivityAnalysis(fromUtc, toUtc, selection, pressKey, controller.signal, occurrences.length).then((page) => { if (!controller.signal.aborted) setOccurrences((current) => [...current, ...page.occurrences.filter((item) => !current.some(({ occurrenceId }) => occurrenceId === item.occurrenceId))]) }).catch(() => { if (!controller.signal.aborted) setError(true) }).finally(() => { if (!controller.signal.aborted) setLoadingMore(false) })
   }
   const activeChoice = data?.catalog.find((item) => item.level === selection.level && item.key === selection.key) ?? data?.selection
-  return <div className="activity-explorer">{data && activeChoice && <GuidedActivityPicker catalog={data.catalog} selected={activeChoice} onSelect={choose} />}{loading && <div className="scope-progress" role="status"><i />Updating activity analysis…</div>}{error && <p className="message message--warning">Activity analysis could not be loaded for this selection. Previously loaded evidence remains visible.</p>}{data && <OperationalActivityExplorerView data={data} analytics={_analytics} occurrences={occurrences} loadingMore={loadingMore} onLoadMore={loadMore} />}</div>
+  return <div className="activity-explorer">{data && activeChoice && <GuidedActivityPicker catalog={data.catalog} selected={activeChoice} onSelect={choose} />}{loading && <div className="scope-progress" role="status"><i />Updating activity analysis…</div>}{error && <p className="message message--warning">Activity analysis could not be loaded for this selection. Previously loaded evidence remains visible.</p>}{data && <OperationalActivityExplorerView data={data} analytics={_analytics} overview={overview} occurrences={occurrences} loadingMore={loadingMore} onLoadMore={loadMore} />}</div>
 }
