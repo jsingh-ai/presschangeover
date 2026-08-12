@@ -24,7 +24,7 @@ const activity = {
   semanticBreakdown: [{ key: 'MAINTENANCE', label: 'Maintenance', level: 'process_family', durationSeconds: 49_200, percentage: 100 }],
   trend: [{ bucketStartUtc: '2026-08-01T00:00:00.000Z', durationSeconds: 7_200, occurrenceCount: 5 }], trendBucket: 'day',
   durationDistribution: [{ key: 'under_5m', label: '< 5m', occurrenceCount: 7 }, { key: '5_15m', label: '5–15m', occurrenceCount: 20 }, { key: '15_30m', label: '15–30m', occurrenceCount: 12 }, { key: '30_60m', label: '30–60m', occurrenceCount: 7 }, { key: 'over_60m', label: '> 60m', occurrenceCount: 1 }],
-  occurrences: [{ occurrenceId: 'o1', pressKey: 'press11', displayName: 'Press 11', startUtc: '2026-08-01T01:00:00.000Z', endUtc: '2026-08-01T01:12:00.000Z', durationSeconds: 720, eventType: 'B', radiusStateLabel: 'Bad', operationalGroupKey: 'MAINTENANCE_INTERVENTION', operationalGroupName: 'Maintenance Intervention', processFamilyKey: 'MAINTENANCE', processFamilyName: 'Maintenance', exactIdentities: [{ identity: 'B\u001f123\u001fMaintenance', eventType: 'B', statusCode: '123', statusDescription: 'Maintenance', durationSeconds: 720, needsClassification: false }] }],
+  occurrences: [{ occurrenceId: 'o1', pressKey: 'press11', displayName: 'Press 11', startUtc: '2026-08-01T01:00:00.000Z', endUtc: '2026-08-01T01:12:00.000Z', durationSeconds: 720, eventType: 'B', radiusStateLabel: 'Bad', operationalGroupKey: 'MAINTENANCE_INTERVENTION', operationalGroupName: 'Maintenance Intervention', processFamilyKey: 'MAINTENANCE', processFamilyName: 'Maintenance', segments: [{ segmentId: 's1', startUtc: '2026-08-01T01:00:00.000Z', endUtc: '2026-08-01T01:12:00.000Z', durationSeconds: 720, eventType: 'B', statusCode: '123', statusDescription: 'Maintenance', operationalGroupKey: 'MAINTENANCE_INTERVENTION', operationalGroupName: 'Maintenance Intervention', processFamilyKey: 'MAINTENANCE', processFamilyName: 'Maintenance', needsClassification: false }], exactIdentities: [{ identity: 'B\u001f123\u001fMaintenance', eventType: 'B', statusCode: '123', statusDescription: 'Maintenance', durationSeconds: 720, needsClassification: false }] }],
   totalOccurrenceCount: 47, evidenceOffset: 0, evidenceLimit: 100,
 } as ActivityAnalysis
 
@@ -45,6 +45,10 @@ describe('one-activity explorer presentation', () => {
     assert.match(html, /Radius Coverage/)
     assert.match(html, /Classification Coverage/)
     assert.match(html, /Load next 46/)
+    assert.match(html, /Focused occurrence/)
+    assert.match(html, /Operational Group/)
+    assert.match(html, /Process Family/)
+    assert.match(html, /Open full evidence/)
     assert.doesNotMatch(html, /Stops &amp; Recovery/)
   })
 

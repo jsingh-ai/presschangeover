@@ -584,6 +584,20 @@ export interface ActivityOccurrence {
   operationalGroupName: string
   processFamilyKey: string
   processFamilyName: string
+  segments: Array<{
+    segmentId: string
+    startUtc: string
+    endUtc: string
+    durationSeconds: number
+    eventType: string
+    statusCode: string | null
+    statusDescription: string
+    operationalGroupKey: string
+    operationalGroupName: string
+    processFamilyKey: string
+    processFamilyName: string
+    needsClassification: boolean
+  }>
   exactIdentities: Array<{ identity: string; eventType: string; statusCode: string | null; statusDescription: string; durationSeconds: number; needsClassification: boolean }>
 }
 

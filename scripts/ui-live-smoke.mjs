@@ -154,6 +154,33 @@ const longStart = new Date(customEnd.getTime() - 4 * 60 * 60_000)
 await navigate(routeUrl('/overview', { preset: 'custom', fromUtc: shortStart.toISOString(), toUtc: customEnd.toISOString(), press: 'press5' }), routes[0].ready, 'short custom range')
 await waitFor(`Boolean(document.querySelector('#press-summary-title')) && !document.querySelector('.scope-progress')`, 'short selected press range')
 report.interactions.shortRange = await evaluate(`({ limitation: document.body.textContent.includes('longer than two hours'), telemetryQuality: document.querySelector('.timeline-quality-row')?.textContent, timeline: Boolean(document.querySelector('.synchronized-timeline')) })`)
+await waitFor(`(() => {
+  const timeline = document.querySelector('.overview-gantt .synchronized-timeline')
+  if (!timeline) return false
+  const labels = [...timeline.querySelectorAll('[aria-label]')].map((item) => item.getAttribute('aria-label'))
+  return labels.some((label) => label === 'Radius recorded intervals')
+    && labels.some((label) => label === 'Operational Group intervals')
+    && labels.some((label) => label === 'Process Family intervals')
+    && labels.some((label) => label === 'Physical Motion intervals')
+    && labels.some((label) => label?.startsWith('Actual Speed.'))
+    && labels.some((label) => label === 'Context changes event markers')
+    && labels.some((label) => label === 'Physical Events event markers')
+})()`, 'Overview full synchronized telemetry tracks')
+report.interactions.overviewTelemetry = await evaluate(`(() => {
+  const timeline = document.querySelector('.overview-gantt .synchronized-timeline')
+  const labels = [...timeline.querySelectorAll('[aria-label]')].map((item) => item.getAttribute('aria-label'))
+  return {
+    context: ['Job', 'Order', 'Recipe', 'Customer', 'Material', 'Roll'].filter((name) => labels.includes(name + ' intervals')),
+    contextMarkers: labels.includes('Context changes event markers'),
+    radius: labels.includes('Radius recorded intervals'),
+    group: labels.includes('Operational Group intervals'),
+    family: labels.includes('Process Family intervals'),
+    motion: labels.includes('Physical Motion intervals'),
+    speed: labels.some((label) => label?.startsWith('Actual Speed.')),
+    physicalEvents: labels.includes('Physical Events event markers'),
+    eventMarkerCount: timeline.querySelectorAll('.synchronized-timeline__event').length,
+  }
+})()`)
 
 await evaluate(`document.querySelector('.overview-selected-period .primary-action')?.click()`)
 await waitFor(`Boolean(document.querySelector('.evidence-drawer-shell'))`, 'Overview exact Evidence Drawer')
@@ -169,12 +196,79 @@ if (!report.interactions.longRange.limitation) throw new Error('Long-range telem
 await navigate(routeUrl('/operational-analysis'), routes[1].ready, 'Operational occurrence evidence')
 const occurrence = await evaluate(`Boolean(document.querySelector('.activity-evidence tbody tr'))`)
 if (occurrence) {
-  await evaluate(`(() => { const row = document.querySelector('.activity-evidence tbody tr'); row?.focus(); row?.click() })()`)
+  await waitFor(`Boolean(document.querySelector('.physical-signature-summary .synchronized-timeline[aria-label*="focused occurrence synchronized evidence"]'))`, 'default focused occurrence timeline')
+  await waitFor(`(() => {
+    const timeline = document.querySelector('.physical-signature-summary .synchronized-timeline[aria-label*="focused occurrence synchronized evidence"]')
+    const labels = [...timeline.querySelectorAll('[aria-label]')].map((item) => item.getAttribute('aria-label'))
+    return labels.includes('Radius recorded intervals')
+      && labels.includes('Operational Group intervals')
+      && labels.includes('Process Family intervals')
+      && labels.includes('Physical Motion intervals')
+      && labels.some((label) => label?.startsWith('Actual Speed.'))
+      && labels.includes('Physical Events event markers')
+  })()`, 'focused occurrence full synchronized telemetry tracks')
+  const firstFocus = await evaluate(`document.querySelector('.activity-evidence tbody tr[aria-pressed="true"]')?.getAttribute('aria-label')`)
+  const occurrenceCount = await evaluate(`document.querySelectorAll('.activity-evidence tbody tr').length`)
+  if (occurrenceCount > 1) {
+    await evaluate(`document.querySelectorAll('.activity-evidence tbody tr')[1]?.click()`)
+    await waitFor(`document.querySelectorAll('.activity-evidence tbody tr')[1]?.getAttribute('aria-pressed') === 'true'`, 'occurrence focus switching')
+  }
+  report.interactions.operationalTelemetry = await evaluate(`(() => {
+    const timeline = document.querySelector('.physical-signature-summary .synchronized-timeline[aria-label*="focused occurrence synchronized evidence"]')
+    const labels = [...timeline.querySelectorAll('[aria-label]')].map((item) => item.getAttribute('aria-label'))
+    return {
+      focusedLabel: document.querySelector('.physical-signature-summary .eyebrow')?.textContent,
+      initialFocus: ${JSON.stringify(firstFocus)},
+      currentFocus: document.querySelector('.activity-evidence tbody tr[aria-pressed="true"]')?.getAttribute('aria-label'),
+      radius: labels.includes('Radius recorded intervals'),
+      group: labels.includes('Operational Group intervals'),
+      family: labels.includes('Process Family intervals'),
+      motion: labels.includes('Physical Motion intervals'),
+      speed: labels.some((label) => label?.startsWith('Actual Speed.')),
+      physicalEvents: labels.includes('Physical Events event markers'),
+      summary: document.querySelector('.physical-signature-facts')?.textContent,
+    }
+  })()`)
+  await evaluate(`document.querySelector('.physical-signature-summary .primary-action')?.click()`)
   await waitFor(`Boolean(document.querySelector('.evidence-drawer-shell'))`, 'occurrence drawer')
   report.interactions.occurrenceDrawer = await evaluate(`({ exact: document.body.textContent.includes('Radius recorded'), semantic: document.body.textContent.includes('ProcessIntelligence'), physical: document.body.textContent.includes('Physical telemetry evidence') })`)
   await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
   await waitFor(`!document.querySelector('.evidence-drawer-shell')`, 'occurrence drawer close')
 }
+
+await navigate(routeUrl('/patterns-episodes'), routes[2].ready, 'Pattern Run evidence')
+await waitFor(`Boolean(document.querySelector('tr[aria-label^="Open evidence for"]'))`, 'matched Run row')
+await evaluate(`document.querySelector('tr[aria-label^="Open evidence for"]')?.click()`)
+await waitFor(`Boolean(document.querySelector('.evidence-drawer-shell'))`, 'Run Evidence Drawer')
+await waitFor(`(() => {
+  const drawer = document.querySelector('.evidence-drawer-shell')
+  const labels = [...drawer.querySelectorAll('[aria-label]')].map((item) => item.getAttribute('aria-label'))
+  return labels.includes('Radius recorded intervals')
+    && labels.includes('Operational Group intervals')
+    && labels.includes('Process Family intervals')
+    && labels.includes('Physical Motion intervals')
+    && labels.some((label) => label?.startsWith('Actual Speed.'))
+    && labels.includes('Context changes event markers')
+    && labels.includes('Physical Events event markers')
+})()`, 'unified Run telemetry timeline')
+report.interactions.runTelemetry = await evaluate(`(() => {
+  const drawer = document.querySelector('.evidence-drawer-shell')
+  const labels = [...drawer.querySelectorAll('[aria-label]')].map((item) => item.getAttribute('aria-label'))
+  return {
+    timelineCount: drawer.querySelectorAll('.synchronized-timeline').length,
+    focusedLongRun: drawer.textContent.includes('Focused two-hour telemetry window'),
+    context: ['Job', 'Order', 'Recipe', 'Customer', 'Material', 'Roll'].filter((name) => labels.includes(name + ' intervals')),
+    contextMarkers: labels.includes('Context changes event markers'),
+    radius: labels.includes('Radius recorded intervals'),
+    group: labels.includes('Operational Group intervals'),
+    family: labels.includes('Process Family intervals'),
+    motion: labels.includes('Physical Motion intervals'),
+    speed: labels.some((label) => label?.startsWith('Actual Speed.')),
+    physicalEvents: labels.includes('Physical Events event markers'),
+  }
+})()`)
+await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
+await waitFor(`!document.querySelector('.evidence-drawer-shell')`, 'Run drawer close')
 
 await navigate(routeUrl('/intelligent-search', { q: 'Make Ready' }), `Boolean(document.querySelector('.search-result-list'))`, 'Search results')
 for (const [key, selector, path] of [

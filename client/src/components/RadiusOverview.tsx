@@ -10,9 +10,9 @@ import type {
   RadiusPressKey,
 } from '../types/api'
 import { formatPlantDateTime } from '../time-ranges'
-import { getPressMotion, getPressSpeed, getPressTelemetryCapabilities, getProductionContext } from '../api/process-intelligence-api'
-import type { PressMotionEvidence, PressSpeedEvidence, PressTelemetryCapabilities, ProductionContextEvidence, ProductionContextField } from '../types/evidence'
-import { SynchronizedTimeline, type TimelineIntervalItem } from './SynchronizedTimeline'
+import type { TimelineIntervalItem, TimelineIntervalTrack } from './SynchronizedTimeline'
+import { usePressTelemetryEvidence } from './TelemetryEvidenceTimeline'
+import { UnifiedProcessTimeline } from './UnifiedProcessTimeline'
 
 interface RadiusOverviewProps {
   overview: RadiusOverviewModel
@@ -22,7 +22,7 @@ interface RadiusOverviewProps {
 
 interface TimelineRange {
   id: string
-  layer: 'radius' | 'process'
+  layer: 'radius' | 'group' | 'family'
   startUtc: string
   endUtc: string
   durationSeconds: number
@@ -182,11 +182,11 @@ function RankingTable({ presses }: { presses: OverviewPressAllocation[] }) {
   </section>
 }
 
-function mergeTimeline(intervals: OverviewTimelineInterval[], layer: 'radius' | 'process'): TimelineRange[] {
+function mergeTimeline(intervals: OverviewTimelineInterval[], layer: TimelineRange['layer']): TimelineRange[] {
   const merged: TimelineRange[] = []
   for (const interval of intervals) {
-    const key = interval.isUnavailable ? 'unavailable' : layer === 'radius' ? interval.eventType : interval.operationalGroupKey
-    const label = interval.isUnavailable ? 'Data unavailable' : layer === 'radius' ? interval.radiusStateLabel : interval.operationalGroupLabel
+    const key = interval.isUnavailable ? 'unavailable' : layer === 'radius' ? interval.eventType : layer === 'group' ? interval.operationalGroupKey : interval.processFamilyKey
+    const label = interval.isUnavailable ? 'Data unavailable' : layer === 'radius' ? interval.radiusStateLabel : layer === 'group' ? interval.operationalGroupLabel : interval.processFamilyLabel ?? 'Needs Classification'
     const previous = merged.at(-1)
     if (previous && previous.endUtc === interval.startUtc && previous.id.startsWith(`${layer}:${key}:`)) {
       previous.endUtc = interval.endUtc
@@ -216,29 +216,12 @@ function compositionTitle(range: TimelineRange, observedSeconds: number): string
   if (range.isUnavailable) return `DATA UNAVAILABLE\n${formatPlantDateTime(range.startUtc)} – ${formatPlantDateTime(range.endUtc)}\n${duration(range.durationSeconds)}\nNo Radius observations were available. Machine state is unknown.`
   const totals = new Map<string, number>()
   for (const interval of range.intervals) {
-    const label = range.layer === 'radius' ? interval.operationalGroupLabel : interval.radiusStateLabel
+    const label = range.layer === 'radius' ? interval.operationalGroupLabel : range.layer === 'group' ? interval.processFamilyLabel ?? 'Needs Classification' : interval.operationalGroupLabel
     totals.set(label, (totals.get(label) ?? 0) + interval.durationSeconds)
   }
   const composition = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([label, seconds]) => `${label}: ${duration(seconds)}`).join('\n')
   const familyLabels = [...new Set(range.intervals.map(({ processFamilyLabel }) => processFamilyLabel).filter(Boolean))].slice(0, 3).join(', ')
-  return `${range.label.toUpperCase()}\n${formatPlantDateTime(range.startUtc)} – ${formatPlantDateTime(range.endUtc)}\n${duration(range.durationSeconds)} · ${(range.durationSeconds / Math.max(1, observedSeconds) * 100).toFixed(1)}% of observed time\n${range.layer === 'radius' ? 'Process composition' : 'Radius state'}:\n${composition}${familyLabels ? `\nProcess families: ${familyLabels}` : ''}`
-}
-
-const contextLabels: Record<ProductionContextField, string> = { job: 'Job', order: 'Order', recipe: 'Recipe', customer: 'Customer', material: 'Material', roll: 'Roll' }
-
-function contextTracks(context: ProductionContextEvidence | undefined) {
-  if (!context) return []
-  const end = Date.parse(context.toUtc)
-  return (Object.keys(contextLabels) as ProductionContextField[]).flatMap((field) => {
-    const evidence = context.fields[field]
-    if (evidence.capabilityState !== 'SUPPORTED') return []
-    const values = [
-      ...(evidence.seed ? [{ atUtc: context.fromUtc, value: evidence.seed.value }] : []),
-      ...evidence.changes.map((change) => ({ atUtc: change.observedAtUtc, value: change.value })),
-    ].sort((a, b) => Date.parse(a.atUtc) - Date.parse(b.atUtc))
-    if (!values.length) return []
-    return [{ id: `context-${field}`, label: contextLabels[field], intervals: values.map((value, index) => ({ id: `context:${field}:${value.atUtc}:${index}`, startUtc: value.atUtc, endUtc: new Date(Math.max(Date.parse(value.atUtc) + 1_000, Math.min(end, Date.parse(values[index + 1]?.atUtc ?? context.toUtc)))).toISOString(), label: String(value.value), details: `${contextLabels[field]} context: ${String(value.value)}\nObserved from ${formatPlantDateTime(value.atUtc)} CT`, className: 'context-timeline-value' })) }]
-  })
+  return `${range.label.toUpperCase()}\n${formatPlantDateTime(range.startUtc)} – ${formatPlantDateTime(range.endUtc)}\n${duration(range.durationSeconds)} · ${(range.durationSeconds / Math.max(1, observedSeconds) * 100).toFixed(1)}% of observed time\n${range.layer === 'radius' ? 'Operational Group composition' : range.layer === 'group' ? 'Process Family composition' : 'Operational Group composition'}:\n${composition}${familyLabels ? `\nProcess families: ${familyLabels}` : ''}`
 }
 
 function SelectedPeriod({ range, observedSeconds, onInspect }: { range: TimelineRange; observedSeconds: number; onInspect?(): void }) {
@@ -258,49 +241,30 @@ function SelectedPeriod({ range, observedSeconds, onInspect }: { range: Timeline
 
 function SynchronizedGantt({ overview, press, onInspectInterval }: { overview: RadiusOverviewModel; press: OverviewPressAllocation; onInspectInterval?(interval: OverviewTimelineInterval): void }) {
   const radiusRanges = useMemo(() => mergeTimeline(press.timelineIntervals, 'radius'), [press.timelineIntervals])
-  const processRanges = useMemo(() => mergeTimeline(press.timelineIntervals, 'process'), [press.timelineIntervals])
+  const groupRanges = useMemo(() => mergeTimeline(press.timelineIntervals, 'group'), [press.timelineIntervals])
+  const familyRanges = useMemo(() => mergeTimeline(press.timelineIntervals, 'family'), [press.timelineIntervals])
   const defaultRange = radiusRanges.find(({ eventType }) => eventType === press.largestNonProductionRadiusStateEventType) ?? radiusRanges[0]
   const [selected, setSelected] = useState<TimelineRange | undefined>(defaultRange)
-  const [telemetryCapabilities, setTelemetryCapabilities] = useState<PressTelemetryCapabilities>()
-  const [context, setContext] = useState<ProductionContextEvidence>()
-  const [motion, setMotion] = useState<PressMotionEvidence>()
-  const [speed, setSpeed] = useState<PressSpeedEvidence>()
-  const [telemetryUnavailable, setTelemetryUnavailable] = useState(false)
   useEffect(() => setSelected(defaultRange), [press.pressKey, overview.fromUtc, overview.toUtc])
-  const byId = new Map([...radiusRanges, ...processRanges].map((range) => [range.id, range]))
-  const item = (range: TimelineRange, layer: 'radius' | 'process'): TimelineIntervalItem => ({
+  const byId = new Map([...radiusRanges, ...groupRanges, ...familyRanges].map((range) => [range.id, range]))
+  const item = (range: TimelineRange): TimelineIntervalItem => ({
     id: range.id,
     startUtc: range.startUtc,
     endUtc: range.endUtc,
     label: range.label,
     details: compositionTitle(range, press.observedSeconds),
     unavailable: range.isUnavailable,
-    className: `overview-gantt-segment overview-gantt-segment--${layer} overview-gantt-segment--${stateClass(layer === 'radius' ? range.eventType : range.isUnavailable ? null : 'other')}`,
-    style: layer === 'process' ? processStyle(range) : undefined,
+    className: `overview-gantt-segment overview-gantt-segment--${range.layer} overview-gantt-segment--${stateClass(range.layer === 'radius' ? range.eventType : range.isUnavailable ? null : 'other')}`,
+    style: range.layer === 'group' ? processStyle(range) : undefined,
   })
   const longRange = Date.parse(overview.toUtc) - Date.parse(overview.fromUtc) > 2 * 60 * 60 * 1_000
-  useEffect(() => {
-    setTelemetryCapabilities(undefined); setContext(undefined); setMotion(undefined); setSpeed(undefined); setTelemetryUnavailable(false)
-    if (longRange) return
-    const controller = new AbortController()
-    void getPressTelemetryCapabilities(press.pressKey, controller.signal).then(async (capabilities) => {
-      if (controller.signal.aborted) return
-      setTelemetryCapabilities(capabilities)
-      const supported = (id: string) => capabilities.capabilities.some((item) => item.canonicalId === id && item.state === 'SUPPORTED')
-      const requests: Promise<void>[] = []
-      if (capabilities.capabilities.some((entry) => entry.canonicalId.startsWith('production.') && entry.state === 'SUPPORTED')) requests.push(getProductionContext(press.pressKey, overview.fromUtc, overview.toUtc, controller.signal).then(setContext))
-      if (supported('physical.motion_state')) requests.push(getPressMotion(press.pressKey, overview.fromUtc, overview.toUtc, controller.signal).then(setMotion))
-      if (supported('machine.speed.actual')) requests.push(getPressSpeed(press.pressKey, overview.fromUtc, overview.toUtc, controller.signal).then(setSpeed))
-      const results = await Promise.allSettled(requests)
-      if (!controller.signal.aborted && results.some(({ status }) => status === 'rejected')) setTelemetryUnavailable(true)
-    }).catch(() => { if (!controller.signal.aborted) setTelemetryUnavailable(true) })
-    return () => controller.abort()
-  }, [press.pressKey, overview.fromUtc, overview.toUtc, longRange])
-  const motionItems = motion?.segments.map((segment, index) => ({ id: `motion:${index}:${segment.fromUtc}`, startUtc: segment.fromUtc, endUtc: segment.toUtc, label: segment.state, details: `Physical Motion: ${segment.state}\n${formatPlantDateTime(segment.fromUtc)} – ${formatPlantDateTime(segment.toUtc)} CT`, unavailable: segment.state === 'UNKNOWN', className: `physical-motion physical-motion--${segment.state.toLowerCase()}` })) ?? []
-  const evidenceTracks = [...contextTracks(context), { id: 'radius', label: 'Radius recorded', intervals: radiusRanges.map((range) => item(range, 'radius')) }, { id: 'process', label: 'ProcessIntelligence', intervals: processRanges.map((range) => item(range, 'process')) }, ...(motionItems.length ? [{ id: 'motion', label: 'Physical Motion', intervals: motionItems }] : [])]
-  const speedCapability = telemetryCapabilities?.capabilities.find(({ canonicalId }) => canonicalId === 'machine.speed.actual')
-  const motionCapability = telemetryCapabilities?.capabilities.find(({ canonicalId }) => canonicalId === 'physical.motion_state')
-  return <section className="panel overview-section overview-gantt" aria-labelledby="overview-gantt-title"><div className="overview-section-heading"><div><p className="eyebrow">Complete selected period</p><h2 id="overview-gantt-title">Synchronized process evidence</h2><p>Job/context, Radius, ProcessIntelligence, Physical Motion, and Actual Speed share one wall-clock viewport when supported.</p></div></div>{longRange && <p className="telemetry-range-note">This range is longer than two hours. Radius and semantic chronology remain available; select an interval to load bounded physical telemetry.</p>}{!longRange && telemetryUnavailable && <p className="message message--warning">Some telemetry is temporarily unavailable. Radius and ProcessIntelligence chronology remain available.</p>}<SynchronizedTimeline fromUtc={overview.fromUtc} toUtc={overview.toUtc} ariaLabel={`${press.displayName} synchronized evidence`} selectedId={selected?.id} intervalTracks={evidenceTracks} numericTracks={speed || speedCapability ? [{ id: 'speed', label: 'Actual Speed', samples: speed?.actual.samples ?? [], unavailableLabel: speedCapability?.state === 'SUPPORTED' ? 'Supported, but no samples in range' : speedCapability?.state === 'UNSUPPORTED' ? 'Unsupported for this press' : 'Capability unknown or temporarily unavailable' }] : []} onSelect={(selectedItem) => setSelected(byId.get(selectedItem.id) ?? selected)} />{!longRange && telemetryCapabilities && <div className="timeline-quality-row"><span>Telemetry metadata <b>{telemetryCapabilities.metadataStatus}</b></span><span>Physical Motion <b>{motionCapability?.state ?? 'UNKNOWN'}</b></span><span>Actual Speed <b>{speedCapability?.state ?? 'UNKNOWN'}</b></span></div>}{selected && <SelectedPeriod range={selected} observedSeconds={press.observedSeconds} onInspect={selected.isUnavailable || !onInspectInterval ? undefined : () => onInspectInterval(selected.intervals[0]!)} />}</section>
+  const telemetry = usePressTelemetryEvidence(press.pressKey, overview.fromUtc, overview.toUtc, { enabled: !longRange, padShortRange: false })
+  const speedCapability = telemetry.capabilities?.capabilities.find(({ canonicalId }) => canonicalId === 'machine.speed.actual')
+  const motionCapability = telemetry.capabilities?.capabilities.find(({ canonicalId }) => canonicalId === 'physical.motion_state')
+  const radiusTrack: TimelineIntervalTrack = { id: 'radius', label: 'Radius recorded', intervals: radiusRanges.map(item) }
+  const groupTrack: TimelineIntervalTrack = { id: 'operational-group', label: 'Operational Group', intervals: groupRanges.map(item) }
+  const familyTrack: TimelineIntervalTrack = { id: 'process-family', label: 'Process Family', intervals: familyRanges.map(item) }
+  return <section className="panel overview-section overview-gantt" aria-labelledby="overview-gantt-title"><div className="overview-section-heading"><div><p className="eyebrow">Complete selected period</p><h2 id="overview-gantt-title">Synchronized process evidence</h2><p>Context, operator evidence, semantic interpretation, and physical evidence share one wall-clock viewport when supported.</p></div></div>{longRange && <p className="telemetry-range-note">This range is longer than two hours. Radius, Operational Group, and Process Family chronology remain available; select an interval to load bounded physical telemetry in exact evidence.</p>}{!longRange && telemetry.error && <p className="message message--warning">Some telemetry is temporarily unavailable. Radius and ProcessIntelligence chronology remain available.</p>}<UnifiedProcessTimeline fromUtc={overview.fromUtc} toUtc={overview.toUtc} ariaLabel={`${press.displayName} synchronized evidence`} selectedId={selected?.id} radiusTrack={radiusTrack} groupTrack={groupTrack} familyTrack={familyTrack} telemetry={longRange ? undefined : telemetry} onSelect={(selectedItem) => setSelected(byId.get(selectedItem.id) ?? selected)} />{!longRange && telemetry.capabilities && <div className="timeline-quality-row"><span>Telemetry metadata <b>{telemetry.capabilities.metadataStatus}</b></span><span>Physical Motion <b>{motionCapability?.state ?? 'UNKNOWN'}</b></span><span>Actual Speed <b>{speedCapability?.state ?? 'UNKNOWN'}</b></span><span>Physical event categories <b>{telemetry.physical?.requestedCategories.length ?? 0}</b></span></div>}{selected && <SelectedPeriod range={selected} observedSeconds={press.observedSeconds} onInspect={selected.isUnavailable || !onInspectInterval ? undefined : () => onInspectInterval(selected.intervals[0]!)} />}</section>
 }
 
 function Coverage({ data, press }: { data: NonNullable<RadiusOverviewModel['decisionSupport']>; press?: OverviewPressAllocation }) {

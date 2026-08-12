@@ -68,12 +68,13 @@ describe('shared evidence foundations', () => {
   })
 
   it('gates telemetry detail calls from capability metadata and degrades requests independently', () => {
-    const source = readFileSync(new URL('../src/components/PhysicalEvidencePanel.tsx', import.meta.url), 'utf8')
+    const source = readFileSync(new URL('../src/components/TelemetryEvidenceTimeline.tsx', import.meta.url), 'utf8')
+    const panelSource = readFileSync(new URL('../src/components/PhysicalEvidencePanel.tsx', import.meta.url), 'utf8')
     assert.match(source, /item\.state === 'SUPPORTED'/)
     assert.match(source, /if \(supported\('machine\.speed\.actual'\)\)/)
     assert.match(source, /if \(supported\('physical\.motion_state'\)\)/)
     assert.match(source, /Promise\.allSettled\(requests\)/)
-    assert.match(source, /Some telemetry evidence could not be loaded/)
+    assert.match(panelSource, /Some telemetry evidence could not be loaded/)
   })
 
   it('restores activity, pattern, and search state through browser navigation', () => {

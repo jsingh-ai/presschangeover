@@ -122,6 +122,17 @@ function buildOccurrence(segments: RadiusStateSegment[], index: number): Activit
     radiusStateLabel: [...states].join(', '), operationalGroupKey: semantic.groupKey,
     operationalGroupName: semantic.groupName, processFamilyKey: semantic.familyKey,
     processFamilyName: semantic.familyName,
+    segments: segments.map((segment, segmentIndex) => {
+      const resolved = classified(segment)
+      return {
+        segmentId: `${primary.pressKey}:${segment.startUtc}:${segmentIndex}`,
+        startUtc: segment.startUtc, endUtc: segment.endUtc, durationSeconds: segment.durationSeconds,
+        eventType: segment.eventType, statusCode: segment.statusCode, statusDescription: segment.statusDescription,
+        operationalGroupKey: resolved.groupKey, operationalGroupName: resolved.groupName,
+        processFamilyKey: resolved.familyKey, processFamilyName: resolved.familyName,
+        needsClassification: resolved.needsClassification,
+      }
+    }),
     exactIdentities: [...identities.values()].sort((a, b) => b.durationSeconds - a.durationSeconds || a.statusDescription.localeCompare(b.statusDescription)),
   }
 }

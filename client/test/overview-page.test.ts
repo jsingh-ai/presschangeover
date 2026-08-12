@@ -182,8 +182,8 @@ describe('Radius state hierarchy Overview', () => {
   it('provides linked hover/focus and persistent click selection behavior', () => {
     const source = readFileSync(new URL('../src/components/SynchronizedTimeline.tsx', import.meta.url), 'utf8')
     assert.match(source, /overlap\(item, hovered\)/)
-    assert.match(source, /onMouseEnter=\{\(\) => setHovered\(item\)\}/)
-    assert.match(source, /onFocus=\{\(\) => setHovered\(item\)\}/)
+    assert.match(source, /onMouseEnter=\{\(\) => focusInterval\(item\)\}/)
+    assert.match(source, /onFocus=\{\(\) => focusInterval\(item\)\}/)
     assert.match(source, /onClick=\{\(\) => onSelect\?\.\(item, track\)\}/)
     assert.match(source, /selectedId === item\.id/)
   })
