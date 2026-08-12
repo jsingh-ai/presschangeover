@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import { getActivityAnalysis } from '../api/process-intelligence-api'
 import { formatDuration } from '../episode-presentation'
 import { formatPlantDateTime } from '../time-ranges'
-import type { ActivityAnalysis, ActivityCatalogItem, ActivityLevel, ActivityOccurrence, ActivitySelection, OperationalAnalytics, OverviewTimelineInterval, RadiusOverview as RadiusOverviewModel, RadiusPressKey } from '../types/api'
+import type { ActivityAnalysis, ActivityCatalogItem, ActivityLevel, ActivityOccurrence, ActivitySelection, OperationalAnalytics, OverviewTimelineInterval, RadiusPressKey } from '../types/api'
 import type { TimedNumericSample } from '../types/evidence'
 import { EvidenceDrawerShell } from './EvidenceDrawerShell'
 import { PhysicalEvidencePanel } from './PhysicalEvidencePanel'
@@ -28,6 +28,8 @@ function updateActivityUrl(selection: ActivitySelection, mode: 'push' | 'replace
   const url = new URL(window.location.href)
   url.searchParams.set('activityLevel', selection.level)
   url.searchParams.set('activityKey', selection.key)
+  if (selection.operationalGroupKey) url.searchParams.set('activityGroup', selection.operationalGroupKey)
+  else url.searchParams.delete('activityGroup')
   url.searchParams.delete('evidence')
   url.searchParams.delete('occurrenceId')
   window.history[mode === 'push' ? 'pushState' : 'replaceState']({}, '', `${url.pathname}?${url.searchParams}`)
@@ -38,7 +40,8 @@ function activityFromUrl(): ActivitySelection | undefined {
   const query = new URLSearchParams(window.location.search)
   const level = query.get('activityLevel')
   const key = query.get('activityKey')
-  return key && levelOrder.includes(level as ActivityLevel) ? { level: level as ActivityLevel, key, label: key } : undefined
+  const operationalGroupKey = query.get('activityGroup')
+  return key && levelOrder.includes(level as ActivityLevel) ? { level: level as ActivityLevel, key, label: key, ...(operationalGroupKey ? { operationalGroupKey } : {}) } : undefined
 }
 
 export function ActivityPicker({ catalog, selected, prompt = 'Search one activity', onSelect }: { catalog: ActivityCatalogItem[]; selected?: ActivityCatalogItem; prompt?: string; onSelect(item: ActivityCatalogItem): void }) {
@@ -53,7 +56,7 @@ export function ActivityPicker({ catalog, selected, prompt = 'Search one activit
     <div className="activity-picker__input"><input id="activity-search" value={query} placeholder={selected?.label ?? 'Type a state, group, family, or exact Radius status'} autoComplete="off" onFocus={() => setOpen(true)} onChange={(event) => { setQuery(event.target.value); setOpen(true) }} aria-expanded={open} aria-controls="activity-results" />{selected && <span>{levelLabels[selected.level]}</span>}</div>
     {open && <div id="activity-results" className="activity-picker__results">{levelOrder.map((level) => {
       const values = matches.filter((item) => item.level === level)
-      return values.length ? <section key={level}><h3>{levelLabels[level]}</h3>{values.map((item) => <button type="button" key={`${item.level}:${item.key}`} onClick={() => { onSelect(item); setQuery(''); setOpen(false) }}><strong>{item.label}</strong>{item.description && <small>{item.description}</small>}{item.needsClassification && <em>Needs Classification</em>}</button>)}</section> : null
+      return values.length ? <section key={level}><h3>{levelLabels[level]}</h3>{values.map((item) => <button type="button" key={`${item.level}:${item.operationalGroupKey ?? ''}:${item.key}`} onClick={() => { onSelect(item); setQuery(''); setOpen(false) }}><strong>{item.label}</strong>{item.level === 'process_family' && item.operationalGroupName && <small>{item.operationalGroupName}</small>}{item.description && <small>{item.description}</small>}{item.needsClassification && <em>Needs Classification</em>}</button>)}</section> : null
     })}<button type="button" className="activity-picker__close" onClick={() => setOpen(false)}>Close results</button></div>}
     <p>Analyze one activity here. Use Pattern Builder for activities that occur together or in sequence.</p>
   </div>
@@ -85,11 +88,11 @@ export function guidedActivityOptions(catalog: ActivityCatalogItem[], level: Act
   }
   if (level === 'radius_state') return catalog.filter((item) => item.level === level)
   if (level === 'exact_status') return exactStatuses.filter(supportsUpstreamPath)
-  return catalog.filter((item) => item.level === level && exactStatuses.some((status) => supportsUpstreamPath(status) && (level === 'operational_group' ? status.operationalGroupKey === item.key : status.processFamilyKey === item.key)))
+  return catalog.filter((item) => item.level === level && (level !== 'process_family' || !path.operational_group || item.operationalGroupKey === path.operational_group) && exactStatuses.some((status) => supportsUpstreamPath(status) && (level === 'operational_group' ? status.operationalGroupKey === item.key : status.processFamilyKey === item.key)))
 }
 
 function pathContains(path: ActivityGuidePath, selected: ActivityCatalogItem) {
-  return path[selected.level] === selected.key
+  return path[selected.level] === selected.key && (selected.level !== 'process_family' || !selected.operationalGroupKey || path.operational_group === selected.operationalGroupKey)
 }
 
 function ActivityOption({ item, active, analyzing, onClick }: { item: ActivityCatalogItem; active: boolean; analyzing: boolean; onClick(): void }) {
@@ -142,7 +145,7 @@ export function GuidedActivityPicker({ catalog, selected, onSelect }: { catalog:
       const ready = level === 'radius_state' || level === 'operational_group' || Boolean(path.operational_group)
       return <section className={`activity-guide__stage${ready ? '' : ' is-muted'}`} key={level} aria-labelledby={`activity-guide-${level}`}>
         <header><span>{copy.step}</span><div><h3 id={`activity-guide-${level}`}>{copy.title}</h3><p>{copy.help}</p></div></header>
-        {ready && <div className="activity-guide__options">{options.map((item) => <ActivityOption key={item.key} item={item} active={path[level] === item.key} analyzing={selected.level === level && selected.key === item.key} onClick={() => chooseLevel(item)} />)}</div>}
+        {ready && <div className="activity-guide__options">{options.map((item) => <ActivityOption key={`${item.operationalGroupKey ?? ''}:${item.key}`} item={item} active={path[level] === item.key} analyzing={selected.level === level && selected.key === item.key && (level !== 'process_family' || selected.operationalGroupKey === item.operationalGroupKey)} onClick={() => chooseLevel(item)} />)}</div>}
         {!ready ? <p className="activity-guide__empty">Select an Operational Group to continue.</p> : !options.length && <p className="activity-guide__empty">No mapped choices are available under the current path.</p>}
       </section>
     })}</div>
@@ -153,7 +156,7 @@ export function GuidedActivityPicker({ catalog, selected, onSelect }: { catalog:
     <div className="activity-guide__search">
       <label htmlFor="activity-guide-search">Search all activities and codes <span>optional shortcut</span></label>
       <div><input id="activity-guide-search" type="search" value={query} placeholder="Search a phase, explanation, family, description, or code" onChange={(event) => setQuery(event.target.value)} autoComplete="off" />{query && <button type="button" onClick={() => setQuery('')}>Clear</button>}</div>
-      {normalizedQuery && <div className="activity-guide__search-results" aria-live="polite">{searchMatches.length ? searchMatches.map((item) => <button type="button" key={`${item.level}:${item.key}`} onClick={() => choose(item)}><span><small>{levelLabels[item.level]}</small><strong>{item.label}</strong>{item.description && <em>{item.description}</em>}</span><b>Analyze</b></button>) : <p>No activity or Radius code matches “{query.trim()}”.</p>}</div>}
+      {normalizedQuery && <div className="activity-guide__search-results" aria-live="polite">{searchMatches.length ? searchMatches.map((item) => <button type="button" key={`${item.level}:${item.operationalGroupKey ?? ''}:${item.key}`} onClick={() => choose(item)}><span><small>{levelLabels[item.level]}{item.level === 'process_family' && item.operationalGroupName ? ` · ${item.operationalGroupName}` : ''}</small><strong>{item.label}</strong>{item.description && <em>{item.description}</em>}</span><b>Analyze</b></button>) : <p>No activity or Radius code matches “{query.trim()}”.</p>}</div>}
     </div>
     <p className="activity-guide__purpose">Each choice replaces the one activity being quantified below. Use Patterns &amp; Episodes when you need combinations or sequence.</p>
   </section>
@@ -190,7 +193,7 @@ function intervalMatchesSelection(interval: OverviewTimelineInterval, selection:
   if (interval.isUnavailable) return false
   if (selection.level === 'radius_state') return interval.eventType === selection.key
   if (selection.level === 'operational_group') return interval.operationalGroupKey === selection.key
-  if (selection.level === 'process_family') return interval.processFamilyKey === selection.key
+  if (selection.level === 'process_family') return interval.processFamilyKey === selection.key && (!selection.operationalGroupKey || interval.operationalGroupKey === selection.operationalGroupKey)
   return [interval.eventType ?? '', interval.statusCode ?? '', interval.statusDescription ?? ''].join('\u001f') === selection.key
 }
 
@@ -235,9 +238,11 @@ function FullRangePhysicalSignature({ data, pressKey, displayName, intervals, ev
   const tracks = fullRangeActivityTracks(intervals, data.selection)
   const summary = telemetrySummary(evidence)
   const sourceUnit = evidence.speed?.actual.sourceUnit ?? 'source units'
-  const pressChoices = data.pressBreakdown.filter(({ occurrenceCount }) => occurrenceCount > 0)
+  const pressChoices = data.pressBreakdown.filter(({ occurrenceCount }) => occurrenceCount > 0).sort((left, right) => left.displayName.localeCompare(right.displayName, undefined, { numeric: true }))
   return <section className="panel physical-signature-summary activity-range-signature" aria-labelledby="physical-signature-title">
-    <div className="section-heading"><div><p className="eyebrow">Complete selected range · matching activity highlighted</p><h2 id="physical-signature-title">Physical signature across the full time range</h2><p>{formatPlantDateTime(data.fromUtc)} – {formatPlantDateTime(data.toUtc)} CT · {displayName ?? 'No matching press'}</p></div>{pressKey && pressChoices.length > 1 && <label className="activity-signature-press">Timeline press<select value={pressKey} onChange={(event) => onPress(event.target.value as RadiusPressKey)}>{pressChoices.map((press) => <option key={press.pressKey} value={press.pressKey}>{press.displayName} · {press.occurrenceCount} occurrences</option>)}</select></label>}</div>
+    <div className="section-heading"><div><p className="eyebrow">Complete selected range · matching activity highlighted</p><h2 id="physical-signature-title">Physical signature across the full time range</h2><p>{formatPlantDateTime(data.fromUtc)} – {formatPlantDateTime(data.toUtc)} CT · {displayName ?? 'No matching press'}</p></div></div>
+    {pressKey && pressChoices.length > 1 && <div className="activity-signature-presses" role="group" aria-label="Timeline press"><span>Timeline press</span><div>{pressChoices.map((press) => <button type="button" key={press.pressKey} className={press.pressKey === pressKey ? 'is-active' : ''} aria-pressed={press.pressKey === pressKey} onClick={() => onPress(press.pressKey)}><strong>{press.displayName}</strong><small>{press.occurrenceCount} {press.occurrenceCount === 1 ? 'occurrence' : 'occurrences'}</small></button>)}</div></div>}
+    <p className="activity-range-classification"><span>Published Classification v{data.classificationVersion}</span><strong>{data.selection.operationalGroupName ? `${data.selection.operationalGroupName} → ` : ''}{data.selection.label}</strong><small>{data.selection.level === 'process_family' ? 'Only exact Radius identities assigned to this Operational Group and Process Family pair are highlighted.' : 'The highlighted intervals use this same published classification response.'}</small></p>
     <p className="activity-range-explanation"><strong>{data.selection.label}</strong> is emphasized; surrounding Radius and ProcessIntelligence states remain visible so its timing is not detached from the rest of the selected range.</p>
     {!pressKey || !intervals.length ? <p className="empty-state">No matching activity is available to establish a press timeline in this range.</p> : telemetryAvailable ? <>
       {evidence.loading && <div className="scope-progress" role="status"><i />Loading motion and speed for the complete selected range…</div>}
@@ -267,13 +272,12 @@ function OccurrenceEvidenceDrawer({ occurrence, classificationVersion, evidence,
 interface OperationalActivityExplorerViewProps {
   data: ActivityAnalysis
   analytics?: OperationalAnalytics
-  overview?: RadiusOverviewModel
   occurrences?: ActivityOccurrence[]
   loadingMore?: boolean
   onLoadMore?(): void
 }
 
-export function OperationalActivityExplorerView({ data, overview, occurrences = data.occurrences, loadingMore = false, onLoadMore }: OperationalActivityExplorerViewProps) {
+export function OperationalActivityExplorerView({ data, occurrences = data.occurrences, loadingMore = false, onLoadMore }: OperationalActivityExplorerViewProps) {
   const [pressFocus, setPressFocus] = useState<RadiusPressKey>()
   const [stateFocus, setStateFocus] = useState<string>()
   const [pressMetric, setPressMetric] = useState<'duration' | 'occurrences' | 'share'>('duration')
@@ -285,8 +289,8 @@ export function OperationalActivityExplorerView({ data, overview, occurrences = 
     ?? [...evidence].sort((left, right) => Date.parse(left.startUtc) - Date.parse(right.startUtc) || left.occurrenceId.localeCompare(right.occurrenceId))[0]
   const signaturePressKey = pressFocus ?? focusedOccurrence?.pressKey ?? data.pressBreakdown.find(({ occurrenceCount }) => occurrenceCount > 0)?.pressKey
   const signaturePress = data.pressBreakdown.find(({ pressKey }) => pressKey === signaturePressKey)
-  const overviewIntervals = overview?.decisionSupport?.pressAllocations.find(({ pressKey }) => pressKey === signaturePressKey)?.timelineIntervals
-  const signatureIntervals = overviewIntervals ?? occurrenceTimelineIntervals(occurrences, signaturePressKey)
+  const classifiedTimeline = data.pressTimelines?.find(({ pressKey }) => pressKey === signaturePressKey)
+  const signatureIntervals = classifiedTimeline?.timelineIntervals ?? occurrenceTimelineIntervals(occurrences, signaturePressKey)
   const telemetryAvailable = Date.parse(data.toUtc) - Date.parse(data.fromUtc) <= MAX_FULL_TELEMETRY_RANGE_MS
   const rangeTelemetry = usePressTelemetryEvidence(signaturePressKey, data.fromUtc, data.toUtc, { enabled: Boolean(signaturePressKey) && telemetryAvailable, fullRange: true, padShortRange: false })
   const drawerTelemetry = usePressTelemetryEvidence(selectedOccurrence?.pressKey, selectedOccurrence?.startUtc ?? data.fromUtc, selectedOccurrence?.endUtc ?? data.toUtc, { enabled: Boolean(selectedOccurrence) })
@@ -340,7 +344,7 @@ export function OperationalActivityExplorerView({ data, overview, occurrences = 
   </>
 }
 
-export function OperationalActivityExplorer({ fromUtc, toUtc, pressKey, analytics: _analytics, overview }: { fromUtc: string; toUtc: string; pressKey?: RadiusPressKey; analytics: OperationalAnalytics; overview: RadiusOverviewModel }) {
+export function OperationalActivityExplorer({ fromUtc, toUtc, pressKey, analytics: _analytics }: { fromUtc: string; toUtc: string; pressKey?: RadiusPressKey; analytics: OperationalAnalytics }) {
   const [data, setData] = useState<ActivityAnalysis>()
   const [occurrences, setOccurrences] = useState<ActivityOccurrence[]>([])
   const [selection, setSelection] = useState<ActivitySelection>(() => activityFromUrl() ?? { level: 'radius_state', key: 'B', label: 'Bad' })
@@ -358,13 +362,13 @@ export function OperationalActivityExplorer({ fromUtc, toUtc, pressKey, analytic
       if (controller.signal.aborted) return
       setData(value)
       setOccurrences(value.occurrences)
-      const resolved = { level: value.selection.level, key: value.selection.key, label: value.selection.label }
+      const resolved = { level: value.selection.level, key: value.selection.key, label: value.selection.label, operationalGroupKey: value.selection.operationalGroupKey }
       setSelection(resolved)
       const query = new URLSearchParams(window.location.search)
       if (!query.has('activityLevel') || !query.has('activityKey')) updateActivityUrl(resolved, 'replace')
     }).catch(() => { if (!controller.signal.aborted) setError(true) }).finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => { controller.abort(); pageRequest.current?.abort() }
-  }, [fromUtc, toUtc, pressKey, selection.level, selection.key])
+  }, [fromUtc, toUtc, pressKey, selection.level, selection.key, selection.operationalGroupKey])
 
   useEffect(() => {
     const restore = () => {
@@ -376,7 +380,7 @@ export function OperationalActivityExplorer({ fromUtc, toUtc, pressKey, analytic
   }, [])
 
   const choose = (item: ActivityCatalogItem) => {
-    const next = { level: item.level, key: item.key, label: item.label }
+    const next = { level: item.level, key: item.key, label: item.label, operationalGroupKey: item.operationalGroupKey }
     updateActivityUrl(next)
     setSelection(next)
   }
@@ -388,6 +392,6 @@ export function OperationalActivityExplorer({ fromUtc, toUtc, pressKey, analytic
     setLoadingMore(true)
     void getActivityAnalysis(fromUtc, toUtc, selection, pressKey, controller.signal, occurrences.length).then((page) => { if (!controller.signal.aborted) setOccurrences((current) => [...current, ...page.occurrences.filter((item) => !current.some(({ occurrenceId }) => occurrenceId === item.occurrenceId))]) }).catch(() => { if (!controller.signal.aborted) setError(true) }).finally(() => { if (!controller.signal.aborted) setLoadingMore(false) })
   }
-  const activeChoice = data?.catalog.find((item) => item.level === selection.level && item.key === selection.key) ?? data?.selection
-  return <div className="activity-explorer">{data && activeChoice && <GuidedActivityPicker catalog={data.catalog} selected={activeChoice} onSelect={choose} />}{loading && <div className="scope-progress" role="status"><i />Updating activity analysis…</div>}{error && <p className="message message--warning">Activity analysis could not be loaded for this selection. Previously loaded evidence remains visible.</p>}{data && <OperationalActivityExplorerView data={data} analytics={_analytics} overview={overview} occurrences={occurrences} loadingMore={loadingMore} onLoadMore={loadMore} />}</div>
+  const activeChoice = data?.catalog.find((item) => item.level === selection.level && item.key === selection.key && (selection.level !== 'process_family' || !selection.operationalGroupKey || item.operationalGroupKey === selection.operationalGroupKey)) ?? data?.selection
+  return <div className="activity-explorer">{data && activeChoice && <GuidedActivityPicker catalog={data.catalog} selected={activeChoice} onSelect={choose} />}{loading && <div className="scope-progress" role="status"><i />Updating activity analysis…</div>}{error && <p className="message message--warning">Activity analysis could not be loaded for this selection. Previously loaded evidence remains visible.</p>}{data && <OperationalActivityExplorerView data={data} analytics={_analytics} occurrences={occurrences} loadingMore={loadingMore} onLoadMore={loadMore} />}</div>
 }

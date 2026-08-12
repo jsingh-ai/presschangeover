@@ -70,8 +70,17 @@ function matchSegment(segment: OperationalRunSegment, condition: ActivitySelecti
   if (segment.isUnavailable) return false
   if (condition.level === 'radius_state') return segment.eventType === condition.key
   if (condition.level === 'operational_group') return segment.operationalGroupKey === condition.key
-  if (condition.level === 'process_family') return segment.processFamilyKey === condition.key
+  if (condition.level === 'process_family') return segment.processFamilyKey === condition.key && (!condition.operationalGroupKey || segment.operationalGroupKey === condition.operationalGroupKey)
   return segment.exactIdentity === condition.key
+}
+
+function sameSelection(left: ActivitySelection, right: ActivitySelection) {
+  return left.level === right.level && left.key === right.key
+    && (left.level !== 'process_family' || !right.operationalGroupKey || left.operationalGroupKey === right.operationalGroupKey)
+}
+
+function conditionKey(condition: ActivitySelection) {
+  return `${condition.level}:${condition.level === 'process_family' ? `${condition.operationalGroupKey ?? ''}:` : ''}${condition.key}`
 }
 
 function dedupeRedundant(conditions: ActivityCatalogItem[], mode: PatternMatchMode) {
@@ -97,7 +106,7 @@ function matchesConditions(run: OperationalRun, conditions: ActivityCatalogItem[
 }
 
 function durationsFor(run: OperationalRun, conditions: ActivityCatalogItem[]) {
-  const conditionDurations = conditions.map((condition) => ({ conditionKey: `${condition.level}:${condition.key}`, durationSeconds: run.segments.filter((segment) => matchSegment(segment, condition)).reduce((sum, segment) => sum + segment.durationSeconds, 0) }))
+  const conditionDurations = conditions.map((condition) => ({ conditionKey: conditionKey(condition), durationSeconds: run.segments.filter((segment) => matchSegment(segment, condition)).reduce((sum, segment) => sum + segment.durationSeconds, 0) }))
   const selectedActivitySeconds = run.segments.filter((segment) => conditions.some((condition) => matchSegment(segment, condition))).reduce((sum, segment) => sum + segment.durationSeconds, 0)
   return { conditionDurations, selectedActivitySeconds }
 }
@@ -144,7 +153,7 @@ export function analyzeRunPatterns(overview: RadiusOverview, snapshot: Classific
   const selectedPattern = allPatterns.find(({ patternKey }) => patternKey === input?.selectedPatternKey) ?? allPatterns[0] ?? null
   const selectedRuns = selectedPattern ? runs.filter(({ runId }) => selectedPattern.matchedRunIds.includes(runId)) : []
   const requestedConditions = (input?.conditions ?? []).flatMap((condition) => {
-    const item = catalog.find(({ level, key }) => level === condition.level && key === condition.key)
+    const item = catalog.find((candidate) => sameSelection(candidate, condition))
     return item ? [item] : []
   })
   const matchMode = input?.matchMode ?? 'contains_all'
@@ -178,4 +187,3 @@ export function analyzeRunPatterns(overview: RadiusOverview, snapshot: Classific
     matchedRuns: evidenceSource.slice(0, PATTERN_EVIDENCE_LIMIT), evidenceLimit: PATTERN_EVIDENCE_LIMIT, builder,
   }
 }
-

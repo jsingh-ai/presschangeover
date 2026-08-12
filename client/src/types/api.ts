@@ -503,7 +503,7 @@ export interface OperationalRun {
 export interface OperationalRunComparison { pressKey: RadiusPressKey; displayName: string; fromUtc: string; toUtc: string; confirmationSeconds: number; samePressMinimumRuns: number; fleetMinimumPresses: number; fleetMinimumRuns: number; similarRelativeTolerance: number; similarAbsoluteSeconds: number; runs: OperationalRun[] }
 
 export type ActivityLevel = 'radius_state' | 'operational_group' | 'process_family' | 'exact_status'
-export interface ActivitySelection { level: ActivityLevel; key: string; label: string }
+export interface ActivitySelection { level: ActivityLevel; key: string; label: string; operationalGroupKey?: string | null }
 export interface ActivityCatalogItem extends ActivitySelection { description: string | null; eventType: string | null; statusCode: string | null; statusDescription: string | null; operationalGroupKey: string | null; operationalGroupName: string | null; processFamilyKey: string | null; processFamilyName: string | null; needsClassification: boolean }
 export interface ActivityOccurrenceSegment { segmentId: string; startUtc: string; endUtc: string; durationSeconds: number; eventType: string; statusCode: string | null; statusDescription: string; operationalGroupKey: string; operationalGroupName: string; processFamilyKey: string; processFamilyName: string; needsClassification: boolean }
 export interface ActivityOccurrence { occurrenceId: string; pressKey: RadiusPressKey; displayName: string; startUtc: string; endUtc: string; durationSeconds: number; eventType: string; radiusStateLabel: string; operationalGroupKey: string; operationalGroupName: string; processFamilyKey: string; processFamilyName: string; segments: ActivityOccurrenceSegment[]; exactIdentities: Array<{ identity: string; eventType: string; statusCode: string | null; statusDescription: string; durationSeconds: number; needsClassification: boolean }> }
@@ -511,6 +511,7 @@ export interface ActivityAnalysis {
   fromUtc: string; toUtc: string; classificationVersion: number; selection: ActivityCatalogItem; catalog: ActivityCatalogItem[]
   summary: { totalDurationSeconds: number; occurrenceCount: number; medianOccurrenceSeconds: number | null; p95OccurrenceSeconds: number | null; longestOccurrenceSeconds: number; pressesObserved: number; scopePresses: number; shareOfObservedPercent: number; sourceCoveragePercent: number; classificationCoveragePercent: number }
   pressBreakdown: Array<{ pressKey: RadiusPressKey; displayName: string; durationSeconds: number; occurrenceCount: number; medianOccurrenceSeconds: number | null; shareOfObservedPercent: number; coveragePercent: number }>
+  pressTimelines: Array<{ pressKey: RadiusPressKey; displayName: string; timelineIntervals: OverviewTimelineInterval[] }>
   radiusStateComposition: Array<{ eventType: string; label: string; durationSeconds: number; percentage: number }>
   semanticBreakdown: Array<{ key: string; label: string; level: 'operational_group' | 'process_family' | 'exact_status'; durationSeconds: number; percentage: number }>
   trend: Array<{ bucketStartUtc: string; durationSeconds: number; occurrenceCount: number }>; trendBucket: 'hour' | 'day'

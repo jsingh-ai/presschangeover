@@ -115,10 +115,11 @@ function parseUtcTimestamp(value: unknown, errorCode: string): string {
   return value
 }
 
-function parseActivitySelection(levelValue: unknown, keyValue: unknown): ActivitySelection | undefined {
+function parseActivitySelection(levelValue: unknown, keyValue: unknown, operationalGroupValue?: unknown): ActivitySelection | undefined {
   if (levelValue === undefined && keyValue === undefined) return undefined
   if (typeof levelValue !== 'string' || !ACTIVITY_LEVELS.has(levelValue as ActivityLevel) || typeof keyValue !== 'string' || !keyValue || keyValue.length > 300) throw new RequestValidationError('invalid_activity_selection')
-  return { level: levelValue as ActivityLevel, key: keyValue, label: keyValue }
+  if (operationalGroupValue !== undefined && (typeof operationalGroupValue !== 'string' || !OPERATIONAL_GROUP_KEYS.includes(operationalGroupValue as OperationalGroupKey))) throw new RequestValidationError('invalid_activity_selection')
+  return { level: levelValue as ActivityLevel, key: keyValue, label: keyValue, ...(operationalGroupValue === undefined ? {} : { operationalGroupKey: operationalGroupValue as OperationalGroupKey }) }
 }
 
 function parseOptionalPressKey(value: unknown): RadiusPressKey | undefined {
@@ -136,7 +137,7 @@ function parsePatternConditions(value: unknown): ActivitySelection[] {
   return parsed.map((item) => {
     if (!item || typeof item !== 'object') throw new RequestValidationError('invalid_pattern_conditions')
     const candidate = item as Record<string, unknown>
-    const selection = parseActivitySelection(candidate.level, candidate.key)
+    const selection = parseActivitySelection(candidate.level, candidate.key, candidate.operationalGroupKey)
     if (!selection) throw new RequestValidationError('invalid_pattern_conditions')
     return selection
   })
@@ -403,7 +404,7 @@ export function createApp({
       const evidenceOffset = request.query.evidenceOffset === undefined ? 0 : Number(request.query.evidenceOffset)
       const evidenceLimit = request.query.evidenceLimit === undefined ? undefined : Number(request.query.evidenceLimit)
       if (!Number.isSafeInteger(evidenceOffset) || evidenceOffset < 0 || (evidenceLimit !== undefined && (!Number.isSafeInteger(evidenceLimit) || evidenceLimit < 1 || evidenceLimit > 100))) throw new RequestValidationError('invalid_activity_evidence_page')
-      response.status(200).json(await radiusService.getActivityAnalysis(fromUtc, toUtc, parseActivitySelection(request.query.level, request.query.key), pressKey, { offset: evidenceOffset, limit: evidenceLimit }))
+      response.status(200).json(await radiusService.getActivityAnalysis(fromUtc, toUtc, parseActivitySelection(request.query.level, request.query.key, request.query.operationalGroupKey), pressKey, { offset: evidenceOffset, limit: evidenceLimit }))
     }),
   )
 

@@ -560,6 +560,7 @@ export interface ActivitySelection {
   level: ActivityLevel
   key: string
   label: string
+  operationalGroupKey?: string | null
 }
 
 export interface ActivityCatalogItem extends ActivitySelection {
@@ -623,6 +624,7 @@ export interface ActivityAnalysis {
     classificationCoveragePercent: number
   }
   pressBreakdown: Array<{ pressKey: RadiusPressKey; displayName: string; durationSeconds: number; occurrenceCount: number; medianOccurrenceSeconds: number | null; shareOfObservedPercent: number; coveragePercent: number }>
+  pressTimelines: Array<{ pressKey: RadiusPressKey; displayName: string; timelineIntervals: OverviewTimelineInterval[] }>
   radiusStateComposition: Array<{ eventType: string; label: string; durationSeconds: number; percentage: number }>
   semanticBreakdown: Array<{ key: string; label: string; level: 'operational_group' | 'process_family' | 'exact_status'; durationSeconds: number; percentage: number }>
   trend: Array<{ bucketStartUtc: string; durationSeconds: number; occurrenceCount: number }>

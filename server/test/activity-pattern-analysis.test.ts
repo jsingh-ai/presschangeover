@@ -93,6 +93,25 @@ describe('canonical one-activity analysis', () => {
     assert.equal(first.summary.totalDurationSeconds, second.summary.totalDurationSeconds)
   })
 
+  it('scopes a shared Process Family to its selected Operational Group and returns the same classified timelines', () => {
+    const sharedFamily = overview([press('press3', [
+      segment('press3', 0, 10, 'M', '50', 'Make Ready - Color Match'),
+      segment('press3', 10, 8, 'B', '89', 'Ink: Wait On'),
+      segment('press3', 18, 6, 'B', '145-6', 'Ink Spill'),
+    ])])
+    const familyChoices = analyzeOperationalActivity(sharedFamily, snapshot, { level: 'radius_state', key: 'B', label: '' }).catalog
+      .filter(({ level, key }) => level === 'process_family' && key === 'INK_COLOR')
+    assert.deepEqual(familyChoices.map(({ operationalGroupKey }) => operationalGroupKey).sort(), ['ADJUSTMENT_QUALITY', 'FAULT_RECOVERY', 'WAITING_IDLE_HOLD'])
+
+    const result = analyzeOperationalActivity(sharedFamily, snapshot, { level: 'process_family', key: 'INK_COLOR', label: '', operationalGroupKey: 'ADJUSTMENT_QUALITY' })
+    assert.equal(result.selection.operationalGroupKey, 'ADJUSTMENT_QUALITY')
+    assert.equal(result.summary.totalDurationSeconds, 600)
+    assert.equal(result.summary.occurrenceCount, 1)
+    assert.deepEqual(result.occurrences.map(({ operationalGroupKey }) => operationalGroupKey), ['ADJUSTMENT_QUALITY'])
+    assert.equal(result.pressTimelines.length, 1)
+    assert.deepEqual(result.pressTimelines[0]?.timelineIntervals.map(({ operationalGroupKey }) => operationalGroupKey), ['ADJUSTMENT_QUALITY', 'WAITING_IDLE_HOLD', 'FAULT_RECOVERY'])
+  })
+
   it('contains no database writes', () => {
     const source = readFileSync(new URL('../src/radius/activity-analysis.ts', import.meta.url), 'utf8')
     assert.doesNotMatch(source, /\b(?:INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|TRUNCATE\s+TABLE|ALTER\s+TABLE|CREATE\s+(?:TABLE|INDEX|TRIGGER))\b/i)
@@ -130,6 +149,21 @@ describe('canonical Operational Run pattern analysis', () => {
     assert.equal(ordered.builder?.matchedRuns, 2)
     assert.equal(reversed.builder?.matchedRuns, 0)
     assert.equal(contains.builder?.pressesObserved, 2)
+  })
+
+  it('keeps a shared Process Family condition scoped to its Operational Group', () => {
+    const sharedFamily = overview([press('press3', [
+      segment('press3', 0, 3, 'G', '150', 'Run Production'),
+      segment('press3', 3, 5, 'M', '50', 'Make Ready - Color Match'),
+      segment('press3', 8, 5, 'B', '89', 'Ink: Wait On'),
+      segment('press3', 13, 3, 'G', '150', 'Run Production'),
+    ])])
+    const adjustment = analyzeRunPatterns(sharedFamily, snapshot, { conditions: [{ level: 'process_family', key: 'INK_COLOR', label: '', operationalGroupKey: 'ADJUSTMENT_QUALITY' }] })
+    const waiting = analyzeRunPatterns(sharedFamily, snapshot, { conditions: [{ level: 'process_family', key: 'INK_COLOR', label: '', operationalGroupKey: 'WAITING_IDLE_HOLD' }] })
+    assert.equal(adjustment.builder?.totalSelectedActivitySeconds, 300)
+    assert.equal(waiting.builder?.totalSelectedActivitySeconds, 300)
+    assert.equal(adjustment.builder?.conditions[0]?.operationalGroupKey, 'ADJUSTMENT_QUALITY')
+    assert.equal(waiting.builder?.conditions[0]?.operationalGroupKey, 'WAITING_IDLE_HOLD')
   })
 
   it('detects hierarchical redundancy and unions overlapping duration', () => {

@@ -123,7 +123,11 @@ export function getRadiusOverview(fromUtc: string, toUtc: string, decisionOnly =
 
 export function getActivityAnalysis(fromUtc: string, toUtc: string, selection?: ActivitySelection, pressKey?: RadiusPressKey, signal?: AbortSignal, evidenceOffset = 0) {
   const parameters = new URLSearchParams({ fromUtc, toUtc })
-  if (selection) { parameters.set('level', selection.level); parameters.set('key', selection.key) }
+  if (selection) {
+    parameters.set('level', selection.level)
+    parameters.set('key', selection.key)
+    if (selection.operationalGroupKey) parameters.set('operationalGroupKey', selection.operationalGroupKey)
+  }
   if (pressKey) parameters.set('pressKey', pressKey)
   parameters.set('evidenceOffset', String(evidenceOffset))
   return getJson<ActivityAnalysis>(`/api/radius/activity-analysis?${parameters.toString()}`, signal)
@@ -132,7 +136,7 @@ export function getActivityAnalysis(fromUtc: string, toUtc: string, selection?: 
 export function getPatternAnalysis(fromUtc: string, toUtc: string, input: { selectedPatternKey?: string; conditions?: ActivitySelection[]; matchMode?: PatternMatchMode; pressKey?: RadiusPressKey } = {}, signal?: AbortSignal) {
   const parameters = new URLSearchParams({ fromUtc, toUtc })
   if (input.selectedPatternKey) parameters.set('patternKey', input.selectedPatternKey)
-  if (input.conditions?.length) parameters.set('conditions', JSON.stringify(input.conditions.map(({ level, key }) => ({ level, key }))))
+  if (input.conditions?.length) parameters.set('conditions', JSON.stringify(input.conditions.map(({ level, key, operationalGroupKey }) => ({ level, key, ...(operationalGroupKey ? { operationalGroupKey } : {}) }))))
   if (input.matchMode) parameters.set('matchMode', input.matchMode)
   if (input.pressKey) parameters.set('pressKey', input.pressKey)
   return getJson<PatternAnalysis>(`/api/radius/pattern-analysis?${parameters.toString()}`, signal)

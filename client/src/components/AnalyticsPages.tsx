@@ -31,7 +31,7 @@ export function OperationalAnalysisPage({ analytics, scopeLabel, overview, selec
   return <div className="page-stack operational-analysis-page">
     <PageIntroduction eyebrow="From Radius phase to operational explanation" title="Operational Analysis" description="Choose a broad Radius phase, narrow through ProcessIntelligence Operational Groups and Process Families, then inspect exact codes only when needed. The page quantifies one clearly identified activity across time and presses." />
     <div className="scope-caption"><strong>{scopeLabel}</strong><span>The guided path controls the activity analyzed below. Combinations and ordered behavior belong in Patterns &amp; Episodes.</span></div>
-    <OperationalActivityExplorer fromUtc={overview.fromUtc} toUtc={overview.toUtc} pressKey={selectedPress} analytics={analytics} overview={overview} />
+    <OperationalActivityExplorer fromUtc={overview.fromUtc} toUtc={overview.toUtc} pressKey={selectedPress} analytics={analytics} />
   </div>
 }
 

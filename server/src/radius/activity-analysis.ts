@@ -9,6 +9,7 @@ import type {
   RadiusStateSegment,
 } from './models.js'
 import { exactRadiusIdentity } from './radius-identity.js'
+import { buildOverviewDecisionSupport } from './overview-analytics.js'
 
 export const ACTIVITY_EVIDENCE_LIMIT = 100
 
@@ -57,14 +58,17 @@ export function buildActivityCatalog(overview: RadiusOverview, snapshot: Classif
   const groupById = new Map(snapshot.groups.map((group) => [group.id, group]))
   const familyById = new Map(snapshot.families.map((family) => [family.id, family]))
   for (const family of snapshot.families) {
-    const mapping = snapshot.classifications.find(({ processFamilyId }) => processFamilyId === family.id)
-    const group = mapping ? groupById.get(mapping.operationalGroupId) : undefined
-    items.set(`process_family:${family.key}`, {
-      level: 'process_family', key: family.key, label: family.displayName, description: family.description,
-      eventType: null, statusCode: null, statusDescription: null, operationalGroupKey: group?.key ?? null,
-      operationalGroupName: group?.displayName ?? null, processFamilyKey: family.key, processFamilyName: family.displayName,
-      needsClassification: false,
-    })
+    const mappings = snapshot.classifications.filter(({ processFamilyId }) => processFamilyId === family.id)
+    const groupIds = [...new Set(mappings.map(({ operationalGroupId }) => operationalGroupId))]
+    for (const groupId of groupIds.length ? groupIds : [null]) {
+      const group = groupId ? groupById.get(groupId) : undefined
+      items.set(`process_family:${group?.key ?? 'unassigned'}:${family.key}`, {
+        level: 'process_family', key: family.key, label: family.displayName, description: family.description,
+        eventType: null, statusCode: null, statusDescription: null, operationalGroupKey: group?.key ?? null,
+        operationalGroupName: group?.displayName ?? null, processFamilyKey: family.key, processFamilyName: family.displayName,
+        needsClassification: false,
+      })
+    }
   }
   for (const press of overview.presses) for (const segment of press.timelineSegments) {
     if (segment.kind !== 'radius') continue
@@ -98,7 +102,7 @@ function matches(segment: RadiusStateSegment, selection: ActivitySelection): boo
   const semantic = classified(segment)
   if (selection.level === 'radius_state') return segment.eventType === selection.key
   if (selection.level === 'operational_group') return semantic.groupKey === selection.key
-  if (selection.level === 'process_family') return semantic.familyKey === selection.key
+  if (selection.level === 'process_family') return semantic.familyKey === selection.key && (!selection.operationalGroupKey || semantic.groupKey === selection.operationalGroupKey)
   return exactRadiusIdentity(segment) === selection.key
 }
 
@@ -179,7 +183,7 @@ function trend(occurrences: ActivityOccurrence[], fromUtc: string, toUtc: string
 
 export function analyzeOperationalActivity(overview: RadiusOverview, snapshot: ClassificationSnapshot, requested?: ActivitySelection, evidencePage: { offset?: number; limit?: number } = {}): ActivityAnalysis {
   const catalog = buildActivityCatalog(overview, snapshot)
-  const selection = catalog.find((item) => item.level === requested?.level && item.key === requested.key)
+  const selection = catalog.find((item) => item.level === requested?.level && item.key === requested.key && (requested.level !== 'process_family' || !requested.operationalGroupKey || item.operationalGroupKey === requested.operationalGroupKey))
     ?? catalog.find((item) => item.level === 'operational_group' && item.key === 'MAINTENANCE_INTERVENTION')
     ?? catalog.find((item) => item.level === 'radius_state' && item.key === 'B')!
   const occurrences = occurrencesFor(overview, selection)
@@ -213,10 +217,13 @@ export function analyzeOperationalActivity(overview: RadiusOverview, snapshot: C
     { key: '15_30m', label: '15–30m', min: 900, max: 1_800 }, { key: '30_60m', label: '30–60m', min: 1_800, max: 3_600 },
     { key: 'over_60m', label: '> 60m', min: 3_600, max: Number.POSITIVE_INFINITY },
   ].map(({ key, label, min, max }) => ({ key, label, occurrenceCount: durations.filter((value) => value >= min && value < max).length }))
+  const matchingPressKeys = new Set(occurrences.map(({ pressKey }) => pressKey))
   return {
     fromUtc: overview.fromUtc, toUtc: overview.toUtc, classificationVersion: snapshot.version, selection, catalog,
     summary: { totalDurationSeconds, occurrenceCount: occurrences.length, medianOccurrenceSeconds: median(durations), p95OccurrenceSeconds: durations.length >= 20 ? percentile(durations, .95) : null, longestOccurrenceSeconds: Math.max(0, ...durations), pressesObserved: pressBreakdown.filter(({ occurrenceCount }) => occurrenceCount > 0).length, scopePresses: overview.presses.length, shareOfObservedPercent: percentage(totalDurationSeconds, observedSeconds), sourceCoveragePercent: percentage(observedSeconds, possibleSeconds), classificationCoveragePercent: percentage(mappedSeconds, observedSeconds) },
-    pressBreakdown, radiusStateComposition, semanticBreakdown, trend: bucketed.values, trendBucket: bucketed.bucket,
+    pressBreakdown,
+    pressTimelines: buildOverviewDecisionSupport(overview).pressAllocations.filter(({ pressKey }) => matchingPressKeys.has(pressKey)).map(({ pressKey, displayName, timelineIntervals }) => ({ pressKey, displayName, timelineIntervals })),
+    radiusStateComposition, semanticBreakdown, trend: bucketed.values, trendBucket: bucketed.bucket,
     durationDistribution: distribution,
     occurrences: occurrences.slice(evidencePage.offset ?? 0, (evidencePage.offset ?? 0) + Math.min(ACTIVITY_EVIDENCE_LIMIT, evidencePage.limit ?? ACTIVITY_EVIDENCE_LIMIT)),
     totalOccurrenceCount: occurrences.length,

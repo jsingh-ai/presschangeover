@@ -69,6 +69,17 @@ describe('one-activity explorer presentation', () => {
     assert.equal((html.match(/>Analyzing<\/em>/g) ?? []).length, 1)
   })
 
+  it('keeps duplicate family names grouped under the selected Operational Group', () => {
+    const duplicateFamilies = [
+      ...catalog,
+      { ...catalog[3]!, operationalGroupKey: 'ADJUSTMENT_QUALITY', operationalGroupName: 'Adjustment & Quality', key: 'INK_COLOR', label: 'Ink / Color', processFamilyKey: 'INK_COLOR', processFamilyName: 'Ink / Color' },
+      { ...catalog[3]!, operationalGroupKey: 'FAULT_RECOVERY', operationalGroupName: 'Fault & Recovery', key: 'INK_COLOR', label: 'Ink / Color', processFamilyKey: 'INK_COLOR', processFamilyName: 'Ink / Color' },
+      { ...catalog[4]!, operationalGroupKey: 'ADJUSTMENT_QUALITY', operationalGroupName: 'Adjustment & Quality', key: 'M\u001f50\u001fMake Ready - Color Match', eventType: 'M', statusCode: '50', statusDescription: 'Make Ready - Color Match', processFamilyKey: 'INK_COLOR', processFamilyName: 'Ink / Color' },
+      { ...catalog[4]!, operationalGroupKey: 'FAULT_RECOVERY', operationalGroupName: 'Fault & Recovery', key: 'B\u001f145-6\u001fInk Spill', eventType: 'B', statusCode: '145-6', statusDescription: 'Ink Spill', processFamilyKey: 'INK_COLOR', processFamilyName: 'Ink / Color' },
+    ] as ActivityAnalysis['catalog']
+    assert.deepEqual(guidedActivityOptions(duplicateFamilies, 'process_family', { operational_group: 'ADJUSTMENT_QUALITY' }).map(({ operationalGroupKey, key }) => [operationalGroupKey, key]), [['ADJUSTMENT_QUALITY', 'INK_COLOR']])
+  })
+
   it('shows magnitude, frequency, press, state, trend, distribution, semantic, and exact evidence', () => {
     const html = renderToStaticMarkup(createElement(OperationalActivityExplorerView, { data: activity, analytics }))
     for (const copy of ['Total time', 'Occurrences', 'Median occurrence', 'Longest occurrence', 'Press comparison', 'Radius composition', 'Daily line trend', 'Occurrence duration', 'Process families', 'Exact occurrences', 'B / 123 / Maintenance', 'Physical signature']) assert.match(html, new RegExp(copy))
@@ -94,6 +105,29 @@ describe('one-activity explorer presentation', () => {
       assert.match(track.intervals[0]!.className ?? '', /activity-range-segment--match/)
       assert.match(track.intervals[1]!.className ?? '', /activity-range-segment--context/)
     }
+  })
+
+  it('highlights a shared family only inside its selected parent group', () => {
+    const intervals = [
+      { intervalId: 'adjustment', startUtc: activity.fromUtc, endUtc: '2026-08-02T00:00:00.000Z', durationSeconds: 86_400, isUnavailable: false, eventType: 'M', statusCode: '50', statusDescription: 'Make Ready - Color Match', radiusStateLabel: 'Make Ready', operationalGroupKey: 'ADJUSTMENT_QUALITY', operationalGroupLabel: 'Adjustment & Quality', operationalGroupLightColor: null, operationalGroupDarkColor: null, processFamilyKey: 'INK_COLOR', processFamilyLabel: 'Ink / Color', classificationNeedsReview: false, classificationStatus: 'mapped' },
+      { intervalId: 'fault', startUtc: '2026-08-02T00:00:00.000Z', endUtc: activity.toUtc, durationSeconds: 518_400, isUnavailable: false, eventType: 'B', statusCode: '145-6', statusDescription: 'Ink Spill', radiusStateLabel: 'Bad', operationalGroupKey: 'FAULT_RECOVERY', operationalGroupLabel: 'Fault & Recovery', operationalGroupLightColor: null, operationalGroupDarkColor: null, processFamilyKey: 'INK_COLOR', processFamilyLabel: 'Ink / Color', classificationNeedsReview: false, classificationStatus: 'mapped' },
+    ] as any
+    const tracks = fullRangeActivityTracks(intervals, { level: 'process_family', key: 'INK_COLOR', label: 'Ink / Color', operationalGroupKey: 'ADJUSTMENT_QUALITY' })
+    for (const track of [tracks.radius, tracks.group, tracks.family]) {
+      assert.match(track.intervals[0]!.className ?? '', /activity-range-segment--match/)
+      assert.match(track.intervals[1]!.className ?? '', /activity-range-segment--context/)
+    }
+  })
+
+  it('renders all timeline press choices as explicit buttons with one clear active press', () => {
+    const secondBreakdown = { ...activity.pressBreakdown[0]!, pressKey: 'press12' as const, displayName: 'Press 12', occurrenceCount: 4 }
+    const secondOccurrence = { ...activity.occurrences[0]!, occurrenceId: 'o2', pressKey: 'press12' as const, displayName: 'Press 12' }
+    const html = renderToStaticMarkup(createElement(OperationalActivityExplorerView, { data: { ...activity, pressBreakdown: [...activity.pressBreakdown, secondBreakdown], occurrences: [...activity.occurrences, secondOccurrence], totalOccurrenceCount: 2 }, analytics }))
+    assert.match(html, /activity-signature-presses/)
+    assert.match(html, /Press 11/)
+    assert.match(html, /Press 12/)
+    assert.equal((html.match(/aria-pressed="true"/g) ?? []).length >= 1, true)
+    assert.doesNotMatch(html, /<select/)
   })
 
   it('provides local press/state focus and responsive theme-aware styling', () => {
