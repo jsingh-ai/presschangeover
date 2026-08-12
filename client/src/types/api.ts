@@ -341,7 +341,7 @@ export interface MakeReadyPatternSummary extends OperationalPatternSummary {
   confirmedProductionCount: number
   returnedToMakeReadyCount: number
   enteredBadCount: number
-  enteredSafetyCount: number
+  enteredSStateCount: number
   failedToReachConfirmedProductionCount: number
   unresolvedCount: number
   medianSecondsToConfirmedProduction: number | null

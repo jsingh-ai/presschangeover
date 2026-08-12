@@ -23,7 +23,7 @@ const analytics = {
   statusDrivers: [{ ...makeReady, durationSeconds: 3000, percentageOfObserved: 100, percentageWithinCategory: 100, occurrenceCount: 5, medianOccurrenceSeconds: 600, p90OccurrenceSeconds: 600, pressCount: 1, scopePressCount: 1, clippedOccurrenceCount: 1, evidence: [evidence] }],
   productionStops: pattern,
   beforeSuccessfulProduction: pattern,
-  afterMakeReady: { ...pattern, confirmedProductionCount: 5, returnedToMakeReadyCount: 0, enteredBadCount: 0, enteredSafetyCount: 0, failedToReachConfirmedProductionCount: 0, unresolvedCount: 0, medianSecondsToConfirmedProduction: 300, p90SecondsToConfirmedProduction: 420 },
+  afterMakeReady: { ...pattern, confirmedProductionCount: 5, returnedToMakeReadyCount: 0, enteredBadCount: 0, enteredSStateCount: 0, failedToReachConfirmedProductionCount: 0, unresolvedCount: 0, medianSecondsToConfirmedProduction: 300, p90SecondsToConfirmedProduction: 420 },
   relationshipGroups: [{ anchor: makeReady, direction: 'after', maxTransitions: 1, denominator: 5, censoredCount: 1, outcomes: [outcome] }],
   anomalies: [],
 } as OperationalAnalytics

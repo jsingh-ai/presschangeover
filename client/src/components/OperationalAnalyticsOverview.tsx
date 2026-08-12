@@ -74,7 +74,7 @@ function MakeReadyCard({ pattern, scopePressCount }: { pattern: MakeReadyPattern
         <div><dt>Reached confirmed production</dt><dd>{supportText(pattern.confirmedProductionCount, pattern.anchorCount)}</dd></div>
         <div><dt>Returned to Make Ready</dt><dd>{supportText(pattern.returnedToMakeReadyCount, pattern.anchorCount)}</dd></div>
         <div><dt>Entered Bad</dt><dd>{supportText(pattern.enteredBadCount, pattern.anchorCount)}</dd></div>
-        <div><dt>Entered Radius S state</dt><dd>{supportText(pattern.enteredSafetyCount, pattern.anchorCount)}</dd></div>
+        <div><dt>Entered Radius S state</dt><dd>{supportText(pattern.enteredSStateCount, pattern.anchorCount)}</dd></div>
         <div><dt>No confirmed production in bounded path</dt><dd>{supportText(pattern.failedToReachConfirmedProductionCount, pattern.anchorCount)}</dd></div>
         <div><dt>Unresolved at range/data boundary</dt><dd>{pattern.unresolvedCount}/{pattern.anchorCount}</dd></div>
         <div><dt>Time to confirmed production</dt><dd>{pattern.medianSecondsToConfirmedProduction === null ? 'No supported sample' : `Median ${compactDuration(pattern.medianSecondsToConfirmedProduction)}${pattern.p90SecondsToConfirmedProduction === null ? '' : ` · P90 ${compactDuration(pattern.p90SecondsToConfirmedProduction)}`}`}</dd></div>

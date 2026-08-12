@@ -355,7 +355,7 @@ function makeReadyPatterns(presses: NormalizedPress[], fromUtc: string, toUtc: s
   let confirmedProductionCount = 0
   let returnedToMakeReadyCount = 0
   let enteredBadCount = 0
-  let enteredSafetyCount = 0
+  let enteredSStateCount = 0
   let failedToReachConfirmedProductionCount = 0
   let unresolvedCount = 0
   const confirmedLags: number[] = []
@@ -385,7 +385,7 @@ function makeReadyPatterns(presses: NormalizedPress[], fromUtc: string, toUtc: s
       let resolved = false
       let hitBoundary = false
       let enteredBad = false
-      let enteredSafety = false
+      let enteredSState = false
       let lastKnownStartMs = exitMs
       for (let cursor = index + 1; cursor < press.segments.length; cursor += 1) {
         const segment = press.segments[cursor]
@@ -393,7 +393,7 @@ function makeReadyPatterns(presses: NormalizedPress[], fromUtc: string, toUtc: s
         lastKnownStartMs = Date.parse(segment.startUtc)
         if (states.length < 6) states.push(statusRef(segment))
         if (segment.eventType === 'B') enteredBad = true
-        if (segment.eventType === 'S') enteredSafety = true
+        if (segment.eventType === 'S') enteredSState = true
         if (segment.isProduction && confirmedStarts.has(segment.startUtc)) {
           confirmedProductionCount += 1
           const lag = Math.max(0, (Date.parse(segment.startUtc) - exitMs) / 1_000)
@@ -405,7 +405,7 @@ function makeReadyPatterns(presses: NormalizedPress[], fromUtc: string, toUtc: s
         if (segment.eventType === 'M') { returnedToMakeReadyCount += 1; break }
       }
       if (enteredBad) enteredBadCount += 1
-      if (enteredSafety) enteredSafetyCount += 1
+      if (enteredSState) enteredSStateCount += 1
       if (!resolved) {
         if (hitBoundary) unresolvedCount += 1
         else failedToReachConfirmedProductionCount += 1
@@ -417,7 +417,7 @@ function makeReadyPatterns(presses: NormalizedPress[], fromUtc: string, toUtc: s
   return {
     anchorCount, resolvedCount, censoredCount,
     outcomes: outcomeSummaries(outcomes, resolvedCount), paths: pathSummaries(paths, paths.length),
-    confirmedProductionCount, returnedToMakeReadyCount, enteredBadCount, enteredSafetyCount,
+    confirmedProductionCount, returnedToMakeReadyCount, enteredBadCount, enteredSStateCount,
     failedToReachConfirmedProductionCount, unresolvedCount,
     medianSecondsToConfirmedProduction: percentile(confirmedLags, 0.5),
     p90SecondsToConfirmedProduction: confirmedLags.length >= PERCENTILE_SAMPLE ? percentile(confirmedLags, 0.9) : null,

@@ -114,7 +114,7 @@ test('valid Radius overview range is forwarded and returned', async () => {
       categories: [], statusDrivers: [],
       productionStops: { anchorCount: 0, resolvedCount: 0, censoredCount: 0, outcomes: [], paths: [] },
       beforeSuccessfulProduction: { anchorCount: 0, resolvedCount: 0, censoredCount: 0, outcomes: [], paths: [] },
-      afterMakeReady: { anchorCount: 0, resolvedCount: 0, censoredCount: 0, outcomes: [], paths: [], confirmedProductionCount: 0, returnedToMakeReadyCount: 0, enteredBadCount: 0, enteredSafetyCount: 0, failedToReachConfirmedProductionCount: 0, unresolvedCount: 0, medianSecondsToConfirmedProduction: null, p90SecondsToConfirmedProduction: null },
+      afterMakeReady: { anchorCount: 0, resolvedCount: 0, censoredCount: 0, outcomes: [], paths: [], confirmedProductionCount: 0, returnedToMakeReadyCount: 0, enteredBadCount: 0, enteredSStateCount: 0, failedToReachConfirmedProductionCount: 0, unresolvedCount: 0, medianSecondsToConfirmedProduction: null, p90SecondsToConfirmedProduction: null },
       relationshipGroups: [], anomalies: [],
     },
   }

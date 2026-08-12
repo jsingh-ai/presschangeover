@@ -134,7 +134,7 @@ describe('operational analytics', () => {
     assert.equal(pattern.confirmedProductionCount, 1)
     assert.equal(pattern.failedToReachConfirmedProductionCount, 0)
     assert.equal(pattern.enteredBadCount, 1)
-    assert.equal(pattern.enteredSafetyCount, 1)
+    assert.equal(pattern.enteredSStateCount, 1)
     assert.equal(pattern.paths[0].states.length, 6)
   })
 
