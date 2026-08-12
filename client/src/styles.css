@@ -1773,7 +1773,14 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
 .synchronized-timeline__event--wash i, .synchronized-timeline__event--pump i { background: #e1762c; box-shadow: 0 0 0 1px #e1762c; }
 .synchronized-timeline__event.is-selected, .synchronized-timeline__event:focus-visible { outline: 3px solid var(--focus, var(--primary)); outline-offset: 2px; border-radius: .2rem; }
 .synchronized-timeline__event-detail { margin-top: .35rem; padding: .55rem .65rem; border: 1px solid var(--border); border-radius: .45rem; background: var(--surface); font-size: .72rem; }
-.synchronized-timeline__event-detail ul { margin: .35rem 0 0; padding-left: 1.1rem; }
+.synchronized-timeline__event-detail > header { display: flex; justify-content: space-between; gap: .75rem; align-items: center; }
+.synchronized-timeline__event-detail > header span { color: var(--text-muted); }
+.synchronized-timeline__event-groups { display: grid; gap: .45rem; margin-top: .45rem; }
+.synchronized-timeline__event-group { padding: .5rem; border: 1px solid var(--border); border-radius: .4rem; background: var(--surface-strong); }
+.synchronized-timeline__event-group > div { display: flex; justify-content: space-between; gap: .75rem; align-items: center; }
+.synchronized-timeline__event-group > div b { min-width: 1.5rem; padding: .08rem .35rem; border-radius: 999px; background: var(--text); color: var(--surface); text-align: center; }
+.synchronized-timeline__event-group ol { margin: .35rem 0 0; padding-left: 1.1rem; }
+.synchronized-timeline__event-group .secondary-action { margin-top: .45rem; min-height: 1.9rem; padding: .2rem .5rem; font-size: .68rem; }
 .synchronized-timeline__event-detail li { display: grid; grid-template-columns: minmax(8rem, auto) 1fr; gap: .5rem; margin-top: .2rem; }
 .synchronized-timeline__event-detail time { color: var(--text-muted); }
 .synchronized-timeline__crosshair { position: absolute; z-index: 6; top: 1.8rem; bottom: 0; width: 1px; margin-left: 9.5rem; background: color-mix(in srgb, var(--text) 50%, transparent); pointer-events: none; }

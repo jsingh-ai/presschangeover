@@ -162,6 +162,7 @@ await waitFor(`(() => {
   if (!timeline) return false
   const labels = [...timeline.querySelectorAll('[aria-label]')].map((item) => item.getAttribute('aria-label'))
   return labels.some((label) => label === 'Radius recorded intervals')
+    && labels.some((label) => label === 'Radius raw codes intervals')
     && labels.some((label) => label === 'Operational Group intervals')
     && labels.some((label) => label === 'Process Family intervals')
     && labels.some((label) => label === 'Physical Motion intervals')
@@ -176,6 +177,7 @@ report.interactions.overviewTelemetry = await evaluate(`(() => {
     context: ['Order', 'Recipe', 'Customer', 'Material', 'Roll'].filter((name) => labels.includes(name + ' intervals')),
     contextMarkers: labels.includes('Context changes event markers'),
     radius: labels.includes('Radius recorded intervals'),
+    radiusRawCodes: labels.includes('Radius raw codes intervals'),
     group: labels.includes('Operational Group intervals'),
     family: labels.includes('Process Family intervals'),
     motion: labels.includes('Physical Motion intervals'),
@@ -184,17 +186,35 @@ report.interactions.overviewTelemetry = await evaluate(`(() => {
     eventMarkerCount: timeline.querySelectorAll('.synchronized-timeline__event').length,
   }
 })()`)
+const hasPhysicalCluster = await evaluate(`Boolean(document.querySelector('[aria-label="Physical Events event markers"] .synchronized-timeline__event'))`)
+if (hasPhysicalCluster) {
+  await evaluate(`(() => {
+    const markers = [...document.querySelectorAll('[aria-label="Physical Events event markers"] .synchronized-timeline__event')]
+    markers.sort((left, right) => Number(right.querySelector('b')?.textContent ?? 1) - Number(left.querySelector('b')?.textContent ?? 1))
+    markers[0]?.click()
+  })()`)
+  await waitFor(`Boolean(document.querySelector('[aria-label="Physical Events event markers"] + .synchronized-timeline__event-detail, [aria-label="Physical Events event markers"] ~ .synchronized-timeline__event-detail'))`, 'grouped Physical Events detail')
+  report.interactions.physicalEventGrouping = await evaluate(`(() => {
+    const detail = document.querySelector('[aria-label="Physical Events event markers"]')?.parentElement?.querySelector('.synchronized-timeline__event-detail')
+    const groups = [...(detail?.querySelectorAll('.synchronized-timeline__event-group') ?? [])]
+    return {
+      summary: detail?.querySelector('header')?.textContent,
+      groups: groups.map((group) => ({ label: group.querySelector('div strong')?.textContent, count: Number(group.querySelector('div b')?.textContent ?? 0), visible: group.querySelectorAll('li').length, expandable: Boolean(group.querySelector('button')) })),
+    }
+  })()`)
+  if (!report.interactions.physicalEventGrouping.groups.length || report.interactions.physicalEventGrouping.groups.some(({ visible }) => visible > 6)) throw new Error('Physical Events detail was not grouped into bounded change groups')
+}
 await evaluate(`document.querySelector('.overview-gantt')?.scrollIntoView({ block: 'start' })`)
 await delay(300)
 await capture('1440-overview-telemetry')
 
-report.interactions.overviewInlineEvidence = await evaluate(`({ selectedPeriod: Boolean(document.querySelector('.overview-selected-period')), noDrawerAction: !document.querySelector('.overview-selected-period .primary-action'), noDrawer: !document.querySelector('.evidence-drawer-shell'), radiusChanges: Boolean(document.querySelector('[aria-label="Radius raw-code changes event markers"]')) })`)
-if (!report.interactions.overviewInlineEvidence.selectedPeriod || !report.interactions.overviewInlineEvidence.noDrawerAction || !report.interactions.overviewInlineEvidence.noDrawer) throw new Error('Overview evidence was not fully integrated on-page')
+report.interactions.overviewInlineEvidence = await evaluate(`({ selectedPeriod: Boolean(document.querySelector('.overview-selected-period')), noDrawerAction: !document.querySelector('.overview-selected-period .primary-action'), noDrawer: !document.querySelector('.evidence-drawer-shell'), radiusRawCodes: Boolean(document.querySelector('[aria-label="Radius raw codes intervals"]')), noRawCodeFlags: !document.querySelector('[aria-label="Radius raw-code changes event markers"]') })`)
+if (!report.interactions.overviewInlineEvidence.selectedPeriod || !report.interactions.overviewInlineEvidence.noDrawerAction || !report.interactions.overviewInlineEvidence.noDrawer || !report.interactions.overviewInlineEvidence.radiusRawCodes || !report.interactions.overviewInlineEvidence.noRawCodeFlags) throw new Error('Overview evidence was not fully integrated on-page')
 
 await navigate(routeUrl('/overview', { preset: 'custom', fromUtc: longStart.toISOString(), toUtc: customEnd.toISOString(), press: 'press5' }), routes[0].ready, 'long custom range')
 await waitFor(`Boolean(document.querySelector('.overview-gantt .synchronized-timeline[aria-label*="complete selected-range synchronized evidence"]')) && !document.querySelector('.overview-gantt .scope-progress')`, 'long-range complete selected-range telemetry')
-report.interactions.longRange = await evaluate(`({ coverage: document.querySelector('.telemetry-range-note')?.textContent, radiusTrack: Boolean(document.querySelector('[aria-label="Radius recorded intervals"]')), groupTrack: Boolean(document.querySelector('[aria-label="Operational Group intervals"]')), familyTrack: Boolean(document.querySelector('[aria-label="Process Family intervals"]')), completeTelemetry: Boolean(document.querySelector('.overview-gantt .synchronized-timeline[aria-label*="complete selected-range synchronized evidence"]')), focusedTelemetry: Boolean(document.querySelector('.overview-inline-telemetry')) })`)
-if (!report.interactions.longRange.coverage?.includes('complete selected range') || !report.interactions.longRange.radiusTrack || !report.interactions.longRange.groupTrack || !report.interactions.longRange.familyTrack || !report.interactions.longRange.completeTelemetry || report.interactions.longRange.focusedTelemetry) throw new Error('Long-range integrated Overview evidence was incomplete')
+report.interactions.longRange = await evaluate(`({ coverage: document.querySelector('.telemetry-range-note')?.textContent, radiusTrack: Boolean(document.querySelector('[aria-label="Radius recorded intervals"]')), radiusRawTrack: Boolean(document.querySelector('[aria-label="Radius raw codes intervals"]')), groupTrack: Boolean(document.querySelector('[aria-label="Operational Group intervals"]')), familyTrack: Boolean(document.querySelector('[aria-label="Process Family intervals"]')), completeTelemetry: Boolean(document.querySelector('.overview-gantt .synchronized-timeline[aria-label*="complete selected-range synchronized evidence"]')), focusedTelemetry: Boolean(document.querySelector('.overview-inline-telemetry')) })`)
+if (!report.interactions.longRange.coverage?.includes('complete selected range') || !report.interactions.longRange.radiusTrack || !report.interactions.longRange.radiusRawTrack || !report.interactions.longRange.groupTrack || !report.interactions.longRange.familyTrack || !report.interactions.longRange.completeTelemetry || report.interactions.longRange.focusedTelemetry) throw new Error('Long-range integrated Overview evidence was incomplete')
 
 await navigate(routeUrl('/operational-analysis', matrixRange), routes[1].ready, 'Operational occurrence evidence')
 const occurrence = await evaluate(`Boolean(document.querySelector('.activity-evidence tbody tr'))`)

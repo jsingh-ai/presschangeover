@@ -293,6 +293,8 @@ export function contextEventTrack(context?: ProductionContextEvidence): Timeline
       id: `context-event:${change.field}:${change.atUtc}:${index}`,
       atUtc: change.atUtc,
       category: `context-${change.field}`,
+      groupKey: `context-${change.field}`,
+      groupLabel: `${CONTEXT_LABELS[change.field]} changes`,
       label: `${CONTEXT_LABELS[change.field]} changed`,
       detail: `${String(change.previousValue)} → ${String(change.value)}. Observed ${formatPlantDateTime(change.atUtc)} CT`,
     })),
@@ -328,6 +330,17 @@ function signalCategory(canonicalId: string): string {
   return 'physical'
 }
 
+function physicalEventGroup(canonicalId: string): { key: string; label: string } {
+  if (canonicalId === 'deck.active') return { key: 'deck-active', label: 'Deck active changes' }
+  if (canonicalId === 'deck.print_on') return { key: 'print-on', label: 'Print-on changes' }
+  if (canonicalId === 'deck.print_off') return { key: 'print-off', label: 'Print-off changes' }
+  if (canonicalId === 'ink.washup.state') return { key: 'wash-state', label: 'Wash-state changes' }
+  if (canonicalId === 'ink.pump.status') return { key: 'pump-state', label: 'Pump-state changes' }
+  if (canonicalId.startsWith('register.')) return { key: 'register', label: 'Register changes' }
+  if (canonicalId.startsWith('impression.')) return { key: 'impression', label: 'Impression changes' }
+  return { key: canonicalId, label: `${canonicalId} changes` }
+}
+
 export function physicalChangeLabel(signal: SemanticSignalEvidence, change: TelemetryChange): string {
   const deck = signal.deckNumber === null ? '' : `Deck ${signal.deckNumber} `
   if (signal.canonicalId === 'deck.active') return `${deck}active signal ${String(change.previousValue)} → ${String(change.value)}`
@@ -342,14 +355,19 @@ export function physicalChangeLabel(signal: SemanticSignalEvidence, change: Tele
 
 export function physicalEventTrack(physical?: CuratedPhysicalEvidence): TimelineEventTrack | undefined {
   if (!physical) return undefined
-  const events: TimelineEvent[] = physical.signals.flatMap((signal) => signal.changes.map((change, index) => ({
-    id: `physical-event:${signal.canonicalId}:${signal.deckNumber ?? ''}:${change.observedAtUtc}:${index}`,
-    atUtc: change.observedAtUtc,
-    category: signalCategory(signal.canonicalId),
-    deckNumber: signal.deckNumber,
-    label: physicalChangeLabel(signal, change),
-    detail: `${signal.canonicalId}. Raw telemetry change observed ${formatPlantDateTime(change.observedAtUtc)} CT`,
-  })))
+  const events: TimelineEvent[] = physical.signals.flatMap((signal) => {
+    const group = physicalEventGroup(signal.canonicalId)
+    return signal.changes.map((change, index) => ({
+      id: `physical-event:${signal.canonicalId}:${signal.deckNumber ?? ''}:${change.observedAtUtc}:${index}`,
+      atUtc: change.observedAtUtc,
+      category: signalCategory(signal.canonicalId),
+      groupKey: group.key,
+      groupLabel: group.label,
+      deckNumber: signal.deckNumber,
+      label: physicalChangeLabel(signal, change),
+      detail: `${signal.canonicalId}. Raw telemetry change observed ${formatPlantDateTime(change.observedAtUtc)} CT`,
+    }))
+  })
   return events.length ? { id: 'physical-events', label: 'Physical Events', events } : undefined
 }
 

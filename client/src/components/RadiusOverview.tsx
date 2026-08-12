@@ -10,7 +10,7 @@ import type {
   RadiusPressKey,
 } from '../types/api'
 import { formatPlantDateTime } from '../time-ranges'
-import type { TimelineEventTrack, TimelineIntervalItem, TimelineIntervalTrack } from './SynchronizedTimeline'
+import type { TimelineIntervalItem, TimelineIntervalTrack } from './SynchronizedTimeline'
 import { MAX_FULL_TELEMETRY_RANGE_MS, usePressTelemetryEvidence } from './TelemetryEvidenceTimeline'
 import { UnifiedProcessTimeline } from './UnifiedProcessTimeline'
 
@@ -238,19 +238,47 @@ function compositionTitle(range: TimelineRange, observedSeconds: number): string
   return `${range.label.toUpperCase()}\n${formatPlantDateTime(range.startUtc)} – ${formatPlantDateTime(range.endUtc)}\n${duration(range.durationSeconds)} · ${(range.durationSeconds / Math.max(1, observedSeconds) * 100).toFixed(1)}% of observed time\n${range.layer === 'radius' ? 'Operational Group composition' : range.layer === 'group' ? 'Process Family composition' : 'Operational Group composition'}:\n${composition}${familyLabels ? `\nProcess families: ${familyLabels}` : ''}`
 }
 
-export function radiusChangeTrack(intervals: OverviewTimelineInterval[]): TimelineEventTrack {
+const RADIUS_RAW_CODE_HUES = [210, 230, 250, 270, 290, 195, 30, 45, 55] as const
+
+export function radiusRawCodeStyle(variant: number): CSSProperties {
+  const hue = RADIUS_RAW_CODE_HUES[variant % RADIUS_RAW_CODE_HUES.length]!
+  const lightness = [36, 44, 52][Math.floor(variant / RADIUS_RAW_CODE_HUES.length) % 3]!
+  return { background: `hsl(${hue} 62% ${lightness}%)`, color: lightness >= 50 ? '#14202b' : '#fff' }
+}
+
+export function radiusRawCodeTrack(intervals: OverviewTimelineInterval[]): TimelineIntervalTrack {
   const ordered = [...intervals].sort((left, right) => Date.parse(left.startUtc) - Date.parse(right.startUtc))
+  const identities = [...new Set(ordered.filter(({ isUnavailable }) => !isUnavailable).map(rawIdentity))].sort()
+  const colorByIdentity = new Map(identities.map((identity, index) => [identity, index]))
+  const items: TimelineIntervalItem[] = []
+  for (const interval of ordered) {
+    const identity = interval.isUnavailable ? 'Data unavailable' : rawIdentity(interval)
+    const previous = items.at(-1)
+    if (previous && previous.endUtc === interval.startUtc && previous.label === identity && previous.unavailable === interval.isUnavailable) {
+      previous.endUtc = interval.endUtc
+      previous.details = interval.isUnavailable
+        ? `Radius raw code unavailable\n${formatPlantDateTime(previous.startUtc)} – ${formatPlantDateTime(previous.endUtc)} CT`
+        : `Exact Radius identity: ${identity}\n${formatPlantDateTime(previous.startUtc)} – ${formatPlantDateTime(previous.endUtc)} CT`
+      continue
+    }
+    items.push({
+      id: `radius-raw:${interval.intervalId}`,
+      startUtc: interval.startUtc,
+      endUtc: interval.endUtc,
+      label: identity,
+      details: interval.isUnavailable
+        ? `Radius raw code unavailable\n${formatPlantDateTime(interval.startUtc)} – ${formatPlantDateTime(interval.endUtc)} CT`
+        : `Exact Radius identity: ${identity}\n${formatPlantDateTime(interval.startUtc)} – ${formatPlantDateTime(interval.endUtc)} CT`,
+      className: 'radius-raw-code-interval',
+      style: interval.isUnavailable ? undefined : radiusRawCodeStyle(colorByIdentity.get(identity) ?? 0),
+      unavailable: interval.isUnavailable,
+    })
+  }
   return {
-    id: 'radius-changes',
-    label: 'Radius raw-code changes',
-    events: ordered.flatMap((interval, index) => {
-      const previous = ordered[index - 1]
-      if (!previous || previous.isUnavailable || interval.isUnavailable || previous.endUtc !== interval.startUtc) return []
-      const before = rawIdentity(previous)
-      const after = rawIdentity(interval)
-      if (before === after) return []
-      return [{ id: `radius-change:${interval.intervalId}`, atUtc: interval.startUtc, category: 'radius', label: `Radius raw code changed: ${before} → ${after}`, detail: `Observed at ${formatPlantDateTime(interval.startUtc)} CT` }]
-    }),
+    id: 'radius-raw-codes',
+    label: 'Radius raw codes',
+    unavailableLabel: 'No Radius raw code observed in this range',
+    intervals: items,
   }
 }
 
@@ -312,11 +340,13 @@ function SynchronizedGantt({ overview, press }: { overview: RadiusOverviewModel;
   const radiusTrack: TimelineIntervalTrack = { id: 'radius', label: 'Radius recorded', intervals: radiusRanges.map(item) }
   const groupTrack: TimelineIntervalTrack = { id: 'operational-group', label: 'Operational Group', intervals: groupRanges.map(item) }
   const familyTrack: TimelineIntervalTrack = { id: 'process-family', label: 'Process Family', intervals: familyRanges.map(item) }
-  const radiusEvents = radiusChangeTrack(press.timelineIntervals)
+  const radiusRawTrack = radiusRawCodeTrack(press.timelineIntervals)
   const focusedRadius = clipTrack(radiusTrack, telemetry.range.fromUtc, telemetry.range.toUtc)
+  const focusedRadiusRaw = clipTrack(radiusRawTrack, telemetry.range.fromUtc, telemetry.range.toUtc)
   const focusedGroup = clipTrack(groupTrack, telemetry.range.fromUtc, telemetry.range.toUtc)
   const focusedFamily = clipTrack(familyTrack, telemetry.range.fromUtc, telemetry.range.toUtc)
-  return <section className="panel overview-section overview-gantt" aria-labelledby="overview-gantt-title"><div className="overview-section-heading"><div><p className="eyebrow">Complete selected-press evidence</p><h2 id="overview-gantt-title">Synchronized process evidence</h2><p>Production context, exact Radius changes, ProcessIntelligence meaning, motion, speed, and physical events are integrated here—no segment sidebar is required.</p></div></div>{telemetry.loading && <div className="scope-progress" role="status"><i />Loading telemetry for the complete selected range…</div>}{telemetry.error && <p className="message message--warning">Some telemetry is temporarily unavailable. Radius and ProcessIntelligence chronology remain available.</p>}{fullRangeTelemetry ? <><p className="telemetry-range-note">Telemetry covers the complete selected range from {formatPlantDateTime(overview.fromUtc)} through {formatPlantDateTime(overview.toUtc)} CT. No two-hour focus window is substituted.</p><UnifiedProcessTimeline fromUtc={overview.fromUtc} toUtc={overview.toUtc} ariaLabel={`${press.displayName} complete selected-range synchronized evidence`} selectedId={selected?.id} radiusTrack={radiusTrack} radiusEventTrack={radiusEvents} groupTrack={groupTrack} familyTrack={familyTrack} telemetry={telemetry} onSelect={(selectedItem) => setSelected(byId.get(selectedItem.id) ?? selected)} /></> : <><p className="telemetry-range-note">This range exceeds 24 hours. Complete Radius and ProcessIntelligence chronology is shown; select an interval for bounded raw telemetry.</p><UnifiedProcessTimeline fromUtc={overview.fromUtc} toUtc={overview.toUtc} ariaLabel={`${press.displayName} complete synchronized chronology`} selectedId={selected?.id} radiusTrack={radiusTrack} radiusEventTrack={radiusEvents} groupTrack={groupTrack} familyTrack={familyTrack} onSelect={(selectedItem) => setSelected(byId.get(selectedItem.id) ?? selected)} /><section className="overview-inline-telemetry" aria-labelledby="overview-inline-telemetry-title"><h3 id="overview-inline-telemetry-title">Focused telemetry for the selected interval</h3><p>{formatPlantDateTime(telemetry.range.fromUtc)} – {formatPlantDateTime(telemetry.range.toUtc)} CT · bounded to two hours</p><UnifiedProcessTimeline fromUtc={telemetry.range.fromUtc} toUtc={telemetry.range.toUtc} ariaLabel={`${press.displayName} focused synchronized telemetry`} selectedId={selected?.id} radiusTrack={focusedRadius} radiusEventTrack={radiusEvents} groupTrack={focusedGroup} familyTrack={focusedFamily} telemetry={telemetry} onSelect={(selectedItem) => setSelected(byId.get(selectedItem.id) ?? selected)} /></section></>}{telemetry.capabilities && <div className="timeline-quality-row"><span>Telemetry metadata <b>{telemetry.capabilities.metadataStatus}</b></span><span>Physical Motion <b>{motionCapability?.state ?? 'UNKNOWN'}</b></span><span>Actual Speed <b>{speedCapability?.state ?? 'UNKNOWN'}</b></span><span>Observed physical changes <b>{telemetry.physical?.signals.reduce((sum, signal) => sum + signal.changes.length, 0) ?? 0}</b></span></div>}{selected && <SelectedPeriod range={selected} observedSeconds={press.observedSeconds} />}</section>
+  const selectTimelineItem = (item: TimelineIntervalItem) => setSelected(byId.get(item.id) ?? radiusRanges.find((range) => Date.parse(item.startUtc) >= Date.parse(range.startUtc) && Date.parse(item.startUtc) < Date.parse(range.endUtc)) ?? selected)
+  return <section className="panel overview-section overview-gantt" aria-labelledby="overview-gantt-title"><div className="overview-section-heading"><div><p className="eyebrow">Complete selected-press evidence</p><h2 id="overview-gantt-title">Synchronized process evidence</h2><p>Production context, exact Radius changes, ProcessIntelligence meaning, motion, speed, and physical events are integrated here—no segment sidebar is required.</p></div></div>{telemetry.loading && <div className="scope-progress" role="status"><i />Loading telemetry for the complete selected range…</div>}{telemetry.error && <p className="message message--warning">Some telemetry is temporarily unavailable. Radius and ProcessIntelligence chronology remain available.</p>}{fullRangeTelemetry ? <><p className="telemetry-range-note">Telemetry covers the complete selected range from {formatPlantDateTime(overview.fromUtc)} through {formatPlantDateTime(overview.toUtc)} CT. No two-hour focus window is substituted.</p><UnifiedProcessTimeline fromUtc={overview.fromUtc} toUtc={overview.toUtc} ariaLabel={`${press.displayName} complete selected-range synchronized evidence`} selectedId={selected?.id} radiusTrack={radiusTrack} radiusRawTrack={radiusRawTrack} groupTrack={groupTrack} familyTrack={familyTrack} telemetry={telemetry} onSelect={selectTimelineItem} /></> : <><p className="telemetry-range-note">This range exceeds 24 hours. Complete Radius and ProcessIntelligence chronology is shown; select an interval for bounded raw telemetry.</p><UnifiedProcessTimeline fromUtc={overview.fromUtc} toUtc={overview.toUtc} ariaLabel={`${press.displayName} complete synchronized chronology`} selectedId={selected?.id} radiusTrack={radiusTrack} radiusRawTrack={radiusRawTrack} groupTrack={groupTrack} familyTrack={familyTrack} onSelect={selectTimelineItem} /><section className="overview-inline-telemetry" aria-labelledby="overview-inline-telemetry-title"><h3 id="overview-inline-telemetry-title">Focused telemetry for the selected interval</h3><p>{formatPlantDateTime(telemetry.range.fromUtc)} – {formatPlantDateTime(telemetry.range.toUtc)} CT · bounded to two hours</p><UnifiedProcessTimeline fromUtc={telemetry.range.fromUtc} toUtc={telemetry.range.toUtc} ariaLabel={`${press.displayName} focused synchronized telemetry`} selectedId={selected?.id} radiusTrack={focusedRadius} radiusRawTrack={focusedRadiusRaw} groupTrack={focusedGroup} familyTrack={focusedFamily} telemetry={telemetry} onSelect={selectTimelineItem} /></section></>}{telemetry.capabilities && <div className="timeline-quality-row"><span>Telemetry metadata <b>{telemetry.capabilities.metadataStatus}</b></span><span>Physical Motion <b>{motionCapability?.state ?? 'UNKNOWN'}</b></span><span>Actual Speed <b>{speedCapability?.state ?? 'UNKNOWN'}</b></span><span>Observed physical changes <b>{telemetry.physical?.signals.reduce((sum, signal) => sum + signal.changes.length, 0) ?? 0}</b></span></div>}{selected && <SelectedPeriod range={selected} observedSeconds={press.observedSeconds} />}</section>
 }
 
 function Coverage({ data, press }: { data: NonNullable<RadiusOverviewModel['decisionSupport']>; press?: OverviewPressAllocation }) {

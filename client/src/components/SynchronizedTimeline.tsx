@@ -37,6 +37,8 @@ export interface TimelineEvent {
   atUtc: string
   label: string
   category: string
+  groupKey?: string
+  groupLabel?: string
   detail?: string
   deckNumber?: number | null
 }
@@ -52,6 +54,28 @@ export interface TimelineEventCluster {
   id: string
   positionPercent: number
   events: TimelineEvent[]
+}
+
+export interface TimelineEventGroup {
+  key: string
+  label: string
+  events: TimelineEvent[]
+}
+
+function defaultEventGroupLabel(category: string): string {
+  const words = category.replace(/^context-/, '').replaceAll(/[-_]+/g, ' ')
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)} changes`
+}
+
+export function groupTimelineEvents(events: TimelineEvent[]): TimelineEventGroup[] {
+  const groups = new Map<string, TimelineEventGroup>()
+  for (const event of events) {
+    const key = event.groupKey ?? event.category
+    const group = groups.get(key) ?? { key, label: event.groupLabel ?? defaultEventGroupLabel(event.category), events: [] }
+    group.events.push(event)
+    groups.set(key, group)
+  }
+  return [...groups.values()].sort((left, right) => right.events.length - left.events.length || left.label.localeCompare(right.label))
 }
 
 export interface SynchronizedTimelineProps {
@@ -139,6 +163,7 @@ export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolut
   const [hoveredEventUtc, setHoveredEventUtc] = useState<string>()
   const [crosshair, setCrosshair] = useState<number>()
   const [selectedEventCluster, setSelectedEventCluster] = useState<string>()
+  const [expandedEventGroups, setExpandedEventGroups] = useState<Set<string>>(() => new Set())
   const canvasStyle = { '--timeline-min-width': `${minimumCanvasWidth}px` } as CSSProperties
   const numericGeometry = useMemo(() => numericTracks.map((track) => ({ track, geometry: numericPaths(track.samples, from, span, 1000, 88, track.connectObservedGaps, track.interpolation) })), [numericTracks, from, span])
   const eventGeometry = useMemo(() => eventTracks.map((track) => ({ track, clusters: clusterTimelineEvents(track.events, fromUtc, toUtc) })), [eventTracks, fromUtc, toUtc])
@@ -153,6 +178,20 @@ export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolut
     if (!trackOrder) return undefined
     const index = trackOrder.indexOf(`${kind}:${id}`)
     return { order: index < 0 ? trackOrder.length : index }
+  }
+
+  function selectEventCluster(id: string) {
+    setSelectedEventCluster((current) => current === id ? undefined : id)
+    setExpandedEventGroups(new Set())
+  }
+
+  function toggleEventGroup(id: string) {
+    setExpandedEventGroups((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
   }
 
   function moveCrosshair(event: PointerEvent<HTMLDivElement>) {
@@ -188,10 +227,10 @@ export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolut
               {clusters.length ? clusters.map((cluster) => {
                 const description = cluster.events.map(eventDescription).join(' ')
                 const category = cluster.events.length === 1 ? cluster.events[0]!.category.replace(/[^a-z0-9_-]/gi, '-').toLowerCase() : 'cluster'
-                return <button type="button" key={cluster.id} className={`synchronized-timeline__event synchronized-timeline__event--${category} ${selectedEventCluster === cluster.id ? 'is-selected' : ''}`} style={{ left: `${cluster.positionPercent}%` }} title={description} aria-label={description} onMouseEnter={() => { setCrosshair(cluster.positionPercent); setHoveredEventUtc(cluster.events[0]?.atUtc) }} onFocus={() => { setCrosshair(cluster.positionPercent); setHoveredEventUtc(cluster.events[0]?.atUtc) }} onMouseLeave={() => { setCrosshair(undefined); setHoveredEventUtc(undefined) }} onBlur={() => { setCrosshair(undefined); setHoveredEventUtc(undefined) }} onClick={() => setSelectedEventCluster((current) => current === cluster.id ? undefined : cluster.id)}><i aria-hidden="true" />{cluster.events.length > 1 && <b>{cluster.events.length}</b>}</button>
+                return <button type="button" key={cluster.id} className={`synchronized-timeline__event synchronized-timeline__event--${category} ${selectedEventCluster === cluster.id ? 'is-selected' : ''}`} style={{ left: `${cluster.positionPercent}%` }} title={description} aria-label={description} onMouseEnter={() => { setCrosshair(cluster.positionPercent); setHoveredEventUtc(cluster.events[0]?.atUtc) }} onFocus={() => { setCrosshair(cluster.positionPercent); setHoveredEventUtc(cluster.events[0]?.atUtc) }} onMouseLeave={() => { setCrosshair(undefined); setHoveredEventUtc(undefined) }} onBlur={() => { setCrosshair(undefined); setHoveredEventUtc(undefined) }} onClick={() => selectEventCluster(cluster.id)}><i aria-hidden="true" />{cluster.events.length > 1 && <b>{cluster.events.length}</b>}</button>
               }) : <span>{track.unavailableLabel ?? 'No observed changes in this range'}</span>}
             </div>
-            {clusters.map((cluster) => selectedEventCluster === cluster.id && <div className="synchronized-timeline__event-detail" role="status" key={`detail:${cluster.id}`}><strong>{cluster.events.length === 1 ? 'Observed event' : `${cluster.events.length} grouped events`}</strong><ul>{cluster.events.map((event) => <li key={event.id}><time>{formatPlantDateTime(event.atUtc)} CT</time><span>{event.label}</span></li>)}</ul></div>)}
+            {clusters.map((cluster) => selectedEventCluster === cluster.id && <div className="synchronized-timeline__event-detail" role="region" aria-label="Selected event details" key={`detail:${cluster.id}`}><header><strong>{cluster.events.length === 1 ? 'Observed event' : `${cluster.events.length} events`}</strong><span>{groupTimelineEvents(cluster.events).length} {groupTimelineEvents(cluster.events).length === 1 ? 'change group' : 'change groups'}</span></header><div className="synchronized-timeline__event-groups">{groupTimelineEvents(cluster.events).map((group) => { const groupId = `${cluster.id}:${group.key}`; const expanded = expandedEventGroups.has(groupId); const visible = expanded ? group.events : group.events.slice(0, 6); return <section key={group.key} className="synchronized-timeline__event-group"><div><strong>{group.label}</strong><b>{group.events.length}</b></div><ol>{visible.map((event) => <li key={event.id}><time>{formatPlantDateTime(event.atUtc)} CT</time><span>{event.label}</span></li>)}</ol>{group.events.length > 6 && <button type="button" className="secondary-action" onClick={() => toggleEventGroup(groupId)}>{expanded ? 'Show first 6' : `Show all ${group.events.length}`}</button>}</section> })}</div></div>)}
           </div>
         </div>)}
         {crosshair !== undefined && <div className="synchronized-timeline__crosshair" style={{ left: `${crosshair}%` }} aria-hidden="true" />}

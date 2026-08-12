@@ -4,8 +4,8 @@ import { describe, it } from 'node:test'
 import React, { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { runLayerIntervals } from '../src/components/RunEvidenceDrawer'
-import { radiusChangeTrack, timelineFamilyLabel } from '../src/components/RadiusOverview'
-import { clusterTimelineEvents, numericPaths, SynchronizedTimeline } from '../src/components/SynchronizedTimeline'
+import { radiusRawCodeTrack, timelineFamilyLabel } from '../src/components/RadiusOverview'
+import { clusterTimelineEvents, groupTimelineEvents, numericPaths, SynchronizedTimeline } from '../src/components/SynchronizedTimeline'
 import { actualSpeedTrack, contextDisplayValue, contextEventTrack, contextIntervalStyle, contextIntervalTracks, curatedCategoriesForCapabilities, mergeTelemetryEvidenceChunks, physicalChangeLabel, physicalEventTrack, telemetryEvidenceChunks, type PressTelemetryEvidenceState } from '../src/components/TelemetryEvidenceTimeline'
 import { UnifiedProcessTimeline } from '../src/components/UnifiedProcessTimeline'
 import type { OperationalRun, OverviewTimelineInterval } from '../src/types/api'
@@ -52,6 +52,9 @@ describe('primary telemetry visual integration', () => {
     const source = readFileSync(new URL('../src/components/SynchronizedTimeline.tsx', import.meta.url), 'utf8')
     assert.match(source, /setHoveredEventUtc/)
     assert.match(source, /setCrosshair\(cluster\.positionPercent\)/)
+    assert.match(source, /groupTimelineEvents\(cluster\.events\)/)
+    assert.match(source, /group\.events\.slice\(0, 6\)/)
+    assert.match(source, /Show all/)
   })
 
   it('creates context intervals and explicit markers from actual observed timestamps', () => {
@@ -97,10 +100,11 @@ describe('primary telemetry visual integration', () => {
     assert.equal(physicalChangeLabel(pump, pump.changes[0]!), 'Pump-state code 1 → 11')
     const track = physicalEventTrack({ pressKey: 'press5', displayName: 'Press 5', sourceKey: 'source', fromUtc, toUtc, requestedCategories: ['deck_states', 'wash', 'pump'], capabilities: [], signals: [deck, wash, pump] })
     assert.equal(track?.events.length, 3)
+    assert.deepEqual(groupTimelineEvents(track?.events ?? []).map(({ label }) => label).sort(), ['Print-on changes', 'Pump-state changes', 'Wash-state changes'])
     assert.doesNotMatch(track?.events.map(({ label }) => label).join(' '), /enabled|began printing|pump failed/i)
   })
 
-  it('shows only actual physical changes and marks every contiguous Radius raw-code transition', () => {
+  it('shows only actual physical changes and renders exact Radius raw codes as colored intervals', () => {
     const unchangedPhysical: CuratedPhysicalEvidence = { pressKey: 'press5', displayName: 'Press 5', sourceKey: 'source', fromUtc, toUtc, requestedCategories: ['deck_states'], capabilities: [], signals: [{ ...deckSignal('deck.print_on', 2, 0, 1), changes: [] }] }
     assert.equal(physicalEventTrack(unchangedPhysical), undefined)
 
@@ -111,17 +115,20 @@ describe('primary telemetry visual integration', () => {
       radiusInterval('gap', '2026-08-11T12:02:00.000Z', '2026-08-11T12:03:00.000Z', null, null, null, true),
       radiusInterval('three', '2026-08-11T12:03:00.000Z', '2026-08-11T12:04:00.000Z', 'G', '150', 'Run Production'),
     ]
-    const radiusEvents = radiusChangeTrack(intervals).events
-    assert.equal(radiusEvents.length, 1)
-    assert.equal(radiusEvents[0]?.atUtc, '2026-08-11T12:01:00.000Z')
-    assert.match(radiusEvents[0]?.label ?? '', /B \/ 100 \/ First → B \/ 200 \/ Second/)
+    const rawTrack = radiusRawCodeTrack(intervals)
+    assert.equal(rawTrack.label, 'Radius raw codes')
+    assert.equal(rawTrack.intervals.length, 4)
+    assert.equal(rawTrack.intervals[1]?.startUtc, '2026-08-11T12:01:00.000Z')
+    assert.equal(rawTrack.intervals[1]?.label, 'B / 200 / Second')
+    assert.equal(new Set(rawTrack.intervals.filter(({ unavailable }) => !unavailable).map(({ style }) => style?.background)).size, 3)
+    assert.doesNotMatch(rawTrack.intervals.map(({ style }) => String(style?.background ?? '')).join(' '), /hsl\((?:0|1[01]\d|12\d)/)
   })
 
   it('keeps Overview telemetry on-page and blocks the Overview segment drawer path', () => {
     const overviewSource = readFileSync(new URL('../src/components/RadiusOverview.tsx', import.meta.url), 'utf8')
     const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
     assert.match(overviewSource, /Focused telemetry for the selected interval/)
-    assert.match(overviewSource, /radiusEventTrack=\{radiusEvents\}/)
+    assert.match(overviewSource, /radiusRawTrack=\{radiusRawTrack\}/)
     assert.doesNotMatch(overviewSource, /Open exact evidence/)
     assert.match(appSource, /!\(area === 'overview' && investigation\.mode === 'segment'\)/)
     assert.match(appSource, /window\.setInterval\(refreshLiveRange, 60_000\)/)
