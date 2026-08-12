@@ -10,14 +10,13 @@ import type {
   RadiusPressKey,
 } from '../types/api'
 import { formatPlantDateTime } from '../time-ranges'
-import type { TimelineIntervalItem, TimelineIntervalTrack } from './SynchronizedTimeline'
+import type { TimelineEventTrack, TimelineIntervalItem, TimelineIntervalTrack } from './SynchronizedTimeline'
 import { usePressTelemetryEvidence } from './TelemetryEvidenceTimeline'
 import { UnifiedProcessTimeline } from './UnifiedProcessTimeline'
 
 interface RadiusOverviewProps {
   overview: RadiusOverviewModel
   selectedPress?: RadiusPressKey
-  onInspectInterval?(pressKey: RadiusPressKey, interval: OverviewTimelineInterval): void
 }
 
 interface TimelineRange {
@@ -100,6 +99,21 @@ function largestFamily(state?: OverviewRadiusStateAllocation, group?: OverviewGr
     ?? group?.families[0]
 }
 
+function familyDisplayName(family: Pick<OverviewFamilyAllocation, 'key' | 'name' | 'needsClassification'>): string {
+  if (family.needsClassification) return 'Needs Classification'
+  return family.key === 'UNKNOWN' ? 'Unspecified by current classification' : family.name
+}
+
+export function timelineFamilyLabel(interval: OverviewTimelineInterval): string {
+  if (interval.classificationStatus === 'needs_classification') return 'Needs Classification'
+  if (interval.processFamilyKey === 'UNKNOWN') return interval.classificationNeedsReview ? 'Needs review' : 'Unspecified by current classification'
+  return interval.processFamilyLabel ?? 'Needs Classification'
+}
+
+function rawIdentity(interval: OverviewTimelineInterval): string {
+  return `${interval.eventType ?? '—'} / ${interval.statusCode ?? '—'} / ${interval.statusDescription ?? '(empty)'}`
+}
+
 function SnapshotMetric({ label, value, detail, accent }: { label: string; value: string; detail: string; accent?: string }) {
   return <div className={`overview-snapshot-metric ${accent ? `overview-snapshot-metric--${accent}` : ''}`}><span>{label}</span><strong>{value}</strong><small>{detail}</small></div>
 }
@@ -112,7 +126,7 @@ function RankCard({ press, top }: { press: OverviewPressAllocation; top: boolean
     <div className="overview-rank-card__title"><span>{top ? `#${press.fleetProductionRank}` : 'Review'}</span><strong>{press.displayName}</strong><b>{pct(press.productionSharePercent)}</b></div>
     <div className="overview-rank-facts"><span>{duration(press.productionSeconds)} Run Production</span><span>{delta(press.productionDeltaVsFleetMedianPoints)} vs median</span><span>{press.coveragePercent.toFixed(1)}% coverage</span></div>
     <div className="overview-rank-states" aria-label={`${press.displayName} Radius state distribution`}>{press.radiusStateBreakdown.map((item) => <span key={item.eventType}><i className={`radius-state-dot radius-state-dot--${stateClass(item.eventType)}`} />{item.displayLabel} {item.shareOfObservedPercent.toFixed(1)}%</span>)}</div>
-    {state && <p><strong>Largest non-production Radius state:</strong> {state.displayLabel} · {state.nonProductionShareOfObservedPercent.toFixed(1)}%{group ? <> <span aria-hidden="true">→</span> {group.name} · {group.shareOfObservedPercent.toFixed(1)}%</> : null}{family ? <> <span aria-hidden="true">→</span> {family.name} · {family.shareOfObservedPercent.toFixed(1)}%</> : null}</p>}
+    {state && <p><strong>Largest non-production Radius state:</strong> {state.displayLabel} · {state.nonProductionShareOfObservedPercent.toFixed(1)}%{group ? <> <span aria-hidden="true">→</span> {group.name} · {group.shareOfObservedPercent.toFixed(1)}%</> : null}{family ? <> <span aria-hidden="true">→</span> {familyDisplayName(family)} · {family.shareOfObservedPercent.toFixed(1)}%</> : null}</p>}
   </article>
 }
 
@@ -124,7 +138,7 @@ function AllocationDetail({ press, state }: { press: OverviewPressAllocation; st
   return <div className="overview-allocation-detail" role="region" aria-label={`${press.displayName} ${state.displayLabel} semantic breakdown`}>
     <div><span>Selected Radius state</span><strong>{press.displayName} · {state.displayLabel}</strong><small>{duration(state.durationSeconds)} · {state.shareOfObservedPercent.toFixed(1)}% of observed time</small></div>
     <div><span>What made up this state</span>{state.operationalGroups.slice(0, 4).map((group) => <p key={group.key}><i style={semanticStyle(group)} /> <strong>{group.name}</strong> {duration(group.durationSeconds)} · {group.shareOfRadiusStatePercent.toFixed(1)}% of {state.displayLabel}</p>)}</div>
-    <div><span>Leading process families</span>{state.operationalGroups.flatMap((group) => group.families).sort((a, b) => b.durationSeconds - a.durationSeconds).slice(0, 4).map((family) => <p key={family.key}><strong>{family.name}</strong> {duration(family.durationSeconds)} · {family.shareOfRadiusStatePercent.toFixed(1)}% of {state.displayLabel}</p>)}</div>
+    <div><span>Leading process families</span>{state.operationalGroups.flatMap((group) => group.families).sort((a, b) => b.durationSeconds - a.durationSeconds).slice(0, 4).map((family) => <p key={family.key}><strong>{familyDisplayName(family)}</strong> {duration(family.durationSeconds)} · {family.shareOfRadiusStatePercent.toFixed(1)}% of {state.displayLabel}</p>)}</div>
   </div>
 }
 
@@ -158,7 +172,7 @@ function HierarchyExplorer({ title, eyebrow, states, selectedState, selectedGrou
     {state && <div className="overview-hierarchy-path">
       <article className="overview-hierarchy-parent"><p className="eyebrow">Radius said</p><h3>{state.displayLabel}</h3><strong>{duration(state.durationSeconds)}</strong><span>{state.shareOfObservedPercent.toFixed(1)}% of observed time</span></article>
       <div className="overview-hierarchy-level"><p className="eyebrow">What made up {state.displayLabel} time</p><div className="overview-group-list">{state.operationalGroups.map((item) => <button type="button" key={item.key} className={item.key === group?.key ? 'active' : ''} onClick={() => onGroup(item.key)} style={semanticStyle(item)}><span><i aria-hidden="true" />{item.name}</span><strong>{duration(item.durationSeconds)}</strong><small>{item.shareOfRadiusStatePercent.toFixed(1)}% of {state.displayLabel} · {item.shareOfObservedPercent.toFixed(1)}% overall</small></button>)}</div>{showPressContributions && group && <PressContributionList contributions={group.pressContributions} category={group.name} />}</div>
-      {group && <div className="overview-hierarchy-level overview-hierarchy-families"><p className="eyebrow">Process families within {group.name}</p><div className="overview-family-list">{group.families.map((item) => <button type="button" key={item.key} className={item.key === family?.key ? 'active' : ''} onClick={() => onFamily(item.key)}><span>{item.name}{item.needsClassification && <em>Needs Classification</em>}</span><strong>{duration(item.durationSeconds)}</strong><small>{item.shareOfGroupPercent.toFixed(1)}% of {group.name} · {item.shareOfRadiusStatePercent.toFixed(1)}% of {state.displayLabel} · {item.shareOfObservedPercent.toFixed(1)}% overall</small></button>)}</div>{family && <p className="overview-family-context"><strong>{family.name}</strong> is observed across {duration(family.durationSeconds)} in this scope. {family.sourceIdentityCount} mapped Radius {family.sourceIdentityCount === 1 ? 'identity contributes' : 'identities contribute'} to this family.</p>}{showPressContributions && family && <PressContributionList contributions={family.pressContributions} category={family.name} />}</div>}
+      {group && <div className="overview-hierarchy-level overview-hierarchy-families"><p className="eyebrow">Process families within {group.name}</p><div className="overview-family-list">{group.families.map((item) => <button type="button" key={item.key} className={item.key === family?.key ? 'active' : ''} onClick={() => onFamily(item.key)}><span>{familyDisplayName(item)}{item.key === 'UNKNOWN' && <em>{item.needsClassification ? 'Needs Classification' : 'Radius identity is not specific enough for a process family'}</em>}</span><strong>{duration(item.durationSeconds)}</strong><small>{item.shareOfGroupPercent.toFixed(1)}% of {group.name} · {item.shareOfRadiusStatePercent.toFixed(1)}% of {state.displayLabel} · {item.shareOfObservedPercent.toFixed(1)}% overall</small></button>)}</div>{family && <p className="overview-family-context"><strong>{familyDisplayName(family)}</strong> is observed across {duration(family.durationSeconds)} in this scope. {family.sourceIdentityCount} Radius {family.sourceIdentityCount === 1 ? 'identity contributes' : 'identities contribute'}; exact raw-code changes are shown in the synchronized timeline.</p>}{showPressContributions && family && <PressContributionList contributions={family.pressContributions} category={familyDisplayName(family)} />}</div>}
     </div>}
   </section>
 }
@@ -177,7 +191,7 @@ function RankingTable({ presses }: { presses: OverviewPressAllocation[] }) {
       const state = largestState(press.radiusStateBreakdown, press.largestNonProductionRadiusStateEventType)
       const group = largestGroup(state)
       const family = largestFamily(state, group)
-      return <tr key={press.pressKey}><td>{index + 1}</td><th scope="row">{press.displayName}</th><td>{pct(press.productionSharePercent)}</td><td>{state ? `${state.displayLabel} · ${state.nonProductionShareOfObservedPercent.toFixed(1)}%` : 'None observed'}</td><td>{group ? `${group.name} · ${group.shareOfObservedPercent.toFixed(1)}%` : '—'}</td><td>{family?.name ?? '—'}</td><td>{press.coveragePercent.toFixed(1)}%</td></tr>
+      return <tr key={press.pressKey}><td>{index + 1}</td><th scope="row">{press.displayName}</th><td>{pct(press.productionSharePercent)}</td><td>{state ? `${state.displayLabel} · ${state.nonProductionShareOfObservedPercent.toFixed(1)}%` : 'None observed'}</td><td>{group ? `${group.name} · ${group.shareOfObservedPercent.toFixed(1)}%` : '—'}</td><td>{family ? familyDisplayName(family) : '—'}</td><td>{press.coveragePercent.toFixed(1)}%</td></tr>
     })}</tbody></table></div>
   </section>
 }
@@ -185,8 +199,8 @@ function RankingTable({ presses }: { presses: OverviewPressAllocation[] }) {
 function mergeTimeline(intervals: OverviewTimelineInterval[], layer: TimelineRange['layer']): TimelineRange[] {
   const merged: TimelineRange[] = []
   for (const interval of intervals) {
-    const key = interval.isUnavailable ? 'unavailable' : layer === 'radius' ? interval.eventType : layer === 'group' ? interval.operationalGroupKey : interval.processFamilyKey
-    const label = interval.isUnavailable ? 'Data unavailable' : layer === 'radius' ? interval.radiusStateLabel : layer === 'group' ? interval.operationalGroupLabel : interval.processFamilyLabel ?? 'Needs Classification'
+    const label = interval.isUnavailable ? 'Data unavailable' : layer === 'radius' ? interval.radiusStateLabel : layer === 'group' ? interval.operationalGroupLabel : timelineFamilyLabel(interval)
+    const key = interval.isUnavailable ? 'unavailable' : layer === 'radius' ? interval.eventType : layer === 'group' ? interval.operationalGroupKey : `${interval.processFamilyKey ?? 'unclassified'}:${label}`
     const previous = merged.at(-1)
     if (previous && previous.endUtc === interval.startUtc && previous.id.startsWith(`${layer}:${key}:`)) {
       previous.endUtc = interval.endUtc
@@ -216,15 +230,44 @@ function compositionTitle(range: TimelineRange, observedSeconds: number): string
   if (range.isUnavailable) return `DATA UNAVAILABLE\n${formatPlantDateTime(range.startUtc)} – ${formatPlantDateTime(range.endUtc)}\n${duration(range.durationSeconds)}\nNo Radius observations were available. Machine state is unknown.`
   const totals = new Map<string, number>()
   for (const interval of range.intervals) {
-    const label = range.layer === 'radius' ? interval.operationalGroupLabel : range.layer === 'group' ? interval.processFamilyLabel ?? 'Needs Classification' : interval.operationalGroupLabel
+    const label = range.layer === 'radius' ? interval.operationalGroupLabel : range.layer === 'group' ? timelineFamilyLabel(interval) : interval.operationalGroupLabel
     totals.set(label, (totals.get(label) ?? 0) + interval.durationSeconds)
   }
   const composition = [...totals.entries()].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([label, seconds]) => `${label}: ${duration(seconds)}`).join('\n')
-  const familyLabels = [...new Set(range.intervals.map(({ processFamilyLabel }) => processFamilyLabel).filter(Boolean))].slice(0, 3).join(', ')
+  const familyLabels = [...new Set(range.intervals.map(timelineFamilyLabel))].slice(0, 3).join(', ')
   return `${range.label.toUpperCase()}\n${formatPlantDateTime(range.startUtc)} – ${formatPlantDateTime(range.endUtc)}\n${duration(range.durationSeconds)} · ${(range.durationSeconds / Math.max(1, observedSeconds) * 100).toFixed(1)}% of observed time\n${range.layer === 'radius' ? 'Operational Group composition' : range.layer === 'group' ? 'Process Family composition' : 'Operational Group composition'}:\n${composition}${familyLabels ? `\nProcess families: ${familyLabels}` : ''}`
 }
 
-function SelectedPeriod({ range, observedSeconds, onInspect }: { range: TimelineRange; observedSeconds: number; onInspect?(): void }) {
+export function radiusChangeTrack(intervals: OverviewTimelineInterval[]): TimelineEventTrack {
+  const ordered = [...intervals].sort((left, right) => Date.parse(left.startUtc) - Date.parse(right.startUtc))
+  return {
+    id: 'radius-changes',
+    label: 'Radius raw-code changes',
+    events: ordered.flatMap((interval, index) => {
+      const previous = ordered[index - 1]
+      if (!previous || previous.isUnavailable || interval.isUnavailable || previous.endUtc !== interval.startUtc) return []
+      const before = rawIdentity(previous)
+      const after = rawIdentity(interval)
+      if (before === after) return []
+      return [{ id: `radius-change:${interval.intervalId}`, atUtc: interval.startUtc, category: 'radius', label: `Radius raw code changed: ${before} → ${after}`, detail: `Observed at ${formatPlantDateTime(interval.startUtc)} CT` }]
+    }),
+  }
+}
+
+function clipTrack(track: TimelineIntervalTrack, fromUtc: string, toUtc: string): TimelineIntervalTrack {
+  const from = Date.parse(fromUtc)
+  const to = Date.parse(toUtc)
+  return {
+    ...track,
+    intervals: track.intervals.flatMap((interval) => {
+      const start = Math.max(from, Date.parse(interval.startUtc))
+      const end = Math.min(to, Date.parse(interval.endUtc))
+      return end > start ? [{ ...interval, startUtc: new Date(start).toISOString(), endUtc: new Date(end).toISOString() }] : []
+    }),
+  }
+}
+
+function SelectedPeriod({ range, observedSeconds }: { range: TimelineRange; observedSeconds: number }) {
   if (range.isUnavailable) return <div className="overview-selected-period"><p className="eyebrow">Selected period</p><h3>Data unavailable</h3><strong>{duration(range.durationSeconds)}</strong><p>No Radius observations were available. Machine state is unknown and no semantic classification is inferred.</p></div>
   const groups = new Map<string, { label: string; seconds: number; families: Map<string, number> }>()
   const states = new Map<string, number>()
@@ -233,13 +276,15 @@ function SelectedPeriod({ range, observedSeconds, onInspect }: { range: Timeline
     const key = interval.operationalGroupKey ?? 'unclassified'
     const group = groups.get(key) ?? { label: interval.operationalGroupLabel, seconds: 0, families: new Map<string, number>() }
     group.seconds += interval.durationSeconds
-    if (interval.processFamilyLabel) group.families.set(interval.processFamilyLabel, (group.families.get(interval.processFamilyLabel) ?? 0) + interval.durationSeconds)
+    const family = timelineFamilyLabel(interval)
+    group.families.set(family, (group.families.get(family) ?? 0) + interval.durationSeconds)
     groups.set(key, group)
   }
-  return <div className="overview-selected-period"><p className="eyebrow">Selected period</p><div className="overview-selected-period__heading"><h3>{range.label}</h3><strong>{duration(range.durationSeconds)}</strong><span>{(range.durationSeconds / Math.max(1, observedSeconds) * 100).toFixed(1)}% of observed press time</span></div><div className="overview-selected-period__grid"><div><span>Radius state</span>{[...states.entries()].map(([label, seconds]) => <p key={label}><strong>{label}</strong>{duration(seconds)}</p>)}</div><div><span>ProcessIntelligence interpretation</span>{[...groups.entries()].map(([key, group]) => <div key={key}><p><strong>{group.label}</strong>{duration(group.seconds)}</p>{[...group.families.entries()].map(([label, seconds]) => <small key={label}>{label} · {duration(seconds)}</small>)}</div>)}</div></div>{onInspect && <button type="button" className="primary-action" onClick={onInspect}>Open exact evidence</button>}</div>
+  const identities = [...new Map(range.intervals.map((interval) => [rawIdentity(interval), interval])).entries()]
+  return <div className="overview-selected-period"><p className="eyebrow">Selected period · integrated evidence</p><div className="overview-selected-period__heading"><h3>{range.label}</h3><strong>{duration(range.durationSeconds)}</strong><span>{(range.durationSeconds / Math.max(1, observedSeconds) * 100).toFixed(1)}% of observed press time</span></div><div className="overview-selected-period__grid"><div><span>Exact Radius identities</span>{identities.map(([identity, interval]) => <p key={identity}><strong>{identity}</strong>{interval.classificationNeedsReview ? 'Needs review' : interval.classificationStatus === 'needs_classification' ? 'Needs Classification' : 'Published mapping'}</p>)}</div><div><span>ProcessIntelligence interpretation</span>{[...groups.entries()].map(([key, group]) => <div key={key}><p><strong>{group.label}</strong>{duration(group.seconds)}</p>{[...group.families.entries()].map(([label, seconds]) => <small key={label}>{label} · {duration(seconds)}</small>)}</div>)}</div></div></div>
 }
 
-function SynchronizedGantt({ overview, press, onInspectInterval }: { overview: RadiusOverviewModel; press: OverviewPressAllocation; onInspectInterval?(interval: OverviewTimelineInterval): void }) {
+function SynchronizedGantt({ overview, press }: { overview: RadiusOverviewModel; press: OverviewPressAllocation }) {
   const radiusRanges = useMemo(() => mergeTimeline(press.timelineIntervals, 'radius'), [press.timelineIntervals])
   const groupRanges = useMemo(() => mergeTimeline(press.timelineIntervals, 'group'), [press.timelineIntervals])
   const familyRanges = useMemo(() => mergeTimeline(press.timelineIntervals, 'family'), [press.timelineIntervals])
@@ -258,13 +303,19 @@ function SynchronizedGantt({ overview, press, onInspectInterval }: { overview: R
     style: range.layer === 'group' ? processStyle(range) : undefined,
   })
   const longRange = Date.parse(overview.toUtc) - Date.parse(overview.fromUtc) > 2 * 60 * 60 * 1_000
-  const telemetry = usePressTelemetryEvidence(press.pressKey, overview.fromUtc, overview.toUtc, { enabled: !longRange, padShortRange: false })
+  const telemetryFromUtc = longRange && selected ? selected.startUtc : overview.fromUtc
+  const telemetryToUtc = longRange && selected ? selected.endUtc : overview.toUtc
+  const telemetry = usePressTelemetryEvidence(press.pressKey, telemetryFromUtc, telemetryToUtc, { padShortRange: longRange })
   const speedCapability = telemetry.capabilities?.capabilities.find(({ canonicalId }) => canonicalId === 'machine.speed.actual')
   const motionCapability = telemetry.capabilities?.capabilities.find(({ canonicalId }) => canonicalId === 'physical.motion_state')
   const radiusTrack: TimelineIntervalTrack = { id: 'radius', label: 'Radius recorded', intervals: radiusRanges.map(item) }
   const groupTrack: TimelineIntervalTrack = { id: 'operational-group', label: 'Operational Group', intervals: groupRanges.map(item) }
   const familyTrack: TimelineIntervalTrack = { id: 'process-family', label: 'Process Family', intervals: familyRanges.map(item) }
-  return <section className="panel overview-section overview-gantt" aria-labelledby="overview-gantt-title"><div className="overview-section-heading"><div><p className="eyebrow">Complete selected period</p><h2 id="overview-gantt-title">Synchronized process evidence</h2><p>Context, operator evidence, semantic interpretation, and physical evidence share one wall-clock viewport when supported.</p></div></div>{longRange && <p className="telemetry-range-note">This range is longer than two hours. Radius, Operational Group, and Process Family chronology remain available; select an interval to load bounded physical telemetry in exact evidence.</p>}{!longRange && telemetry.error && <p className="message message--warning">Some telemetry is temporarily unavailable. Radius and ProcessIntelligence chronology remain available.</p>}<UnifiedProcessTimeline fromUtc={overview.fromUtc} toUtc={overview.toUtc} ariaLabel={`${press.displayName} synchronized evidence`} selectedId={selected?.id} radiusTrack={radiusTrack} groupTrack={groupTrack} familyTrack={familyTrack} telemetry={longRange ? undefined : telemetry} onSelect={(selectedItem) => setSelected(byId.get(selectedItem.id) ?? selected)} />{!longRange && telemetry.capabilities && <div className="timeline-quality-row"><span>Telemetry metadata <b>{telemetry.capabilities.metadataStatus}</b></span><span>Physical Motion <b>{motionCapability?.state ?? 'UNKNOWN'}</b></span><span>Actual Speed <b>{speedCapability?.state ?? 'UNKNOWN'}</b></span><span>Physical event categories <b>{telemetry.physical?.requestedCategories.length ?? 0}</b></span></div>}{selected && <SelectedPeriod range={selected} observedSeconds={press.observedSeconds} onInspect={selected.isUnavailable || !onInspectInterval ? undefined : () => onInspectInterval(selected.intervals[0]!)} />}</section>
+  const radiusEvents = radiusChangeTrack(press.timelineIntervals)
+  const focusedRadius = clipTrack(radiusTrack, telemetry.range.fromUtc, telemetry.range.toUtc)
+  const focusedGroup = clipTrack(groupTrack, telemetry.range.fromUtc, telemetry.range.toUtc)
+  const focusedFamily = clipTrack(familyTrack, telemetry.range.fromUtc, telemetry.range.toUtc)
+  return <section className="panel overview-section overview-gantt" aria-labelledby="overview-gantt-title"><div className="overview-section-heading"><div><p className="eyebrow">Complete selected-press evidence</p><h2 id="overview-gantt-title">Synchronized process evidence</h2><p>Job context, exact Radius changes, ProcessIntelligence meaning, motion, speed, and physical events are integrated here—no segment sidebar is required.</p></div></div>{telemetry.error && <p className="message message--warning">Some telemetry is temporarily unavailable. Radius and ProcessIntelligence chronology remain available.</p>}{!longRange ? <UnifiedProcessTimeline fromUtc={overview.fromUtc} toUtc={overview.toUtc} ariaLabel={`${press.displayName} synchronized evidence`} selectedId={selected?.id} radiusTrack={radiusTrack} radiusEventTrack={radiusEvents} groupTrack={groupTrack} familyTrack={familyTrack} telemetry={telemetry} onSelect={(selectedItem) => setSelected(byId.get(selectedItem.id) ?? selected)} /> : <><p className="telemetry-range-note">The complete Radius, raw-code-change, Operational Group, and Process Family chronology is shown first. Select any interval to update the bounded telemetry window below without opening a sidebar.</p><UnifiedProcessTimeline fromUtc={overview.fromUtc} toUtc={overview.toUtc} ariaLabel={`${press.displayName} complete synchronized chronology`} selectedId={selected?.id} radiusTrack={radiusTrack} radiusEventTrack={radiusEvents} groupTrack={groupTrack} familyTrack={familyTrack} onSelect={(selectedItem) => setSelected(byId.get(selectedItem.id) ?? selected)} /><section className="overview-inline-telemetry" aria-labelledby="overview-inline-telemetry-title"><h3 id="overview-inline-telemetry-title">Focused telemetry for the selected interval</h3><p>{formatPlantDateTime(telemetry.range.fromUtc)} – {formatPlantDateTime(telemetry.range.toUtc)} CT · bounded to two hours</p><UnifiedProcessTimeline fromUtc={telemetry.range.fromUtc} toUtc={telemetry.range.toUtc} ariaLabel={`${press.displayName} focused synchronized telemetry`} selectedId={selected?.id} radiusTrack={focusedRadius} radiusEventTrack={radiusEvents} groupTrack={focusedGroup} familyTrack={focusedFamily} telemetry={telemetry} onSelect={(selectedItem) => setSelected(byId.get(selectedItem.id) ?? selected)} /></section></>}{telemetry.capabilities && <div className="timeline-quality-row"><span>Telemetry metadata <b>{telemetry.capabilities.metadataStatus}</b></span><span>Physical Motion <b>{motionCapability?.state ?? 'UNKNOWN'}</b></span><span>Actual Speed <b>{speedCapability?.state ?? 'UNKNOWN'}</b></span><span>Observed physical changes <b>{telemetry.physical?.signals.reduce((sum, signal) => sum + signal.changes.length, 0) ?? 0}</b></span></div>}{selected && <SelectedPeriod range={selected} observedSeconds={press.observedSeconds} />}</section>
 }
 
 function Coverage({ data, press }: { data: NonNullable<RadiusOverviewModel['decisionSupport']>; press?: OverviewPressAllocation }) {
@@ -298,7 +349,7 @@ function FleetOverview({ overview, selectedState, selectedGroup, selectedFamily,
   </>
 }
 
-function SinglePressOverview({ overview, selectedPress, selectedState, selectedGroup, selectedFamily, onState, onGroup, onFamily, onInspectInterval }: { overview: RadiusOverviewModel; selectedPress: RadiusPressKey; selectedState?: string; selectedGroup?: string; selectedFamily?: string; onState(value: string): void; onGroup(value: string): void; onFamily(value: string): void; onInspectInterval?(pressKey: RadiusPressKey, interval: OverviewTimelineInterval): void }) {
+function SinglePressOverview({ overview, selectedPress, selectedState, selectedGroup, selectedFamily, onState, onGroup, onFamily }: { overview: RadiusOverviewModel; selectedPress: RadiusPressKey; selectedState?: string; selectedGroup?: string; selectedFamily?: string; onState(value: string): void; onGroup(value: string): void; onFamily(value: string): void }) {
   const data = overview.decisionSupport!
   const press = data.pressAllocations.find((candidate) => candidate.pressKey === selectedPress)
   if (!press) return <section className="panel empty-state">The selected press is not mapped in this Radius range.</section>
@@ -307,16 +358,16 @@ function SinglePressOverview({ overview, selectedPress, selectedState, selectedG
   const family = largestFamily(state, group)
   const otherEligible = Math.max(0, data.fleetSummary.rankablePressCount - 1)
   return <>
-    <section className="overview-snapshot" aria-labelledby="press-summary-title"><div className="overview-snapshot-heading"><div><p className="eyebrow">Selected press</p><h2 id="press-summary-title">{press.displayName} summary</h2></div><small>Published Classification v{data.classificationVersion}</small></div><div className="overview-snapshot-grid"><SnapshotMetric label="Run Production" value={pct(press.productionSharePercent)} detail={duration(press.productionSeconds)} accent="production" /><SnapshotMetric label="Fleet rank" value={press.rankingEligible ? `${press.fleetProductionRank} / ${data.fleetSummary.rankablePressCount}` : 'Not ranked'} detail={`${delta(press.productionDeltaVsFleetMedianPoints)} vs median`} /><SnapshotMetric label="Radius coverage" value={`${press.coveragePercent.toFixed(1)}%`} detail={`${duration(press.unavailableSeconds)} unavailable`} /><SnapshotMetric label="Largest non-production Radius state" value={state?.displayLabel ?? 'None observed'} detail={state ? `${state.nonProductionShareOfObservedPercent.toFixed(1)}% · ${duration(state.nonProductionSeconds)}` : 'No non-production time'} /></div>{state && <div className="overview-summary-path"><span><b>{state.displayLabel}</b>{state.nonProductionShareOfObservedPercent.toFixed(1)}% of observed time outside canonical production</span>{group && <span><b>{group.name}</b>{group.shareOfObservedPercent.toFixed(1)}% of observed time</span>}{family && <span><b>{family.name}</b>{family.shareOfObservedPercent.toFixed(1)}% of observed time</span>}</div>}</section>
+    <section className="overview-snapshot" aria-labelledby="press-summary-title"><div className="overview-snapshot-heading"><div><p className="eyebrow">Selected press</p><h2 id="press-summary-title">{press.displayName} summary</h2></div><small>Published Classification v{data.classificationVersion}</small></div><div className="overview-snapshot-grid"><SnapshotMetric label="Run Production" value={pct(press.productionSharePercent)} detail={duration(press.productionSeconds)} accent="production" /><SnapshotMetric label="Fleet rank" value={press.rankingEligible ? `${press.fleetProductionRank} / ${data.fleetSummary.rankablePressCount}` : 'Not ranked'} detail={`${delta(press.productionDeltaVsFleetMedianPoints)} vs median`} /><SnapshotMetric label="Radius coverage" value={`${press.coveragePercent.toFixed(1)}%`} detail={`${duration(press.unavailableSeconds)} unavailable`} /><SnapshotMetric label="Largest non-production Radius state" value={state?.displayLabel ?? 'None observed'} detail={state ? `${state.nonProductionShareOfObservedPercent.toFixed(1)}% · ${duration(state.nonProductionSeconds)}` : 'No non-production time'} /></div>{state && <div className="overview-summary-path"><span><b>{state.displayLabel}</b>{state.nonProductionShareOfObservedPercent.toFixed(1)}% of observed time outside canonical production</span>{group && <span><b>{group.name}</b>{group.shareOfObservedPercent.toFixed(1)}% of observed time</span>}{family && <span><b>{familyDisplayName(family)}</b>{family.shareOfObservedPercent.toFixed(1)}% of observed time</span>}</div>}</section>
     <section className="panel overview-section overview-position" aria-labelledby="position-title"><div className="overview-section-heading"><div><p className="eyebrow">Comparable fleet context</p><h2 id="position-title">Position in fleet</h2></div></div><dl><div><dt>Run Production rank</dt><dd>{press.rankingEligible ? `${press.fleetProductionRank} / ${data.fleetSummary.rankablePressCount}` : 'Not ranked'}</dd></div><div><dt>Run Production</dt><dd>{pct(press.productionSharePercent)}</dd></div><div><dt>Fleet median</dt><dd>{pct(data.fleetSummary.productionMedianPercent)}</dd></div><div><dt>Difference</dt><dd>{delta(press.productionDeltaVsFleetMedianPoints)}</dd></div></dl><p>{press.rankingEligible && press.fleetProductionRank !== null ? `${press.displayName} spent a larger observed Run Production share than ${Math.max(0, data.fleetSummary.rankablePressCount - press.fleetProductionRank)} of ${otherEligible} other rankable presses.` : `${press.displayName} is not ranked: ${exclusionReason(press)}.`}</p></section>
     <section className="panel overview-section" aria-labelledby="distribution-title"><div className="overview-section-heading"><div><p className="eyebrow">Observed Radius time only</p><h2 id="distribution-title">Radius State Distribution</h2><p>These broad states describe what Radius reported; the semantic hierarchy below explains what each state represented.</p></div><RadiusStateLegend /></div><div className="overview-distribution">{press.radiusStateBreakdown.map((item) => <div key={item.eventType}><span><i className={`radius-state-dot radius-state-dot--${stateClass(item.eventType)}`} />{item.displayLabel}</span><div><i className={`overview-radius-fill overview-radius-fill--${stateClass(item.eventType)}`} style={{ width: `${item.shareOfObservedPercent}%` }} /></div><strong>{item.shareOfObservedPercent.toFixed(1)}%</strong><small>{duration(item.durationSeconds)}</small></div>)}</div><p className="overview-unavailable-note"><strong>Data unavailable:</strong> {duration(press.unavailableSeconds)} · {(100 - press.coveragePercent).toFixed(1)}% of selected wall-clock time</p></section>
-    <SynchronizedGantt overview={overview} press={press} onInspectInterval={(interval) => onInspectInterval?.(selectedPress, interval)} />
+    <SynchronizedGantt overview={overview} press={press} />
     <HierarchyExplorer title={`Where ${press.displayName} Spent Its Time`} eyebrow="Selected press Radius states explained" states={press.radiusStateBreakdown} selectedState={selectedState} selectedGroup={selectedGroup} selectedFamily={selectedFamily} onState={onState} onGroup={onGroup} onFamily={onFamily} />
     <Coverage data={data} press={press} />
   </>
 }
 
-export function RadiusOverview({ overview, selectedPress, onInspectInterval }: RadiusOverviewProps) {
+export function RadiusOverview({ overview, selectedPress }: RadiusOverviewProps) {
   const data = overview.decisionSupport
   const activePress = selectedPress ? data?.pressAllocations.find(({ pressKey }) => pressKey === selectedPress) : undefined
   const scopeStates = activePress?.radiusStateBreakdown ?? data?.fleetRadiusStateBreakdown ?? []
@@ -351,7 +402,7 @@ export function RadiusOverview({ overview, selectedPress, onInspectInterval }: R
     {!data ? <section className="panel unavailable-panel"><h2>Overview classification unavailable</h2><p>The read-only Radius response did not include a published classification view. Radius evidence remains available in Operational Analysis.</p></section>
       : data.fleetSummary.observedSeconds === 0 ? <section className="panel unavailable-panel"><h2>No observed Radius data</h2><p>The selected period contains only Data unavailable. No press is ranked and no operational meaning is inferred.</p></section>
         : selectedPress
-          ? <SinglePressOverview overview={overview} selectedPress={selectedPress} selectedState={selectedState} selectedGroup={selectedGroup} selectedFamily={selectedFamily} onState={chooseState} onGroup={chooseGroup} onFamily={setSelectedFamily} onInspectInterval={onInspectInterval} />
+          ? <SinglePressOverview overview={overview} selectedPress={selectedPress} selectedState={selectedState} selectedGroup={selectedGroup} selectedFamily={selectedFamily} onState={chooseState} onGroup={chooseGroup} onFamily={setSelectedFamily} />
           : <FleetOverview overview={overview} selectedState={selectedState} selectedGroup={selectedGroup} selectedFamily={selectedFamily} onState={chooseState} onGroup={chooseGroup} onFamily={setSelectedFamily} />}
   </>
 }

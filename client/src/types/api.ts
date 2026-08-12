@@ -430,9 +430,9 @@ export interface OverviewRadiusStateAllocation {
 export type OverviewTimelineClassificationStatus = 'mapped' | 'needs_classification' | 'unavailable'
 export interface OverviewTimelineInterval {
   intervalId: string; startUtc: string; endUtc: string; durationSeconds: number; isUnavailable: boolean
-  eventType: string | null; radiusStateLabel: string; operationalGroupKey: string | null; operationalGroupLabel: string
+  eventType: string | null; statusCode: string | null; statusDescription: string | null; radiusStateLabel: string; operationalGroupKey: string | null; operationalGroupLabel: string
   operationalGroupLightColor: string | null; operationalGroupDarkColor: string | null
-  processFamilyKey: string | null; processFamilyLabel: string | null; classificationStatus: OverviewTimelineClassificationStatus
+  processFamilyKey: string | null; processFamilyLabel: string | null; classificationNeedsReview: boolean; classificationStatus: OverviewTimelineClassificationStatus
 }
 export interface OverviewPressAllocation {
   pressKey: RadiusPressKey; displayName: string; wallClockSeconds: number; observedSeconds: number; unavailableSeconds: number

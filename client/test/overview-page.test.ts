@@ -34,7 +34,7 @@ const makeReady = radiusState('M', 'Make Ready', 600, observed, [setupGroup])
 
 function interval(id: string, start: string, end: string, seconds: number, eventType: string | null, state: string, groupItem?: OverviewGroupAllocation, familyName?: string): OverviewTimelineInterval {
   const unavailable = eventType === null
-  return { intervalId: id, startUtc: start, endUtc: end, durationSeconds: seconds, isUnavailable: unavailable, eventType, radiusStateLabel: state, operationalGroupKey: groupItem?.key ?? null, operationalGroupLabel: unavailable ? 'Data unavailable' : groupItem?.name ?? 'Needs Classification', operationalGroupLightColor: groupItem?.lightColor ?? null, operationalGroupDarkColor: groupItem?.darkColor ?? null, processFamilyKey: familyName?.toUpperCase().replaceAll(' ', '_') ?? null, processFamilyLabel: familyName ?? null, classificationStatus: unavailable ? 'unavailable' : groupItem ? 'mapped' : 'needs_classification' }
+  return { intervalId: id, startUtc: start, endUtc: end, durationSeconds: seconds, isUnavailable: unavailable, eventType, radiusStateLabel: state, statusCode: unavailable ? null : '100', statusDescription: unavailable ? null : state, operationalGroupKey: groupItem?.key ?? null, operationalGroupLabel: unavailable ? 'Data unavailable' : groupItem?.name ?? 'Needs Classification', operationalGroupLightColor: groupItem?.lightColor ?? null, operationalGroupDarkColor: groupItem?.darkColor ?? null, processFamilyKey: familyName?.toUpperCase().replaceAll(' ', '_') ?? null, processFamilyLabel: familyName ?? null, classificationNeedsReview: !unavailable && !groupItem, classificationStatus: unavailable ? 'unavailable' : groupItem ? 'mapped' : 'needs_classification' }
 }
 
 const timeline = [
@@ -188,14 +188,17 @@ describe('Radius state hierarchy Overview', () => {
     assert.match(source, /selectedId === item\.id/)
   })
 
-  it('keeps long-range Radius chronology and requires focused physical detail', () => {
+  it('keeps long-range Radius chronology and integrates bounded physical detail on-page', () => {
     const modified = structuredClone(overview)
     modified.toUtc = '2026-08-11T16:00:00.000Z'
     const html = renderToStaticMarkup(createElement(RadiusOverview, { overview: modified, selectedPress: 'press11' }))
-    assert.match(html, /range is longer than two hours/)
-    assert.match(html, /select an interval to load bounded physical telemetry/)
+    assert.match(html, /Select any interval to update the bounded telemetry window below/)
+    assert.match(html, /Focused telemetry for the selected interval/)
+    assert.match(html, /bounded to two hours/)
     assert.match(html, /Radius recorded/)
-    assert.match(html, /ProcessIntelligence/)
+    assert.match(html, /Operational Group/)
+    assert.match(html, /Process Family/)
+    assert.doesNotMatch(html, /Open exact evidence/)
   })
 
   it('keeps the responsive light/dark implementation free of page-level overflow', () => {

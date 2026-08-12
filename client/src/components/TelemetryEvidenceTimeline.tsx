@@ -82,22 +82,20 @@ export function usePressTelemetryEvidence(pressKey: RadiusPressKey | undefined, 
 export function contextIntervalTracks(context?: ProductionContextEvidence): TimelineIntervalTrack[] {
   if (!context) return []
   const end = Date.parse(context.toUtc)
-  return (Object.keys(CONTEXT_LABELS) as ProductionContextField[]).flatMap((field) => {
+  return (Object.keys(CONTEXT_LABELS) as ProductionContextField[]).map((field) => {
     const evidence = context.fields[field]
-    if (evidence.capabilityState !== 'SUPPORTED') return []
     const values = [
       ...(evidence.seed ? [{ atUtc: context.fromUtc, value: evidence.seed.value }] : []),
       ...evidence.changes.map((change) => ({ atUtc: change.observedAtUtc, value: change.value })),
     ].sort((left, right) => Date.parse(left.atUtc) - Date.parse(right.atUtc))
-    if (!values.length) return []
-    return [{ id: `context-${field}`, label: CONTEXT_LABELS[field], intervals: values.map((value, index) => ({
+    return { id: `context-${field}`, label: CONTEXT_LABELS[field], unavailableLabel: evidence.capabilityState === 'UNSUPPORTED' ? 'Unsupported for this press' : evidence.capabilityState === 'SUPPORTED' ? 'Supported, but no value observed in this range' : 'Capability unknown or temporarily unavailable', intervals: values.map((value, index) => ({
       id: `context:${field}:${value.atUtc}:${index}`,
       startUtc: value.atUtc,
       endUtc: new Date(Math.max(Date.parse(value.atUtc) + 1_000, Math.min(end, Date.parse(values[index + 1]?.atUtc ?? context.toUtc)))).toISOString(),
       label: String(value.value),
       details: `${CONTEXT_LABELS[field]} context: ${String(value.value)}\nObserved from ${formatPlantDateTime(value.atUtc)} CT`,
       className: 'context-timeline-value',
-    })) }]
+    })) }
   })
 }
 
@@ -115,10 +113,10 @@ export function contextEventTrack(context?: ProductionContextEvidence): Timeline
   }
 }
 
-export function motionIntervalTrack(motion?: PressMotionEvidence): TimelineIntervalTrack | undefined {
-  if (!motion) return undefined
+export function motionIntervalTrack(motion?: PressMotionEvidence, capability?: SignalCapability): TimelineIntervalTrack | undefined {
+  if (!motion && !capability) return undefined
   return {
-    id: 'motion', label: 'Physical Motion', intervals: motion.segments.map((segment, index) => ({
+    id: 'motion', label: 'Physical Motion', unavailableLabel: capability?.state === 'UNSUPPORTED' ? 'Unsupported for this press' : capability?.state === 'SUPPORTED' ? 'Supported, but no physical state observed in this range' : 'Capability unknown or temporarily unavailable', intervals: (motion?.segments ?? []).map((segment, index) => ({
       id: `motion:${index}:${segment.fromUtc}`, startUtc: segment.fromUtc, endUtc: segment.toUtc, label: segment.state,
       details: `Physical Motion: ${segment.state}\n${formatPlantDateTime(segment.fromUtc)} – ${formatPlantDateTime(segment.toUtc)} CT\n${Math.round(segment.durationMs / 1_000)} seconds`,
       className: `physical-motion physical-motion--${segment.state.toLowerCase()}`, unavailable: segment.state === 'UNKNOWN',
@@ -165,7 +163,7 @@ export function physicalEventTrack(physical?: CuratedPhysicalEvidence): Timeline
     label: physicalChangeLabel(signal, change),
     detail: `${signal.canonicalId}. Raw telemetry change observed ${formatPlantDateTime(change.observedAtUtc)} CT`,
   })))
-  return { id: 'physical-events', label: 'Physical Events', events, unavailableLabel: 'No supported physical signal changes observed in this range' }
+  return events.length ? { id: 'physical-events', label: 'Physical Events', events } : undefined
 }
 
 export function telemetrySummary(evidence: PressTelemetryEvidenceState) {

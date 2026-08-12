@@ -42,10 +42,11 @@ export function PhysicalEvidencePanel({ pressKey, fromUtc, toUtc, evidence, show
   const speedCapability = capabilities?.capabilities.find(({ canonicalId }) => canonicalId === 'machine.speed.actual')
   const motionCapability = capabilities?.capabilities.find(({ canonicalId }) => canonicalId === 'physical.motion_state')
   const contextValues = context ? (Object.keys(CONTEXT_LABELS) as Array<keyof typeof CONTEXT_LABELS>).map((field) => ({ field, value: currentContext(context, field) })).filter((item): item is { field: keyof typeof CONTEXT_LABELS; value: string } => item.value !== undefined) : []
-  const motionTrack = motionIntervalTrack(motion)
+  const motionTrack = motionIntervalTrack(motion, motionCapability)
   const speedTrack = actualSpeedTrack(speed, speedCapability)
   const contextEvents = contextEventTrack(context)
   const physicalEvents = physicalEventTrack(physical)
+  const changedSignals = physical?.signals.filter(({ changes }) => changes.length > 0) ?? []
 
   return <section className="drawer-section physical-evidence" aria-labelledby="physical-evidence-title">
     <div className="section-heading"><div><p className="eyebrow">Independent source</p><h3 id="physical-evidence-title">Physical telemetry evidence</h3><p>Telemetry is shown as independent physical evidence. It does not correct Radius or redefine the ProcessIntelligence classification.</p></div></div>
@@ -58,12 +59,12 @@ export function PhysicalEvidencePanel({ pressKey, fromUtc, toUtc, evidence, show
       {showTimeline && <SynchronizedTimeline fromUtc={range.fromUtc} toUtc={range.toUtc} ariaLabel={`${capabilities.displayName} synchronized physical evidence`} intervalTracks={[...contextIntervalTracks(context), ...(motionTrack ? [motionTrack] : [])]} numericTracks={speedTrack ? [speedTrack] : []} eventTracks={[contextEvents, physicalEvents].filter((track): track is NonNullable<typeof track> => Boolean(track))} />}
       {speed && <p className="quiet-copy">Actual Speed: {speed.actual.samples.length ? `${speed.actual.samples.length} raw samples` : 'supported but no samples in range'}{speed.actual.sourceUnit ? ` · source metadata reports ${speed.actual.sourceUnit}; values are not converted` : ' · source units are unverified'}</p>}
       {context && <section className="physical-evidence__section"><h4>Job / production context</h4>{contextValues.length ? <dl className="compact-facts">{contextValues.map(({ field, value }) => <div key={field}><dt>{CONTEXT_LABELS[field]}</dt><dd>{value}</dd></div>)}</dl> : <p className="empty-state">Supported context fields have no values in this range.</p>}{context.changes.length > 0 && <ol className="context-change-list">{context.changes.map((change, index) => <li key={`${change.atUtc}:${change.field}:${index}`}><time>{formatPlantDateTime(change.atUtc)} CT</time><strong>{CONTEXT_LABELS[change.field]}</strong><span>{String(change.previousValue)} → {String(change.value)}</span></li>)}</ol>}</section>}
-      {physical && <section className="physical-evidence__section"><h4>Supported signal changes</h4>{physical.signals.length ? <ul className="physical-signal-list">{physical.signals.map((signal) => {
+      {physical && <section className="physical-evidence__section"><h4>Observed signal changes</h4>{changedSignals.length ? <ul className="physical-signal-list">{changedSignals.map((signal) => {
         const key = `${signal.canonicalId}:${signal.deckNumber ?? ''}`
         const expanded = expandedSignals.has(key)
         const visible = expanded ? signal.changes : signal.changes.slice(0, 8)
         return <li key={key}><strong>{signalLabel(signal.canonicalId, signal.deckNumber)}</strong><span>{signal.observationState === 'SUPPORTED_WITH_NO_SAMPLES_IN_RANGE' ? 'Supported, but no changes in range' : signal.changes.length > 8 && !expanded ? `8 of ${signal.changes.length} changes shown` : `${signal.changes.length} raw code/value change${signal.changes.length === 1 ? '' : 's'} shown`}</span>{visible.map((change, index) => <small key={`${change.observedAtUtc}:${index}`}>{formatPlantDateTime(change.observedAtUtc)} CT · {String(change.previousValue)} → {String(change.value)}</small>)}{signal.changes.length > 8 && <button type="button" className="secondary-action" onClick={() => setExpandedSignals((current) => { const next = new Set(current); if (expanded) next.delete(key); else next.add(key); return next })}>{expanded ? 'Show first 8 changes' : `Show all ${signal.changes.length} changes`}</button>}</li>
-      })}</ul> : <p className="empty-state">No supported deck, register, impression, wash, or pump signals were returned.</p>}</section>}
+      })}</ul> : <p className="empty-state">No deck, register, impression, wash, or pump changes were observed in this range.</p>}</section>}
     </>}
     {error && <p className="message message--warning">Some telemetry evidence could not be loaded. Available Radius evidence and successful telemetry sections remain visible.</p>}
   </section>

@@ -285,6 +285,8 @@ function timelineInterval(segment: RadiusStatusSegment, index: number): Overview
       durationSeconds: segment.durationSeconds,
       isUnavailable: true,
       eventType: null,
+      statusCode: null,
+      statusDescription: null,
       radiusStateLabel: 'Data unavailable',
       operationalGroupKey: null,
       operationalGroupLabel: 'Data unavailable',
@@ -292,6 +294,7 @@ function timelineInterval(segment: RadiusStatusSegment, index: number): Overview
       operationalGroupDarkColor: null,
       processFamilyKey: null,
       processFamilyLabel: null,
+      classificationNeedsReview: false,
       classificationStatus: 'unavailable',
     }
   }
@@ -303,6 +306,8 @@ function timelineInterval(segment: RadiusStatusSegment, index: number): Overview
     durationSeconds: segment.durationSeconds,
     isUnavailable: false,
     eventType: segment.eventType,
+    statusCode: segment.statusCode,
+    statusDescription: segment.statusDescription,
     radiusStateLabel: radiusStateLabel(segment.eventType),
     operationalGroupKey: classification.groupKey,
     operationalGroupLabel: classification.groupName,
@@ -310,6 +315,7 @@ function timelineInterval(segment: RadiusStatusSegment, index: number): Overview
     operationalGroupDarkColor: classification.groupDarkColor,
     processFamilyKey: classification.familyKey,
     processFamilyLabel: classification.familyName,
+    classificationNeedsReview: segment.classification?.needsReview ?? true,
     classificationStatus: classification.needsClassification ? 'needs_classification' : 'mapped',
   }
 }

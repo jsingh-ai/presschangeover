@@ -19,6 +19,7 @@ export interface TimelineIntervalTrack {
   id: string
   label: string
   intervals: TimelineIntervalItem[]
+  unavailableLabel?: string
 }
 
 export interface TimelineNumericTrack {
@@ -160,12 +161,12 @@ export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolut
         {intervalTracks.map((track) => <div className="synchronized-timeline__row" key={track.id} style={rowOrder('interval', track.id)}>
           <strong>{track.label}</strong>
           <div className="synchronized-timeline__track" role="group" aria-label={`${track.label} intervals`}>
-            {track.intervals.map((item) => {
+            {track.intervals.length ? track.intervals.map((item) => {
               const left = Math.max(0, (Date.parse(item.startUtc) - from) / span * 100)
               const width = Math.max(.12, Math.min(100 - left, (Date.parse(item.endUtc) - Date.parse(item.startUtc)) / span * 100))
               const linked = hovered ? overlap(item, hovered) : hoveredEventUtc ? Date.parse(item.startUtc) <= Date.parse(hoveredEventUtc) && Date.parse(item.endUtc) > Date.parse(hoveredEventUtc) : false
               return <button type="button" key={item.id} className={`synchronized-timeline__interval ${item.className ?? ''} ${item.unavailable ? 'is-unavailable' : ''} ${linked ? 'is-linked' : ''} ${selectedId === item.id ? 'is-selected' : ''}`.trim()} style={{ left: `${left}%`, width: `${width}%`, ...item.style }} title={item.details} aria-label={item.details?.replaceAll('\n', '. ') ?? `${item.label}, ${timeLabel(item.startUtc, labelOrigin, coordinateMode)} to ${timeLabel(item.endUtc, labelOrigin, coordinateMode)}`} onMouseEnter={() => focusInterval(item)} onFocus={() => focusInterval(item)} onMouseLeave={() => { setHovered(undefined); setCrosshair(undefined) }} onBlur={() => { setHovered(undefined); setCrosshair(undefined) }} onClick={() => onSelect?.(item, track)}>{width >= 4 && <span>{item.label}</span>}</button>
-            })}
+            }) : <span className="synchronized-timeline__empty">{track.unavailableLabel ?? 'No observed state in this range'}</span>}
           </div>
         </div>)}
         {numericGeometry.map(({ track, geometry }) => <div className="synchronized-timeline__row synchronized-timeline__row--numeric" key={track.id} style={rowOrder('numeric', track.id)}>

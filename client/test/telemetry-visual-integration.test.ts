@@ -4,10 +4,11 @@ import { describe, it } from 'node:test'
 import React, { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { runLayerIntervals } from '../src/components/RunEvidenceDrawer'
+import { radiusChangeTrack, timelineFamilyLabel } from '../src/components/RadiusOverview'
 import { clusterTimelineEvents, SynchronizedTimeline } from '../src/components/SynchronizedTimeline'
 import { contextEventTrack, contextIntervalTracks, curatedCategoriesForCapabilities, physicalChangeLabel, physicalEventTrack, type PressTelemetryEvidenceState } from '../src/components/TelemetryEvidenceTimeline'
 import { UnifiedProcessTimeline } from '../src/components/UnifiedProcessTimeline'
-import type { OperationalRun } from '../src/types/api'
+import type { OperationalRun, OverviewTimelineInterval } from '../src/types/api'
 import type { CuratedPhysicalEvidence, ProductionContextEvidence, SemanticSignalEvidence, SignalCapability, TelemetryChange } from '../src/types/evidence'
 
 Object.assign(globalThis, { React })
@@ -55,8 +56,8 @@ describe('primary telemetry visual integration', () => {
 
   it('creates context intervals and explicit markers from actual observed timestamps', () => {
     const context = contextFixture()
-    assert.equal(contextIntervalTracks(context)[0]?.label, 'Order')
-    assert.equal(contextIntervalTracks(context)[0]?.intervals[1]?.startUtc, '2026-08-11T12:05:00.000Z')
+    assert.deepEqual(contextIntervalTracks(context).map(({ label }) => label), ['Job', 'Order', 'Recipe', 'Customer', 'Material', 'Roll'])
+    assert.equal(contextIntervalTracks(context).find(({ label }) => label === 'Order')?.intervals[1]?.startUtc, '2026-08-11T12:05:00.000Z')
     const marker = contextEventTrack(context)?.events[0]
     assert.equal(marker?.atUtc, '2026-08-11T12:05:00.000Z')
     assert.equal(marker?.label, 'Order changed')
@@ -93,6 +94,39 @@ describe('primary telemetry visual integration', () => {
     const track = physicalEventTrack({ pressKey: 'press5', displayName: 'Press 5', sourceKey: 'source', fromUtc, toUtc, requestedCategories: ['deck_states', 'wash', 'pump'], capabilities: [], signals: [deck, wash, pump] })
     assert.equal(track?.events.length, 3)
     assert.doesNotMatch(track?.events.map(({ label }) => label).join(' '), /enabled|began printing|pump failed/i)
+  })
+
+  it('shows only actual physical changes and marks every contiguous Radius raw-code transition', () => {
+    const unchangedPhysical: CuratedPhysicalEvidence = { pressKey: 'press5', displayName: 'Press 5', sourceKey: 'source', fromUtc, toUtc, requestedCategories: ['deck_states'], capabilities: [], signals: [{ ...deckSignal('deck.print_on', 2, 0, 1), changes: [] }] }
+    assert.equal(physicalEventTrack(unchangedPhysical), undefined)
+
+    const radiusInterval = (intervalId: string, startUtc: string, endUtc: string, eventType: string | null, statusCode: string | null, statusDescription: string | null, isUnavailable = false): OverviewTimelineInterval => ({ intervalId, startUtc, endUtc, durationSeconds: 60, isUnavailable, eventType, radiusStateLabel: isUnavailable ? 'Data unavailable' : 'Bad', statusCode, statusDescription, operationalGroupKey: isUnavailable ? null : 'ROUTINE_PROCESS', operationalGroupLabel: isUnavailable ? 'Data unavailable' : 'Routine Process', operationalGroupLightColor: null, operationalGroupDarkColor: null, processFamilyKey: isUnavailable ? null : 'CLEANING_WASH', processFamilyLabel: isUnavailable ? null : 'Cleaning / Wash', classificationNeedsReview: false, classificationStatus: isUnavailable ? 'unavailable' : 'mapped' })
+    const intervals = [
+      radiusInterval('one', fromUtc, '2026-08-11T12:01:00.000Z', 'B', '100', 'First'),
+      radiusInterval('two', '2026-08-11T12:01:00.000Z', '2026-08-11T12:02:00.000Z', 'B', '200', 'Second'),
+      radiusInterval('gap', '2026-08-11T12:02:00.000Z', '2026-08-11T12:03:00.000Z', null, null, null, true),
+      radiusInterval('three', '2026-08-11T12:03:00.000Z', '2026-08-11T12:04:00.000Z', 'G', '150', 'Run Production'),
+    ]
+    const radiusEvents = radiusChangeTrack(intervals).events
+    assert.equal(radiusEvents.length, 1)
+    assert.equal(radiusEvents[0]?.atUtc, '2026-08-11T12:01:00.000Z')
+    assert.match(radiusEvents[0]?.label ?? '', /B \/ 100 \/ First → B \/ 200 \/ Second/)
+  })
+
+  it('keeps Overview telemetry on-page and blocks the Overview segment drawer path', () => {
+    const overviewSource = readFileSync(new URL('../src/components/RadiusOverview.tsx', import.meta.url), 'utf8')
+    const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+    assert.match(overviewSource, /Focused telemetry for the selected interval/)
+    assert.match(overviewSource, /radiusEventTrack=\{radiusEvents\}/)
+    assert.doesNotMatch(overviewSource, /Open exact evidence/)
+    assert.match(appSource, /!\(area === 'overview' && investigation\.mode === 'segment'\)/)
+  })
+
+  it('explains published Unknown-family mappings without hiding review-required identities', () => {
+    const interval = { classificationStatus: 'mapped', processFamilyKey: 'UNKNOWN', processFamilyLabel: 'Unknown', classificationNeedsReview: false } as OverviewTimelineInterval
+    assert.equal(timelineFamilyLabel(interval), 'Unspecified by current classification')
+    assert.equal(timelineFamilyLabel({ ...interval, classificationNeedsReview: true }), 'Needs review')
+    assert.equal(timelineFamilyLabel({ ...interval, classificationStatus: 'needs_classification' }), 'Needs Classification')
   })
 
   it('merges contiguous Run family intervals but never bridges an unavailable gap', () => {

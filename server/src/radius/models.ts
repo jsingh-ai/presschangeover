@@ -431,6 +431,8 @@ export interface OverviewTimelineInterval {
   durationSeconds: number
   isUnavailable: boolean
   eventType: string | null
+  statusCode: string | null
+  statusDescription: string | null
   radiusStateLabel: string
   operationalGroupKey: string | null
   operationalGroupLabel: string
@@ -438,6 +440,7 @@ export interface OverviewTimelineInterval {
   operationalGroupDarkColor: string | null
   processFamilyKey: string | null
   processFamilyLabel: string | null
+  classificationNeedsReview: boolean
   classificationStatus: OverviewTimelineClassificationStatus
 }
 

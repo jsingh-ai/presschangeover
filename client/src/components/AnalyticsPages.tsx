@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { OperationalAnalytics, OverviewTimelineInterval, RadiusOverview as RadiusOverviewModel, RadiusPressKey, RunPatternEvidence } from '../types/api'
+import type { OperationalAnalytics, RadiusOverview as RadiusOverviewModel, RadiusPressKey, RunPatternEvidence } from '../types/api'
 import { RadiusOverview } from './RadiusOverview'
 import { OperationalActivityExplorer } from './OperationalActivityExplorer'
 import { PatternExplorer } from './PatternExplorer'
@@ -14,14 +14,13 @@ function PageIntroduction({ eyebrow, title, description }: { eyebrow: string; ti
   return <header className="page-introduction"><p className="eyebrow">{eyebrow}</p><h1>{title}</h1><p>{description}</p></header>
 }
 
-export function OverviewPage({ overview, selectedPress, onInspectInterval }: {
+export function OverviewPage({ overview, selectedPress }: {
   overview: RadiusOverviewModel
   selectedPress?: RadiusPressKey
-  onInspectInterval?(pressKey: RadiusPressKey, interval: OverviewTimelineInterval): void
 }) {
   return <div className="page-stack overview-page">
     <PageIntroduction eyebrow="Fleet orientation and decision support" title="Overview" description="See which presses spent the most observed time running, where non-production time went, and whether data coverage supports a fair comparison." />
-    <RadiusOverview overview={overview} selectedPress={selectedPress} onInspectInterval={onInspectInterval} />
+    <RadiusOverview overview={overview} selectedPress={selectedPress} />
   </div>
 }
 

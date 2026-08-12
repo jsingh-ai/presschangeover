@@ -328,20 +328,13 @@ function App() {
     {operationsArea && error && overview && <div className="scope-progress scope-progress--error" role="alert">{error} Previous results remain visible.</div>}
     {operationsArea && area !== 'overview' && overview && selectedPress && pressLoading && <div className="scope-progress" role="status"><i aria-hidden="true" />Applying {selectedScopeLabel}; the current timeline remains available.</div>}
     {operationsArea && area !== 'overview' && selectedPress && pressError && !pressLoading && <div className="scope-progress scope-progress--error" role="alert">{pressError}</div>}
-    {overview && area === 'overview' && <OverviewPage overview={overview} selectedPress={selectedPress} onInspectInterval={(pressKey, interval) => {
-      const cached = overview.presses.find((press) => press.pressKey === pressKey)?.timelineSegments.find((segment) => segment.startUtc === interval.startUtc && segment.endUtc === interval.endUtc)
-      if (cached) { navigateSegment(pressKey, cached); return }
-      void getRadiusPressEpisodes(pressKey, overview.fromUtc, overview.toUtc).then((detail) => {
-        const source = detail.timelineSegments.find((segment) => segment.startUtc === interval.startUtc && segment.endUtc === interval.endUtc)
-        if (source) navigateSegment(pressKey, source)
-      })
-    }} />}
+    {overview && area === 'overview' && <OverviewPage overview={overview} selectedPress={selectedPress} />}
     {overview && activeAnalytics && area === 'operational-analysis' && <OperationalAnalysisPage analytics={activeAnalytics} scopeLabel={analyticsScopeLabel} overview={overview} selectedPress={selectedPress} />}
     {overview && activeAnalytics && area === 'patterns-episodes' && <PatternsEpisodesPage analytics={activeAnalytics} scopeLabel={analyticsScopeLabel} overview={overview} selectedPress={selectedPress} />}
     {area === 'intelligent-search' && <IntelligentSearchPage />}
     {area === 'state-classification' && <StateClassificationPage />}
 
-    {investigation && investigation.mode !== 'status' && investigation.mode !== 'anomaly' && drawerResultPress && (drawerResult || drawerPressLoading || (investigation.mode === 'segment' && drawerSegment)) && <InvestigationDrawer route={investigation} result={drawerResult} episode={episodeDetail} segment={selectedSegmentDetail} finding={selectedFinding} loading={investigation.mode === 'segment' ? false : drawerPressLoading || drawerLoading} onClose={closeInvestigation} onSelectSegment={(nextSegment) => navigateSegment(nextSegment.pressKey, nextSegment)} contextSegments={drawerContextSegments} />}
+    {investigation && !(area === 'overview' && investigation.mode === 'segment') && investigation.mode !== 'status' && investigation.mode !== 'anomaly' && drawerResultPress && (drawerResult || drawerPressLoading || (investigation.mode === 'segment' && drawerSegment)) && <InvestigationDrawer route={investigation} result={drawerResult} episode={episodeDetail} segment={selectedSegmentDetail} finding={selectedFinding} loading={investigation.mode === 'segment' ? false : drawerPressLoading || drawerLoading} onClose={closeInvestigation} onSelectSegment={(nextSegment) => navigateSegment(nextSegment.pressKey, nextSegment)} contextSegments={drawerContextSegments} />}
     {investigation && (investigation.mode === 'status' || investigation.mode === 'anomaly') && activeAnalytics && <AnalyticsEvidenceDrawer route={investigation} analytics={activeAnalytics} scopeLabel={analyticsScopeLabel} onClose={closeInvestigation} />}
   </ApplicationShell>
 }

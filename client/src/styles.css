@@ -1754,6 +1754,7 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
 .synchronized-timeline__numeric svg { display: block; width: 100%; height: 100%; }
 .synchronized-timeline__numeric path { fill: none; stroke: var(--primary); stroke-width: 2.5; vector-effect: non-scaling-stroke; }
 .synchronized-timeline__numeric > span { display: grid; place-items: center; height: 100%; color: var(--text-muted); font-size: .76rem; }
+.synchronized-timeline__track > .synchronized-timeline__empty { display: grid; place-items: center; height: 100%; color: var(--text-muted); font-size: .76rem; }
 .synchronized-timeline__event-column { min-width: 0; }
 .synchronized-timeline__events { position: relative; min-height: 2.65rem; border: 1px solid var(--border); border-radius: .55rem; background: var(--surface-strong); }
 .synchronized-timeline__events > span { display: grid; place-items: center; min-height: 2.65rem; color: var(--text-muted); font-size: .76rem; }
@@ -1781,6 +1782,9 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
   .synchronized-timeline__interval { transition: none; }
 }
 .telemetry-range-note { border-left: 3px solid var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--surface)); padding: .7rem .8rem; border-radius: .35rem; color: var(--text-muted); }
+.overview-inline-telemetry { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.overview-inline-telemetry h3 { margin: 0; }
+.overview-inline-telemetry > p { margin: .25rem 0 .75rem; color: var(--text-muted); font-size: .86rem; }
 .evidence-capabilities { margin-block: .8rem; }
 .physical-evidence__section { margin-top: 1rem; }
 .physical-evidence__section h4 { margin: 0 0 .65rem; }

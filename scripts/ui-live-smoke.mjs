@@ -188,16 +188,13 @@ await evaluate(`document.querySelector('.overview-gantt')?.scrollIntoView({ bloc
 await delay(300)
 await capture('1440-overview-telemetry')
 
-await evaluate(`document.querySelector('.overview-selected-period .primary-action')?.click()`)
-await waitFor(`Boolean(document.querySelector('.evidence-drawer-shell'))`, 'Overview exact Evidence Drawer')
-report.interactions.drawerOpen = await evaluate(`({ dialog: Boolean(document.querySelector('[role=dialog][aria-modal=true]')), physical: document.body.textContent.includes('Physical telemetry evidence'), segmentStart: new URLSearchParams(location.search).get('segmentStart'), segmentEnd: new URLSearchParams(location.search).get('segmentEnd') })`)
-await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
-await waitFor(`!document.querySelector('.evidence-drawer-shell')`, 'Escape closes Evidence Drawer')
-report.interactions.drawerClosed = true
+report.interactions.overviewInlineEvidence = await evaluate(`({ selectedPeriod: Boolean(document.querySelector('.overview-selected-period')), noDrawerAction: !document.querySelector('.overview-selected-period .primary-action'), noDrawer: !document.querySelector('.evidence-drawer-shell'), radiusChanges: Boolean(document.querySelector('[aria-label="Radius raw-code changes event markers"]')) })`)
+if (!report.interactions.overviewInlineEvidence.selectedPeriod || !report.interactions.overviewInlineEvidence.noDrawerAction || !report.interactions.overviewInlineEvidence.noDrawer) throw new Error('Overview evidence was not fully integrated on-page')
 
 await navigate(routeUrl('/overview', { preset: 'custom', fromUtc: longStart.toISOString(), toUtc: customEnd.toISOString(), press: 'press5' }), routes[0].ready, 'long custom range')
-report.interactions.longRange = await evaluate(`({ limitation: document.querySelector('.telemetry-range-note')?.textContent, radiusTrack: Boolean(document.querySelector('[aria-label="Radius recorded intervals"]')), groupTrack: Boolean(document.querySelector('[aria-label="Operational Group intervals"]')), familyTrack: Boolean(document.querySelector('[aria-label="Process Family intervals"]')) })`)
-if (!report.interactions.longRange.limitation || !report.interactions.longRange.radiusTrack || !report.interactions.longRange.groupTrack || !report.interactions.longRange.familyTrack) throw new Error('Long-range Radius/Group/Family chronology was incomplete')
+await waitFor(`Boolean(document.querySelector('.overview-inline-telemetry .synchronized-timeline'))`, 'long-range inline focused telemetry')
+report.interactions.longRange = await evaluate(`({ limitation: document.querySelector('.telemetry-range-note')?.textContent, radiusTrack: Boolean(document.querySelector('[aria-label="Radius recorded intervals"]')), groupTrack: Boolean(document.querySelector('[aria-label="Operational Group intervals"]')), familyTrack: Boolean(document.querySelector('[aria-label="Process Family intervals"]')), focusedTelemetry: Boolean(document.querySelector('.overview-inline-telemetry .synchronized-timeline')) })`)
+if (!report.interactions.longRange.limitation || !report.interactions.longRange.radiusTrack || !report.interactions.longRange.groupTrack || !report.interactions.longRange.familyTrack || !report.interactions.longRange.focusedTelemetry) throw new Error('Long-range integrated Overview evidence was incomplete')
 
 await navigate(routeUrl('/operational-analysis', matrixRange), routes[1].ready, 'Operational occurrence evidence')
 const occurrence = await evaluate(`Boolean(document.querySelector('.activity-evidence tbody tr'))`)
