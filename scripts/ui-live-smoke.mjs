@@ -104,12 +104,15 @@ const viewports = [
   { name: '390', width: 390, height: 844 },
 ]
 const report = { matrix: {}, interactions: {}, telemetry: {}, performance: {}, consoleErrors }
+const matrixEnd = new Date(Date.now() - 10 * 60_000)
+const matrixStart = new Date(matrixEnd.getTime() - 4 * 60 * 60_000)
+const matrixRange = { preset: 'custom', fromUtc: matrixStart.toISOString(), toUtc: matrixEnd.toISOString() }
 
 for (const viewport of viewports) {
   report.matrix[viewport.name] = {}
   await command('Emulation.setDeviceMetricsOverride', { width: viewport.width, height: viewport.height, deviceScaleFactor: 1, mobile: viewport.width < 600 })
   for (const route of routes) {
-    await navigate(routeUrl(route.path), route.ready, `${route.key} at ${viewport.name}px`)
+    await navigate(routeUrl(route.path, matrixRange), route.ready, `${route.key} at ${viewport.name}px`)
     report.matrix[viewport.name][route.key] = {}
     for (const theme of ['light', 'dark']) {
       await setTheme(theme)
@@ -132,7 +135,7 @@ for (const viewport of viewports) {
 }
 
 await command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false })
-await navigate(routeUrl('/overview'), routes[0].ready, 'All Presses Overview')
+await navigate(routeUrl('/overview', matrixRange), routes[0].ready, 'All Presses Overview')
 await setTheme('light')
 report.interactions.allPresses = await evaluate(`({ selected: document.querySelector('.press-scope-button[aria-pressed=true]')?.textContent, pressCount: document.querySelectorAll('.press-scope-button[data-press-key]:not([data-press-key=""])').length })`)
 await evaluate(`document.querySelector('.press-scope-button[data-press-key="press5"]')?.click()`)
@@ -148,8 +151,8 @@ for (const preset of [
   report.interactions[preset.value] = await evaluate(`({ preset: new URLSearchParams(location.search).get('preset'), snapshot: Boolean(document.querySelector('.overview-snapshot')) })`)
 }
 
-const customEnd = new Date(Date.now() - 10 * 60_000)
-const shortStart = new Date(customEnd.getTime() - 60 * 60_000)
+const customEnd = matrixEnd
+const shortStart = new Date(customEnd.getTime() - 30 * 60_000)
 const longStart = new Date(customEnd.getTime() - 4 * 60 * 60_000)
 await navigate(routeUrl('/overview', { preset: 'custom', fromUtc: shortStart.toISOString(), toUtc: customEnd.toISOString(), press: 'press5' }), routes[0].ready, 'short custom range')
 await waitFor(`Boolean(document.querySelector('#press-summary-title')) && !document.querySelector('.scope-progress')`, 'short selected press range')
@@ -194,7 +197,7 @@ await navigate(routeUrl('/overview', { preset: 'custom', fromUtc: longStart.toIS
 report.interactions.longRange = await evaluate(`({ limitation: document.querySelector('.telemetry-range-note')?.textContent, radiusTrack: Boolean(document.querySelector('[aria-label="Radius recorded intervals"]')), semanticTrack: Boolean(document.querySelector('[aria-label="ProcessIntelligence intervals"]')) })`)
 if (!report.interactions.longRange.limitation) throw new Error('Long-range telemetry limitation was not visible')
 
-await navigate(routeUrl('/operational-analysis'), routes[1].ready, 'Operational occurrence evidence')
+await navigate(routeUrl('/operational-analysis', matrixRange), routes[1].ready, 'Operational occurrence evidence')
 const occurrence = await evaluate(`Boolean(document.querySelector('.activity-evidence tbody tr'))`)
 if (occurrence) {
   await waitFor(`Boolean(document.querySelector('.physical-signature-summary .synchronized-timeline[aria-label*="focused occurrence synchronized evidence"]'))`, 'default focused occurrence timeline')
@@ -238,7 +241,7 @@ if (occurrence) {
   await waitFor(`!document.querySelector('.evidence-drawer-shell')`, 'occurrence drawer close')
 }
 
-await navigate(routeUrl('/patterns-episodes'), routes[2].ready, 'Pattern Run evidence')
+await navigate(routeUrl('/patterns-episodes', matrixRange), routes[2].ready, 'Pattern Run evidence')
 await waitFor(`Boolean(document.querySelector('tr[aria-label^="Open evidence for"]'))`, 'matched Run row')
 await evaluate(`document.querySelector('tr[aria-label^="Open evidence for"]')?.click()`)
 await waitFor(`Boolean(document.querySelector('.evidence-drawer-shell'))`, 'Run Evidence Drawer')
