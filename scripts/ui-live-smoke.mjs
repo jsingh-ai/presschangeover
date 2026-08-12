@@ -181,6 +181,7 @@ report.interactions.overviewTelemetry = await evaluate(`(() => {
     eventMarkerCount: timeline.querySelectorAll('.synchronized-timeline__event').length,
   }
 })()`)
+await capture('1440-overview-telemetry')
 
 await evaluate(`document.querySelector('.overview-selected-period .primary-action')?.click()`)
 await waitFor(`Boolean(document.querySelector('.evidence-drawer-shell'))`, 'Overview exact Evidence Drawer')
@@ -229,6 +230,7 @@ if (occurrence) {
       summary: document.querySelector('.physical-signature-facts')?.textContent,
     }
   })()`)
+  await capture('1440-operational-focused-telemetry')
   await evaluate(`document.querySelector('.physical-signature-summary .primary-action')?.click()`)
   await waitFor(`Boolean(document.querySelector('.evidence-drawer-shell'))`, 'occurrence drawer')
   report.interactions.occurrenceDrawer = await evaluate(`({ exact: document.body.textContent.includes('Radius recorded'), semantic: document.body.textContent.includes('ProcessIntelligence'), physical: document.body.textContent.includes('Physical telemetry evidence') })`)
@@ -267,6 +269,7 @@ report.interactions.runTelemetry = await evaluate(`(() => {
     physicalEvents: labels.includes('Physical Events event markers'),
   }
 })()`)
+await capture('1440-pattern-run-telemetry')
 await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
 await waitFor(`!document.querySelector('.evidence-drawer-shell')`, 'Run drawer close')
 
