@@ -22,6 +22,8 @@ import {
 import { TelemetryApiError } from './telemetry-error.js'
 import { TelemetrySourceRegistry } from './telemetry-source-registry.js'
 
+const MAX_SEMANTIC_SELECTORS_PER_REQUEST = 50
+
 function observationState(signal: TelemetrySemanticSignalHistory): EvidenceObservationState {
   if (!signal.supported) return 'UNSUPPORTED'
   if (signal.samples.length || signal.changes.length) return 'SUPPORTED_WITH_OBSERVATIONS'
@@ -136,8 +138,10 @@ export class TelemetryFoundationService {
       const decks = request.deckNumbers?.length ? request.deckNumbers : capability?.deckNumbers ?? []
       return deckScoped ? decks.map((deckNumber) => ({ canonicalId, deckNumber, representation: request.representation })) : [{ canonicalId, representation: request.representation }]
     })
-    if (!selectors.length || selectors.length > 50) throw new TelemetryApiError('request_invalid', 400)
-    const history = await this.semanticHistory(pressKey, { fromUtc: request.fromUtc, toUtc: request.toUtc, includeSeed: request.includeSeed, signals: selectors }, requestId, signal)
-    return { pressKey, sourceKey: history.sourceKey, displayName: history.displayName, fromUtc: history.fromUtc, toUtc: history.toUtc, requestedCategories: request.categories, capabilities: capabilitySet.capabilities.filter(({ canonicalId }) => ids.has(canonicalId)), signals: history.signals }
+    if (!selectors.length) throw new TelemetryApiError('request_invalid', 400)
+    const batches = Array.from({ length: Math.ceil(selectors.length / MAX_SEMANTIC_SELECTORS_PER_REQUEST) }, (_, index) => selectors.slice(index * MAX_SEMANTIC_SELECTORS_PER_REQUEST, (index + 1) * MAX_SEMANTIC_SELECTORS_PER_REQUEST))
+    const histories = await Promise.all(batches.map((signals) => this.semanticHistory(pressKey, { fromUtc: request.fromUtc, toUtc: request.toUtc, includeSeed: request.includeSeed, signals }, requestId, signal)))
+    const history = histories[0]!
+    return { pressKey, sourceKey: history.sourceKey, displayName: history.displayName, fromUtc: history.fromUtc, toUtc: history.toUtc, requestedCategories: request.categories, capabilities: capabilitySet.capabilities.filter(({ canonicalId }) => ids.has(canonicalId)), signals: histories.flatMap(({ signals }) => signals) }
   }
 }

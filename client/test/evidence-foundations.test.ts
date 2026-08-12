@@ -75,4 +75,13 @@ describe('shared evidence foundations', () => {
     assert.match(source, /Promise\.allSettled\(requests\)/)
     assert.match(source, /Some telemetry evidence could not be loaded/)
   })
+
+  it('restores activity, pattern, and search state through browser navigation', () => {
+    for (const component of ['OperationalActivityExplorer.tsx', 'PatternExplorer.tsx', 'IntelligentSearchPage.tsx']) {
+      const source = readFileSync(new URL(`../src/components/${component}`, import.meta.url), 'utf8')
+      assert.match(source, /addEventListener\('popstate'/)
+      assert.match(source, /removeEventListener\('popstate'/)
+      assert.match(source, /URLSearchParams\(window\.location\.search\)/)
+    }
+  })
 })

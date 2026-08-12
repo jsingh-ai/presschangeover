@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { getActivityAnalysis } from '../api/process-intelligence-api'
 import { formatDuration } from '../episode-presentation'
 import { formatPlantDateTime } from '../time-ranges'
@@ -156,8 +156,10 @@ export function OperationalActivityExplorer({ fromUtc, toUtc, pressKey, analytic
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState(false)
+  const pageRequest = useRef<AbortController | undefined>(undefined)
 
   useEffect(() => {
+    pageRequest.current?.abort()
     const controller = new AbortController()
     setLoading(true)
     setError(false)
@@ -170,8 +172,17 @@ export function OperationalActivityExplorer({ fromUtc, toUtc, pressKey, analytic
       const query = new URLSearchParams(window.location.search)
       if (!query.has('activityLevel') || !query.has('activityKey')) updateActivityUrl(resolved, 'replace')
     }).catch(() => { if (!controller.signal.aborted) setError(true) }).finally(() => { if (!controller.signal.aborted) setLoading(false) })
-    return () => controller.abort()
+    return () => { controller.abort(); pageRequest.current?.abort() }
   }, [fromUtc, toUtc, pressKey, selection.level, selection.key])
+
+  useEffect(() => {
+    const restore = () => {
+      const restored = activityFromUrl()
+      if (restored) setSelection(restored)
+    }
+    window.addEventListener('popstate', restore)
+    return () => window.removeEventListener('popstate', restore)
+  }, [])
 
   const choose = (item: ActivityCatalogItem) => {
     const next = { level: item.level, key: item.key, label: item.label }
@@ -180,9 +191,11 @@ export function OperationalActivityExplorer({ fromUtc, toUtc, pressKey, analytic
   }
   const loadMore = () => {
     if (!data || loadingMore || occurrences.length >= data.totalOccurrenceCount) return
+    pageRequest.current?.abort()
     const controller = new AbortController()
+    pageRequest.current = controller
     setLoadingMore(true)
-    void getActivityAnalysis(fromUtc, toUtc, selection, pressKey, controller.signal, occurrences.length).then((page) => setOccurrences((current) => [...current, ...page.occurrences.filter((item) => !current.some(({ occurrenceId }) => occurrenceId === item.occurrenceId))])).catch(() => setError(true)).finally(() => setLoadingMore(false))
+    void getActivityAnalysis(fromUtc, toUtc, selection, pressKey, controller.signal, occurrences.length).then((page) => { if (!controller.signal.aborted) setOccurrences((current) => [...current, ...page.occurrences.filter((item) => !current.some(({ occurrenceId }) => occurrenceId === item.occurrenceId))]) }).catch(() => { if (!controller.signal.aborted) setError(true) }).finally(() => { if (!controller.signal.aborted) setLoadingMore(false) })
   }
   return <div className="activity-explorer">{data && <ActivityPicker catalog={data.catalog} selected={data.selection} onSelect={choose} />}{loading && <div className="scope-progress" role="status"><i />Updating activity analysis…</div>}{error && <p className="message message--warning">Activity analysis could not be loaded for this selection. Previously loaded evidence remains visible.</p>}{data && <OperationalActivityExplorerView data={data} analytics={_analytics} occurrences={occurrences} loadingMore={loadingMore} onLoadMore={loadMore} />}</div>
 }

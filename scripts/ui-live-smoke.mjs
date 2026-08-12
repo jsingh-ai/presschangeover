@@ -7,7 +7,7 @@ const screenshotDirectory = process.argv[4]
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
 
 async function pageTarget() {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
+  for (let attempt = 0; attempt < 80; attempt += 1) {
     try {
       const targets = await fetch(`${debuggerUrl}/json/list`).then((response) => response.json())
       const target = targets.find(({ type }) => type === 'page')
@@ -27,14 +27,19 @@ await new Promise((resolve, reject) => {
 
 let nextId = 1
 const pending = new Map()
+const consoleErrors = []
 socket.addEventListener('message', (event) => {
   const message = JSON.parse(event.data)
-  if (!message.id) return
-  const handler = pending.get(message.id)
-  if (!handler) return
-  pending.delete(message.id)
-  if (message.error) handler.reject(new Error(message.error.message))
-  else handler.resolve(message.result)
+  if (message.id) {
+    const handler = pending.get(message.id)
+    if (!handler) return
+    pending.delete(message.id)
+    if (message.error) handler.reject(new Error(message.error.message))
+    else handler.resolve(message.result)
+    return
+  }
+  if (message.method === 'Runtime.exceptionThrown') consoleErrors.push(message.params.exceptionDetails.text)
+  if (message.method === 'Runtime.consoleAPICalled' && message.params.type === 'error') consoleErrors.push(message.params.args.map(({ value, description }) => value ?? description).join(' '))
 })
 
 function command(method, params = {}) {
@@ -49,12 +54,12 @@ async function evaluate(expression) {
   return result.result.value
 }
 
-async function waitFor(expression, label) {
-  for (let attempt = 0; attempt < 120; attempt += 1) {
+async function waitFor(expression, label, attempts = 160) {
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
     try { if (await evaluate(expression)) return } catch {}
     await delay(250)
   }
-  const state = await evaluate(`({ path: location.pathname, title: document.querySelector('h1')?.textContent, loading: document.querySelector('[role=status]')?.textContent, error: document.querySelector('.unavailable-panel')?.textContent })`)
+  const state = await evaluate(`({ path: location.pathname, title: document.querySelector('h1')?.textContent, status: document.querySelector('[role=status]')?.textContent, alert: document.querySelector('[role=alert]')?.textContent })`)
   throw new Error(`Timed out waiting for ${label}: ${JSON.stringify(state)}`)
 }
 
@@ -69,161 +74,140 @@ async function capture(name) {
   await writeFile(join(screenshotDirectory, `${name}.png`), Buffer.from(screenshot.data, 'base64'))
 }
 
+async function setTheme(theme) {
+  if ((await evaluate('document.documentElement.dataset.theme')) !== theme) await evaluate(`document.querySelector('.theme-toggle')?.click()`)
+  await waitFor(`document.documentElement.dataset.theme === ${JSON.stringify(theme)}`, `${theme} theme`)
+}
+
+function routeUrl(path, parameters = {}) {
+  const url = new URL(path, applicationUrl)
+  Object.entries(parameters).forEach(([key, value]) => url.searchParams.set(key, value))
+  return url.toString()
+}
+
 await command('Page.enable')
 await command('Runtime.enable')
 if (screenshotDirectory) await mkdir(screenshotDirectory, { recursive: true })
 
-const report = { viewports: {}, regressions: {} }
-for (const viewport of [
-  { name: 'desktop-1600', width: 1600, height: 1050 },
-  { name: 'desktop-1440', width: 1440, height: 1000 },
-  { name: 'desktop-1200', width: 1200, height: 900 },
-  { name: 'tablet', width: 768, height: 1024 },
-  { name: 'mobile', width: 390, height: 844 },
-]) {
+const routes = [
+  { key: 'overview', path: '/overview', ready: `Boolean(document.querySelector('.overview-snapshot'))` },
+  { key: 'operational', path: '/operational-analysis', ready: `Boolean(document.querySelector('.activity-header .activity-metrics'))` },
+  { key: 'patterns', path: '/patterns-episodes', ready: `Boolean(document.querySelector('.pattern-summary'))` },
+  { key: 'search', path: '/intelligent-search', ready: `Boolean(document.querySelector('.intelligent-search-page [role=search]'))` },
+  { key: 'admin', path: '/administration/state-classification', ready: `Boolean(document.querySelector('.classification-admin-page'))` },
+]
+const viewports = [
+  { name: '1600', width: 1600, height: 1050 },
+  { name: '1440', width: 1440, height: 1000 },
+  { name: '1200', width: 1200, height: 900 },
+  { name: '768', width: 768, height: 1024 },
+  { name: '390', width: 390, height: 844 },
+]
+const report = { matrix: {}, interactions: {}, telemetry: {}, performance: {}, consoleErrors }
+
+for (const viewport of viewports) {
+  report.matrix[viewport.name] = {}
   await command('Emulation.setDeviceMetricsOverride', { width: viewport.width, height: viewport.height, deviceScaleFactor: 1, mobile: viewport.width < 600 })
-  await navigate(applicationUrl, `Boolean(document.querySelector('.overview-snapshot'))`, `${viewport.name} Overview`)
-  if ((await evaluate(`document.documentElement.dataset.theme`)) !== 'light') await evaluate(`document.querySelector('.theme-toggle')?.click()`)
-  await waitFor(`document.documentElement.dataset.theme === 'light'`, `${viewport.name} light theme`)
-  report.viewports[viewport.name] = await evaluate(`({
-    width: innerWidth,
-    pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-    fleetSnapshot: Boolean(document.querySelector('#fleet-snapshot-title')),
-    topRunning: document.querySelectorAll('#top-running-title + .overview-rank-card, .overview-rank-panel:first-child .overview-rank-card').length,
-    attention: document.querySelectorAll('.overview-rank-panel:nth-child(2) .overview-rank-card').length,
-    allocationRows: document.querySelectorAll('.overview-allocation-row').length,
-    radiusStates: document.querySelectorAll('.overview-hierarchy-states .overview-state-card').length,
-    operationsRawToggle: Boolean(document.querySelector('.overview-mode-toggle')),
-    hierarchy: document.body.textContent.includes('Radius state') && document.body.textContent.includes('Process group') && document.body.textContent.includes('Process family'),
-    activityFocus: document.body.textContent.includes('Activity Focus'),
-    tablesContained: [...document.querySelectorAll('.overview-table-scroll')].every((item) => item.scrollWidth >= item.clientWidth),
-    theme: document.documentElement.dataset.theme,
-  })`)
-  await capture(`${viewport.name}-light`)
+  for (const route of routes) {
+    await navigate(routeUrl(route.path), route.ready, `${route.key} at ${viewport.name}px`)
+    report.matrix[viewport.name][route.key] = {}
+    for (const theme of ['light', 'dark']) {
+      await setTheme(theme)
+      const result = await evaluate(`({
+        path: location.pathname,
+        title: document.querySelector('.page-introduction h1, .intelligent-search-hero h1, .classification-admin-hero h1, h1')?.textContent,
+        theme: document.documentElement.dataset.theme,
+        overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
+        internalOverflowContained: [...document.querySelectorAll('.analysis-table-scroll,.overview-table-scroll,.synchronized-timeline__scroll,.classification-table-scroll')].every((item) => item.getBoundingClientRect().right <= document.documentElement.clientWidth + 1),
+        dialogCount: document.querySelectorAll('[role=dialog]').length,
+        durationMs: Math.round(performance.getEntriesByType('navigation')[0]?.duration ?? 0),
+        resourceBytes: Math.round(performance.getEntriesByType('resource').reduce((sum, item) => sum + (item.transferSize || item.encodedBodySize || 0), 0)),
+      })`)
+      if (result.overflow) throw new Error(`${route.key} has page-level horizontal overflow at ${viewport.name}px in ${theme} theme`)
+      if (result.theme !== theme) throw new Error(`${route.key} did not apply ${theme} theme at ${viewport.name}px`)
+      report.matrix[viewport.name][route.key][theme] = result
+      await capture(`${viewport.name}-${route.key}-${theme}`)
+    }
+  }
 }
 
 await command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false })
-await navigate(applicationUrl, `Boolean(document.querySelector('.overview-snapshot'))`, 'desktop Overview interaction')
-if ((await evaluate(`document.documentElement.dataset.theme`)) !== 'dark') await evaluate(`document.querySelector('.theme-toggle')?.click()`)
-await waitFor(`document.documentElement.dataset.theme === 'dark'`, 'dark theme')
-report.dark = await evaluate(`({ theme: document.documentElement.dataset.theme, pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, snapshotBackground: getComputedStyle(document.querySelector('.overview-snapshot')).backgroundColor })`)
-await capture('desktop-1440-dark')
-
-await evaluate(`document.querySelector('.overview-state-card--bad')?.click()`)
-await waitFor(`document.querySelector('.overview-state-card--bad')?.classList.contains('active') && document.querySelectorAll('.overview-group-list button').length > 0 && document.querySelectorAll('.overview-family-list button').length > 0`, 'fleet Bad hierarchy')
-await evaluate(`document.querySelector('.overview-stack-segment--bad')?.click()`)
-await waitFor(`Boolean(document.querySelector('.overview-allocation-detail'))`, 'fleet allocation semantic detail')
-report.fleetHierarchy = await evaluate(`({
-  toggleRemoved: !document.querySelector('.overview-mode-toggle'),
-  selectedState: document.querySelector('.overview-state-card.active span')?.textContent,
-  groups: document.querySelectorAll('.overview-group-list button').length,
-  families: document.querySelectorAll('.overview-family-list button').length,
-  exactTableRemoved: !document.querySelector('.overview-exact-table'),
-  allocationDetail: document.querySelector('.overview-allocation-detail')?.textContent,
-  pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-})`)
-
+await navigate(routeUrl('/overview'), routes[0].ready, 'All Presses Overview')
+await setTheme('light')
+report.interactions.allPresses = await evaluate(`({ selected: document.querySelector('.press-scope-button[aria-pressed=true]')?.textContent, pressCount: document.querySelectorAll('.press-scope-button[data-press-key]:not([data-press-key=""])').length })`)
 await evaluate(`document.querySelector('.press-scope-button[data-press-key="press5"]')?.click()`)
-await waitFor(`new URLSearchParams(location.search).get('press') === 'press5' && Boolean(document.querySelector('#press-summary-title'))`, 'single-press Overview')
-await evaluate(`document.querySelector('.overview-gantt-segment--process:not(.overview-gantt-segment--offline)')?.focus()`)
-await waitFor(`document.querySelectorAll('.overview-gantt-segment.linked').length >= 2`, 'linked Gantt focus')
-await evaluate(`document.querySelector('.overview-gantt-segment--process:not(.overview-gantt-segment--offline)')?.click()`)
-await waitFor(`Boolean(document.querySelector('.overview-selected-period'))`, 'selected Gantt period')
-report.singlePress = await evaluate(`({
-  title: document.querySelector('#press-summary-title')?.textContent,
-  fleetRank: document.querySelector('.overview-position dd')?.textContent,
-  radiusSegments: document.querySelectorAll('.overview-gantt-segment--radius').length,
-  processSegments: document.querySelectorAll('.overview-gantt-segment--process').length,
-  unavailableSegments: document.querySelectorAll('.overview-gantt-segment--offline').length,
-  linkedSegments: document.querySelectorAll('.overview-gantt-segment.linked').length,
-  selectedPeriod: document.querySelector('.overview-selected-period')?.textContent,
-  tracksShareWidth: (() => { const tracks = [...document.querySelectorAll('.overview-gantt-track')]; return tracks.length === 2 && Math.abs(tracks[0].getBoundingClientRect().width - tracks[1].getBoundingClientRect().width) < 1 })(),
-  modeToggleRemoved: !document.querySelector('.overview-mode-toggle'),
-  activityFocus: document.body.textContent.includes('Activity Focus'),
-  pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-})`)
-await capture('single-press-synchronized-dark')
+await waitFor(`new URLSearchParams(location.search).get('press') === 'press5' && Boolean(document.querySelector('#press-summary-title'))`, 'individual press')
+report.interactions.individualPress = await evaluate(`({ title: document.querySelector('#press-summary-title')?.textContent, timeline: Boolean(document.querySelector('.synchronized-timeline')), overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth })`)
 
-for (const [path, selector, key] of [
-  ['/operational-analysis', '.operational-analysis-page', 'operationalAnalysis'],
-  ['/patterns-episodes', '.patterns-episodes-page', 'patternsEpisodes'],
-  ['/intelligent-search', '.intelligent-search-page', 'intelligentSearch'],
-  ['/administration/state-classification', '.classification-page', 'classification'],
+for (const preset of [
+  { label: 'Today', value: 'today' },
+  { label: 'Last 24 Hours', value: 'last24' },
 ]) {
-  const url = new URL(path, applicationUrl).toString()
-  await navigate(url, `Boolean(document.querySelector(${JSON.stringify(selector)}))`, key)
-  report.regressions[key] = await evaluate(`({ path: location.pathname, title: document.querySelector('.page-introduction h1, h1')?.textContent, serverError: Boolean(document.querySelector('.unavailable-panel')) })`)
+  await evaluate(`[...document.querySelectorAll('.range-button')].find((item) => item.textContent.trim() === ${JSON.stringify(preset.label)})?.click()`)
+  await waitFor(`new URLSearchParams(location.search).get('preset') === ${JSON.stringify(preset.value)} && !document.querySelector('.scope-progress')`, preset.label)
+  report.interactions[preset.value] = await evaluate(`({ preset: new URLSearchParams(location.search).get('preset'), snapshot: Boolean(document.querySelector('.overview-snapshot')) })`)
 }
 
-report.analyticsResponsive = {}
-for (const viewport of [
-  { name: 'desktop-1600', width: 1600, height: 1050 },
-  { name: 'desktop', width: 1440, height: 1000 },
-  { name: 'desktop-1200', width: 1200, height: 900 },
-  { name: 'tablet', width: 768, height: 1024 },
-  { name: 'mobile', width: 390, height: 844 },
+const customEnd = new Date(Date.now() - 10 * 60_000)
+const shortStart = new Date(customEnd.getTime() - 60 * 60_000)
+const longStart = new Date(customEnd.getTime() - 4 * 60 * 60_000)
+await navigate(routeUrl('/overview', { preset: 'custom', fromUtc: shortStart.toISOString(), toUtc: customEnd.toISOString(), press: 'press5' }), routes[0].ready, 'short custom range')
+await waitFor(`Boolean(document.querySelector('#press-summary-title')) && !document.querySelector('.scope-progress')`, 'short selected press range')
+report.interactions.shortRange = await evaluate(`({ limitation: document.body.textContent.includes('longer than two hours'), telemetryQuality: document.querySelector('.timeline-quality-row')?.textContent, timeline: Boolean(document.querySelector('.synchronized-timeline')) })`)
+
+await evaluate(`document.querySelector('.overview-selected-period .primary-action')?.click()`)
+await waitFor(`Boolean(document.querySelector('.evidence-drawer-shell'))`, 'Overview exact Evidence Drawer')
+report.interactions.drawerOpen = await evaluate(`({ dialog: Boolean(document.querySelector('[role=dialog][aria-modal=true]')), physical: document.body.textContent.includes('Physical telemetry evidence'), segmentStart: new URLSearchParams(location.search).get('segmentStart'), segmentEnd: new URLSearchParams(location.search).get('segmentEnd') })`)
+await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
+await waitFor(`!document.querySelector('.evidence-drawer-shell')`, 'Escape closes Evidence Drawer')
+report.interactions.drawerClosed = true
+
+await navigate(routeUrl('/overview', { preset: 'custom', fromUtc: longStart.toISOString(), toUtc: customEnd.toISOString(), press: 'press5' }), routes[0].ready, 'long custom range')
+report.interactions.longRange = await evaluate(`({ limitation: document.querySelector('.telemetry-range-note')?.textContent, radiusTrack: Boolean(document.querySelector('[aria-label="Radius recorded intervals"]')), semanticTrack: Boolean(document.querySelector('[aria-label="ProcessIntelligence intervals"]')) })`)
+if (!report.interactions.longRange.limitation) throw new Error('Long-range telemetry limitation was not visible')
+
+await navigate(routeUrl('/operational-analysis'), routes[1].ready, 'Operational occurrence evidence')
+const occurrence = await evaluate(`Boolean(document.querySelector('.activity-evidence tbody tr'))`)
+if (occurrence) {
+  await evaluate(`(() => { const row = document.querySelector('.activity-evidence tbody tr'); row?.focus(); row?.click() })()`)
+  await waitFor(`Boolean(document.querySelector('.evidence-drawer-shell'))`, 'occurrence drawer')
+  report.interactions.occurrenceDrawer = await evaluate(`({ exact: document.body.textContent.includes('Radius recorded'), semantic: document.body.textContent.includes('ProcessIntelligence'), physical: document.body.textContent.includes('Physical telemetry evidence') })`)
+  await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
+  await waitFor(`!document.querySelector('.evidence-drawer-shell')`, 'occurrence drawer close')
+}
+
+await navigate(routeUrl('/intelligent-search', { q: 'Make Ready' }), `Boolean(document.querySelector('.search-result-list'))`, 'Search results')
+for (const [key, selector, path] of [
+  ['operationalLink', `a[href^="/operational-analysis"]`, '/operational-analysis'],
+  ['patternsLink', `a[href^="/patterns-episodes"]`, '/patterns-episodes'],
+  ['adminLink', `a[href^="/administration/state-classification"]`, '/administration/state-classification'],
 ]) {
-  await command('Emulation.setDeviceMetricsOverride', { width: viewport.width, height: viewport.height, deviceScaleFactor: 1, mobile: viewport.width < 600 })
-  await navigate(new URL('/operational-analysis', applicationUrl).toString(), `Boolean(document.querySelector('.activity-header .activity-metrics'))`, `${viewport.name} Operational Analysis`)
-  if ((await evaluate(`document.documentElement.dataset.theme`)) !== 'light') await evaluate(`document.querySelector('.theme-toggle')?.click()`)
-  await waitFor(`document.documentElement.dataset.theme === 'light'`, `${viewport.name} analytics light theme`)
-  const operational = await evaluate(`({
-    overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-    metrics: document.querySelectorAll('.activity-metrics dd').length,
-    pressBars: document.querySelectorAll('.analysis-bars button').length,
-    trend: Boolean(document.querySelector('.activity-trend')),
-    distribution: Boolean(document.body.textContent.includes('Duration distribution')),
-    evidenceRows: document.querySelectorAll('.activity-evidence tbody tr').length,
-    evidenceContained: [...document.querySelectorAll('.analysis-table-scroll')].every((item) => item.scrollWidth >= item.clientWidth),
-  })`)
-  await navigate(new URL('/patterns-episodes', applicationUrl).toString(), `Boolean(document.querySelector('.pattern-summary'))`, `${viewport.name} Patterns`)
-  const patterns = await evaluate(`({
-    overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
-    summary: document.querySelectorAll('.pattern-summary dd').length,
-    prevalenceRows: document.querySelectorAll('.pattern-bars button').length,
-    tabs: document.querySelectorAll('.analysis-tabs [role=tab]').length,
-    evidenceContained: [...document.querySelectorAll('.analysis-table-scroll')].every((item) => item.scrollWidth >= item.clientWidth),
-  })`)
-  report.analyticsResponsive[viewport.name] = { operational, patterns, theme: await evaluate(`document.documentElement.dataset.theme`) }
+  const href = await evaluate(`document.querySelector(${JSON.stringify(`.search-result-actions ${selector}`)})?.getAttribute('href')`)
+  if (!href) throw new Error(`Search did not expose ${key}`)
+  report.interactions[key] = href
+  await navigate(new URL(href, applicationUrl).toString(), `location.pathname === ${JSON.stringify(path)}`, key)
+  await command('Runtime.evaluate', { expression: 'history.back()' })
+  await waitFor(`location.pathname === '/intelligent-search' && Boolean(document.querySelector('.search-result-list'))`, `${key} Back navigation`)
+  await command('Runtime.evaluate', { expression: 'history.forward()' })
+  await waitFor(`location.pathname === ${JSON.stringify(path)}`, `${key} Forward navigation`)
+  await command('Runtime.evaluate', { expression: 'history.back()' })
+  await waitFor(`location.pathname === '/intelligent-search' && Boolean(document.querySelector('.search-result-list'))`, `${key} return to Search`)
 }
 
-await command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false })
-await navigate(new URL('/operational-analysis', applicationUrl).toString(), `Boolean(document.querySelector('.activity-header .activity-metrics'))`, 'Operational activity interaction')
-await evaluate(`(() => { const input = document.querySelector('.activity-picker input'); const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; setter.call(input, 'Cleaning / Wash'); input.dispatchEvent(new Event('input', { bubbles: true })); })()`)
-await waitFor(`Boolean([...document.querySelectorAll('#activity-results button')].find((item) => item.textContent.includes('Cleaning / Wash')))`, 'Cleaning activity result')
-await evaluate(`[...document.querySelectorAll('#activity-results button')].find((item) => item.textContent.includes('Cleaning / Wash'))?.click()`)
-await waitFor(`document.querySelector('.activity-header h2')?.textContent === 'Cleaning / Wash'`, 'Cleaning activity analysis')
-report.operationalInteraction = await evaluate(`({ selection: document.querySelector('.activity-header h2')?.textContent, metrics: document.querySelector('.activity-metrics')?.textContent, evidenceRows: document.querySelectorAll('.activity-evidence tbody tr').length, overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth })`)
+report.telemetry.press12Capabilities = await evaluate(`fetch('/api/telemetry/presses/press12/capabilities').then(async (response) => ({ status: response.status, body: await response.json() })).then(({ status, body }) => ({ status, unsupported: body.capabilities?.filter((item) => item.state === 'UNSUPPORTED').length ?? 0, unknown: body.capabilities?.filter((item) => item.state === 'UNKNOWN').length ?? 0 }))`)
 
-await navigate(new URL('/patterns-episodes', applicationUrl).toString(), `Boolean(document.querySelector('.pattern-summary'))`, 'Matched Run detail reuse')
-await evaluate(`document.querySelector('.pattern-bars button')?.click()`)
-await waitFor(`Boolean(document.querySelector('.pattern-explorer .analysis-table-scroll tbody tr'))`, 'matched Run evidence')
-const matchedEvidence = await evaluate(`(() => { const row = document.querySelector('.pattern-explorer .analysis-table-scroll tbody tr'); return { press: row?.querySelector('th')?.textContent, start: row?.querySelector('td')?.textContent } })()`)
-await evaluate(`document.querySelector('.pattern-explorer .analysis-table-scroll tbody tr')?.click()`)
-await waitFor(`Boolean(document.querySelector('#pattern-run-detail .selected-run-heading')) && !document.querySelector('.scope-progress')`, 'existing Run detail')
-report.matchedRunDetail = { ...matchedEvidence, ...await evaluate(`({ heading: document.querySelector('#pattern-run-detail .selected-run-heading')?.textContent, selectedRow: document.querySelector('#pattern-run-detail .run-row.selected .run-row-summary small')?.textContent, press: new URLSearchParams(location.search).get('press') })`) }
+const interception = await command('Page.addScriptToEvaluateOnNewDocument', { source: `{
+  const actualFetch = window.fetch.bind(window)
+  window.fetch = (input, init) => String(input instanceof Request ? input.url : input).includes('/api/telemetry/')
+    ? Promise.resolve(new Response(JSON.stringify({ error: 'simulated_telemetry_unavailable' }), { status: 503, headers: { 'Content-Type': 'application/json' } }))
+    : actualFetch(input, init)
+}` })
+await navigate(routeUrl('/overview', { preset: 'custom', fromUtc: shortStart.toISOString(), toUtc: customEnd.toISOString(), press: 'press5' }), routes[0].ready, 'telemetry degradation simulation')
+await waitFor(`document.body.textContent.includes('telemetry is temporarily unavailable') || document.body.textContent.includes('Some telemetry is temporarily unavailable')`, 'telemetry degradation fallback')
+report.telemetry.degradedFallback = await evaluate(`({ radiusPage: Boolean(document.querySelector('.overview-snapshot')), radiusTrack: Boolean(document.querySelector('[aria-label="Radius recorded intervals"]')), warning: document.querySelector('.message--warning')?.textContent, fatal: Boolean(document.querySelector('.unavailable-panel')) })`)
+await command('Page.removeScriptToEvaluateOnNewDocument', { identifier: interception.identifier })
 
-await navigate(new URL('/patterns-episodes', applicationUrl).toString(), `Boolean(document.querySelector('.pattern-summary'))`, 'Pattern Builder interaction')
-await evaluate(`[...document.querySelectorAll('.analysis-tabs button')].find((item) => item.textContent.includes('Pattern Builder'))?.click()`)
-await waitFor(`Boolean(document.querySelector('.pattern-builder-panel'))`, 'Pattern Builder tab')
-for (const activity of ['Maintenance Intervention', 'Cleaning / Wash']) {
-  await evaluate(`(() => { const input = document.querySelector('.activity-picker input'); const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set; setter.call(input, ${JSON.stringify(activity)}); input.dispatchEvent(new Event('input', { bubbles: true })); })()`)
-  await waitFor(`Boolean([...document.querySelectorAll('#activity-results button')].find((item) => item.textContent.includes(${JSON.stringify(activity)})))`, `${activity} builder result`)
-  await evaluate(`[...document.querySelectorAll('#activity-results button')].find((item) => item.textContent.includes(${JSON.stringify(activity)}))?.click()`)
-}
-await evaluate(`[...document.querySelectorAll('.builder-mode button')].find((item) => item.textContent.includes('Analyze Runs'))?.click()`)
-await waitFor(`Boolean(document.querySelector('.matched-donut')) && !document.querySelector('.scope-progress')`, 'Contains All result')
-const containsAll = await evaluate(`({ title: document.querySelector('.pattern-builder-panel + .panel h2, .message + .panel h2')?.textContent, result: document.querySelector('.matched-donut')?.parentElement?.textContent, evidenceRows: document.querySelectorAll('.pattern-explorer .analysis-table-scroll tbody tr').length })`)
-await evaluate(`[...document.querySelectorAll('.builder-mode button')].find((item) => item.textContent.includes('In This Order'))?.click()`)
-await evaluate(`[...document.querySelectorAll('.builder-mode button')].find((item) => item.textContent.includes('Analyze Runs'))?.click()`)
-await waitFor(`Boolean([...document.querySelectorAll('.pattern-explorer h2')].find((item) => item.textContent === 'In This Order')) && !document.querySelector('.scope-progress')`, 'In This Order result')
-report.patternBuilderInteraction = { containsAll, inOrder: await evaluate(`({ title: [...document.querySelectorAll('.pattern-explorer h2')].find((item) => item.textContent === 'In This Order')?.textContent, result: document.querySelector('.matched-donut')?.parentElement?.textContent, evidenceRows: document.querySelectorAll('.pattern-explorer .analysis-table-scroll tbody tr').length, overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth })`) }
-
-if ((await evaluate(`document.documentElement.dataset.theme`)) !== 'dark') await evaluate(`document.querySelector('.theme-toggle')?.click()`)
-await waitFor(`document.documentElement.dataset.theme === 'dark'`, 'analytics dark theme')
-await delay(250)
-report.analyticsDark = await evaluate(`({ theme: document.documentElement.dataset.theme, overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth, panel: getComputedStyle(document.querySelector('.panel')).backgroundColor, text: getComputedStyle(document.querySelector('.panel')).color })`)
-await capture('patterns-builder-dark')
-
+report.performance = Object.fromEntries(Object.entries(report.matrix['1440']).map(([key, themes]) => [key, themes.light]))
+if (consoleErrors.length) throw new Error(`Browser console errors: ${consoleErrors.join(' | ')}`)
 socket.close()
 console.log(JSON.stringify(report, null, 2))

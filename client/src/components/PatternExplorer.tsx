@@ -90,6 +90,22 @@ export function PatternExplorer({ fromUtc, toUtc, pressKey, onSelectRun, onResto
     return () => controller.abort()
   }, [fromUtc, toUtc, pressKey, selectedPatternKey, submittedConditions, submittedMode])
 
+  useEffect(() => {
+    const restore = () => {
+      const restoredQuery = new URLSearchParams(window.location.search)
+      const restoredConditions = initialConditions()
+      const restoredMode: PatternMatchMode = restoredQuery.get('patternMode') === 'in_order' ? 'in_order' : 'contains_all'
+      setTab(restoredQuery.get('patternTab') === 'builder' || restoredConditions.length ? 'builder' : 'discovered')
+      setSelectedPatternKey(restoredQuery.get('patternKey') ?? undefined)
+      setMode(restoredMode)
+      setSubmittedMode(restoredMode)
+      setSubmittedConditions(restoredConditions)
+      setConditions(data ? restoredConditions.map((condition) => data.catalog.find((item) => item.level === condition.level && item.key === condition.key) ?? { ...condition, description: null, eventType: null, statusCode: null, statusDescription: null, operationalGroupKey: null, operationalGroupName: null, processFamilyKey: null, processFamilyName: null, needsClassification: false }) : [])
+    }
+    window.addEventListener('popstate', restore)
+    return () => window.removeEventListener('popstate', restore)
+  }, [data])
+
   const selectTab = (next: 'discovered' | 'builder') => { setTab(next); updatePatternUrl({ patternTab: next }) }
   const selectPattern = (key: string) => { setSelectedPatternKey(key); updatePatternUrl({ patternTab: 'discovered', patternKey: key }) }
   const refreshBuilder = () => {

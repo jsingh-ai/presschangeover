@@ -158,6 +158,32 @@ test('curated deck/process evidence requests raw canonical signals and derives n
   assert.doesNotMatch(JSON.stringify(result), /began printing|problem|failed/i)
 })
 
+test('curated evidence batches large supported selector sets at the frozen upstream limit', async () => {
+  const deckNumbers = Array.from({ length: 10 }, (_, index) => index + 1)
+  const capabilityTemplate = press5CapabilitiesFixture.capabilities.find(({ canonicalId }) => canonicalId === 'deck.active')!
+  const capabilities = {
+    ...press5CapabilitiesFixture,
+    capabilities: [
+      ...press5CapabilitiesFixture.capabilities.filter(({ canonicalId }) => !canonicalId.startsWith('deck.')),
+      ...['deck.active', 'deck.print_on', 'deck.print_off', 'register.long.actual_or_correction', 'register.side.actual_or_correction', 'impression.anilox.drive_side', 'ink.washup.state', 'ink.pump.status'].map((canonicalId) => ({ ...capabilityTemplate, canonicalId, deckNumbers })),
+    ],
+  }
+  const batchSizes: number[] = []
+  const template = mixedHistoryFixture.signals.find(({ canonicalId }) => canonicalId === 'deck.active')!
+  const service = new TelemetryFoundationService(baseClient({
+    getCapabilities: async () => capabilities,
+    querySemanticHistory: async (_sourceId, query) => {
+      batchSizes.push(query.signals.length)
+      return { ...mixedHistoryFixture, signals: query.signals.map(({ canonicalId, deckNumber = null, representation }) => ({ ...template, canonicalId, deckNumber, representation })) }
+    },
+  }))
+  const result = await service.evidence('press5', { fromUtc: mixedHistoryFixture.fromUtc, toUtc: mixedHistoryFixture.toUtc, includeSeed: true, categories: ['deck_states', 'register', 'impression', 'wash', 'pump'], representation: 'changes' })
+  assert.ok(batchSizes.length > 1)
+  assert.ok(batchSizes.every((size) => size <= 50))
+  assert.equal(result.signals.length, batchSizes.reduce((sum, size) => sum + size, 0))
+  assert.ok(result.signals.length > 50)
+})
+
 test('telemetry cancellation and outage remain typed and independent', async () => {
   const controller = new AbortController(); controller.abort()
   await assert.rejects(new TelemetryFoundationService(baseClient()).sources.resolve('press5', undefined, controller.signal), (error: unknown) => error instanceof TelemetryApiError && error.kind === 'cancelled')

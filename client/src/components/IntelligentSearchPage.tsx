@@ -89,7 +89,14 @@ export function IntelligentSearchPage() {
 
   useEffect(() => {
     if (initialQuery) void runSearch(initialQuery, false)
-    return () => activeRequest.current?.abort()
+    const restore = () => {
+      const restored = new URLSearchParams(window.location.search).get('q') ?? ''
+      setQuery(restored)
+      if (restored) void runSearch(restored, false)
+      else { activeRequest.current?.abort(); setResponse(undefined); setError(undefined); setLoading(false) }
+    }
+    window.addEventListener('popstate', restore)
+    return () => { activeRequest.current?.abort(); window.removeEventListener('popstate', restore) }
   }, [])
 
   function submit(event: FormEvent) { event.preventDefault(); void runSearch(query, true) }
