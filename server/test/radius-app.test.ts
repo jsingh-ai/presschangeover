@@ -135,6 +135,15 @@ test('valid Radius overview range is forwarded and returned', async () => {
   )
   assert.equal(response.status, 200)
   assert.deepEqual(JSON.parse(response.body), overview)
+  const decisionResponse = await request(
+    app,
+    '/api/radius/overview?fromUtc=2026-08-10T00%3A00%3A00.000Z&toUtc=2026-08-11T00%3A00%3A00.000Z&view=decision',
+  )
+  const decisionBody = JSON.parse(decisionResponse.body) as Record<string, unknown>
+  assert.equal(decisionResponse.status, 200)
+  assert.equal('episodeAnalysis' in decisionBody, false)
+  assert.equal('operationalAnalytics' in decisionBody, false)
+  assert.deepEqual(decisionBody.presses, overview.presses)
 })
 
 test('unknown press keys are rejected before repository access', async () => {

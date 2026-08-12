@@ -10,7 +10,7 @@ const telemetryClient = new TelemetryApiClient(config.telemetryApi)
 const classificationService = createClassificationService(config.classificationDatabase)
 await classificationService.initialize()
 const radiusService = new ClassifiedRadiusService(createRadiusService(config.radius, config.plantTimeZone), classificationService)
-const app = createApp({ telemetryClient, radiusService, classificationService, classificationAuthorizer: createClassificationAuthorizer(config.classificationAuthorization, config.classificationDatabase.enabled) })
+const app = createApp({ telemetryClient, radiusService, classificationService, classificationAuthorizer: createClassificationAuthorizer(config.classificationDatabase.enabled) })
 
 app.listen(config.port, config.host, () => {
   console.log(

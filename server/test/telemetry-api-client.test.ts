@@ -4,6 +4,7 @@ import {
   TelemetryApiClient,
   TelemetryApiError,
 } from '../src/telemetry/telemetry-api-client.js'
+import { mixedHistoryFixture, motionFixture, press14SpeedFixture, press5CapabilitiesFixture } from './fixtures/telemetry-fixtures.js'
 
 function jsonResponse(value: unknown, status = 200): Response {
   return new Response(JSON.stringify(value), {
@@ -149,4 +150,77 @@ test('malformed upstream JSON becomes an invalid-response error', async () => {
     (error: unknown) =>
       error instanceof TelemetryApiError && error.kind === 'invalid_response',
   )
+})
+
+test('strictly parses capabilities and preserves supported and unsupported entries', async () => {
+  const client = new TelemetryApiClient({ baseUrl: 'http://telemetry.internal', timeoutMs: 500 }, async () => jsonResponse(press5CapabilitiesFixture))
+  const result = await client.getCapabilities(41)
+  assert.equal(result.capabilities.find(({ canonicalId }) => canonicalId === 'deck.active')?.supported, true)
+  assert.equal(result.capabilities.find(({ canonicalId }) => canonicalId === 'deck.active')?.deckNumbers[0], 1)
+})
+
+test('semantic history POST sends explicit mixed representations and preserves typed evidence', async () => {
+  let method = ''
+  let body: Record<string, unknown> = {}
+  const client = new TelemetryApiClient({ baseUrl: 'http://telemetry.internal', timeoutMs: 500 }, async (_input, init) => {
+    method = init?.method ?? ''
+    body = JSON.parse(String(init?.body))
+    return jsonResponse(mixedHistoryFixture)
+  })
+  const result = await client.querySemanticHistory(41, {
+    fromUtc: mixedHistoryFixture.fromUtc, toUtc: mixedHistoryFixture.toUtc, includeSeed: true,
+    signals: [{ canonicalId: 'production.order', representation: 'changes' }, { canonicalId: 'ink.temperature.actual', deckNumber: 3, representation: 'samples' }],
+  })
+  assert.equal(method, 'POST')
+  assert.deepEqual((body.signals as Array<{ representation: string }>).map(({ representation }) => representation), ['changes', 'samples'])
+  assert.equal(result.signals[0]?.seedSample?.observedAtUtc, '2026-08-12T03:29:25.000Z')
+  assert.equal(result.signals[0]?.changes[0]?.previousValueKind, 'string')
+  assert.equal(result.signals[1]?.seedSample?.value, 0)
+  assert.equal(result.signals[2]?.samples[0]?.valueKind, 'numeric')
+  assert.equal(result.signals[3]?.seedSample?.value, false)
+})
+
+test('machine speed preserves actual/setpoint values and source unit without conversion', async () => {
+  const client = new TelemetryApiClient({ baseUrl: 'http://telemetry.internal', timeoutMs: 500 }, async () => jsonResponse(press14SpeedFixture))
+  const result = await client.getMachineSpeedHistory(43, press14SpeedFixture.fromUtc, press14SpeedFixture.toUtc)
+  assert.equal(result.actual.sourceUnit, 'ft/min')
+  assert.equal(result.actual.canonicalUnitStatus, 'unverified')
+  assert.deepEqual(result.actual.samples.map(({ value }) => value), [0, 25.5])
+  assert.equal(result.setpoint?.samples[0]?.value, 100)
+})
+
+test('physical motion parser preserves policy, states, speed, target, and durations', async () => {
+  const productionShape = {
+    ...motionFixture,
+    summary: { runningSeconds: 120, stoppedSeconds: 120, transitionSeconds: 30, unknownSeconds: 30 },
+    segments: motionFixture.segments.map(({ fromUtc, toUtc, durationMs, ...segment }) => ({ ...segment, startUtc: fromUtc, endUtc: toUtc, durationSeconds: durationMs / 1000 })),
+  }
+  const client = new TelemetryApiClient({ baseUrl: 'http://telemetry.internal', timeoutMs: 500 }, async () => jsonResponse(productionShape))
+  const result = await client.getPhysicalState(41, motionFixture.fromUtc, motionFixture.toUtc)
+  assert.deepEqual(result.segments.map(({ state }) => state), ['RUNNING', 'STOPPED', 'TRANSITION', 'UNKNOWN'])
+  assert.equal(result.segments[0]?.actualSpeedAtStart, 30)
+  assert.equal(result.segments[0]?.targetCommanded, true)
+  assert.equal(result.summary.durationsSeconds?.RUNNING, 120)
+})
+
+test('malformed semantic values fail closed rather than becoming zero', async () => {
+  const malformed = structuredClone(mixedHistoryFixture) as unknown as { signals: Array<{ seedSample: { valueKind: string; value: unknown } | null }> }
+  malformed.signals[0]!.seedSample = { ...malformed.signals[0]!.seedSample!, valueKind: 'integer', value: 'not-a-number' }
+  const client = new TelemetryApiClient({ baseUrl: 'http://telemetry.internal', timeoutMs: 500 }, async () => jsonResponse(malformed))
+  await assert.rejects(client.querySemanticHistory(41, { fromUtc: mixedHistoryFixture.fromUtc, toUtc: mixedHistoryFixture.toUtc, includeSeed: true, signals: [{ canonicalId: 'production.order', representation: 'changes' }] }), (error: unknown) => error instanceof TelemetryApiError && error.kind === 'invalid_response')
+})
+
+for (const [status, kind] of [[400, 'request_invalid'], [413, 'payload_too_large'], [503, 'unavailable']] as const) {
+  test(`semantic upstream ${status} maps to ${kind}`, async () => {
+    const client = new TelemetryApiClient({ baseUrl: 'http://telemetry.internal', timeoutMs: 500 }, async () => new Response('sanitized failure', { status }))
+    await assert.rejects(client.querySemanticHistory(41, { fromUtc: mixedHistoryFixture.fromUtc, toUtc: mixedHistoryFixture.toUtc, includeSeed: true, signals: [{ canonicalId: 'production.order', representation: 'changes' }] }), (error: unknown) => error instanceof TelemetryApiError && error.kind === kind && error.upstreamStatus === status)
+  })
+}
+
+test('external AbortSignal cancellation is distinct from timeout', async () => {
+  const client = new TelemetryApiClient({ baseUrl: 'http://telemetry.internal', timeoutMs: 5_000 }, async (_input, init) => new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener('abort', () => reject(new Error('cancelled internal request')))))
+  const controller = new AbortController()
+  const pending = client.getCapabilities(41, undefined, controller.signal)
+  controller.abort()
+  await assert.rejects(pending, (error: unknown) => error instanceof TelemetryApiError && error.kind === 'cancelled')
 })

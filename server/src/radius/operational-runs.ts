@@ -112,6 +112,7 @@ function segmentId(segment: RadiusStatusSegment, index: number): string {
 
 function toRunSegment(segment: RadiusStatusSegment, index: number, phase: 'pre-production' | 'production'): OperationalRunSegment {
   const state = segment.kind === 'radius' ? segment : undefined
+  const classification = state?.classification
   return {
     segmentId: segmentId(segment, index),
     exactIdentity: state ? exactRadiusIdentity(state) : null,
@@ -124,6 +125,11 @@ function toRunSegment(segment: RadiusStatusSegment, index: number, phase: 'pre-p
     phase,
     isUnavailable: segment.kind === 'offline',
     isShortRunAttempt: state?.stateBreakdownRunQualification?.state === 'short',
+    operationalGroupKey: classification?.isFallback ? 'NEEDS_CLASSIFICATION' : classification?.operationalGroupKey ?? null,
+    operationalGroupName: classification?.isFallback ? 'Needs Classification' : classification?.operationalGroupName ?? null,
+    processFamilyKey: classification?.isFallback ? 'NEEDS_CLASSIFICATION' : classification?.processFamilyKey ?? null,
+    processFamilyName: classification?.isFallback ? 'Needs Classification' : classification?.processFamilyName ?? null,
+    classificationStatus: !state ? 'unavailable' : !classification || classification.isFallback ? 'needs_classification' : 'mapped',
   }
 }
 

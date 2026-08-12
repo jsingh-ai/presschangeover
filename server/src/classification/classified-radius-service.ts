@@ -10,4 +10,6 @@ export class ClassifiedRadiusService implements RadiusService {
   async getPressEpisodes(pressKey: RadiusPressKey, fromUtc: string, toUtc: string): Promise<RadiusPressEpisodes> { return this.classifications.classifyPressEpisodes(await this.source.getPressEpisodes(pressKey, fromUtc, toUtc)) }
   async getEpisode(pressKey: RadiusPressKey, episodeId: string): Promise<OperationalEpisode> { return this.classifications.classifyEpisode(await this.source.getEpisode(pressKey, episodeId)) }
   getObservedIdentities(): Promise<ObservedRadiusIdentity[]> { return this.source.getObservedIdentities?.() ?? Promise.resolve([]) }
+  async getActivityAnalysis(fromUtc: string, toUtc: string, selection?: import('../radius/models.js').ActivitySelection, pressKey?: RadiusPressKey) { return this.classifications.analyzeActivity(await (this.source.getAnalysisOverview?.(fromUtc, toUtc) ?? this.source.getOverview(fromUtc, toUtc)), selection, pressKey) }
+  async getPatternAnalysis(fromUtc: string, toUtc: string, input?: { selectedPatternKey?: string; conditions?: import('../radius/models.js').ActivitySelection[]; matchMode?: import('../radius/models.js').PatternMatchMode; pressKey?: RadiusPressKey }) { return this.classifications.analyzePatterns(await (this.source.getAnalysisOverview?.(fromUtc, toUtc) ?? this.source.getOverview(fromUtc, toUtc)), input) }
 }

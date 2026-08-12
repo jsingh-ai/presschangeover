@@ -9,33 +9,31 @@ import {
   type TelemetryHealth,
   type TelemetrySource,
 } from './models.js'
+import type {
+  TelemetryCapabilitiesResponse,
+  TelemetryMachineSpeedHistory,
+  TelemetrySemanticHistoryQuery,
+  TelemetrySemanticHistoryResponse,
+} from './telemetry-contracts.js'
+import { TelemetryApiError } from './telemetry-error.js'
+import { parseCapabilitiesResponse, parseMachineSpeedHistory, parseSemanticHistoryResponse } from './telemetry-response-parsers.js'
 
-export type TelemetryApiErrorKind =
-  | 'timeout'
-  | 'unavailable'
-  | 'not_found'
-  | 'upstream_http'
-  | 'invalid_response'
-
-export class TelemetryApiError extends Error {
-  constructor(
-    public readonly kind: TelemetryApiErrorKind,
-    public readonly upstreamStatus?: number,
-  ) {
-    super(`Telemetry dependency failure: ${kind}`)
-    this.name = 'TelemetryApiError'
-  }
-}
+export { TelemetryApiError } from './telemetry-error.js'
+export type { TelemetryApiErrorKind } from './telemetry-error.js'
 
 export interface TelemetryClient {
   getHealth(requestId?: string): Promise<TelemetryHealth>
   getDatabaseHealth(requestId?: string): Promise<TelemetryDatabaseHealth>
-  getSources(requestId?: string): Promise<TelemetrySource[]>
+  getSources(requestId?: string, signal?: AbortSignal): Promise<TelemetrySource[]>
+  getCapabilities?(sourceId: number, requestId?: string, signal?: AbortSignal): Promise<TelemetryCapabilitiesResponse>
+  getMachineSpeedHistory?(sourceId: number, fromUtc: string, toUtc: string, requestId?: string, signal?: AbortSignal): Promise<TelemetryMachineSpeedHistory>
+  querySemanticHistory?(sourceId: number, query: TelemetrySemanticHistoryQuery, requestId?: string, signal?: AbortSignal): Promise<TelemetrySemanticHistoryResponse>
   getPhysicalState(
     sourceId: number,
     fromUtc: string,
     toUtc: string,
     requestId?: string,
+    signal?: AbortSignal,
   ): Promise<PhysicalStateResponse>
 }
 
@@ -173,21 +171,32 @@ function parseSegment(value: unknown): PhysicalStateSegment {
   }
 
   const suppliedDuration = record.durationMs
+  const suppliedSeconds = record.durationSeconds
   const calculatedDuration = Date.parse(toUtc) - Date.parse(fromUtc)
   const durationMs =
     typeof suppliedDuration === 'number' && Number.isFinite(suppliedDuration)
       ? suppliedDuration
+      : typeof suppliedSeconds === 'number' && Number.isFinite(suppliedSeconds)
+        ? suppliedSeconds * 1_000
       : calculatedDuration
 
   if (durationMs < 0) {
     throw new TelemetryApiError('invalid_response')
   }
 
+  const optionalNumber = (key: string): number | null | undefined => record[key] === undefined ? undefined : record[key] === null ? null : typeof record[key] === 'number' && Number.isFinite(record[key]) ? record[key] as number : (() => { throw new TelemetryApiError('invalid_response') })()
+  const optionalBoolean = (key: string): boolean | null | undefined => record[key] === undefined ? undefined : record[key] === null ? null : typeof record[key] === 'boolean' ? record[key] as boolean : (() => { throw new TelemetryApiError('invalid_response') })()
+  if (record.reason !== undefined && typeof record.reason !== 'string') throw new TelemetryApiError('invalid_response')
   return {
     state: parseState(record.state),
     fromUtc,
     toUtc,
     durationMs,
+    durationSeconds: durationMs / 1_000,
+    actualSpeedAtStart: optionalNumber('actualSpeedAtStart'),
+    targetSpeedAtStart: optionalNumber('targetSpeedAtStart'),
+    targetCommanded: optionalBoolean('targetCommanded'),
+    ...(typeof record.reason === 'string' ? { reason: record.reason } : {}),
   }
 }
 
@@ -264,6 +273,11 @@ function parsePhysicalState(value: unknown): PhysicalStateResponse {
           .reduce((total, segment) => total + segment.durationMs, 0),
     ]),
   ) as Record<PhysicalState, number>
+  const durationSecondsKey: Record<PhysicalState, string> = { RUNNING: 'runningSeconds', STOPPED: 'stoppedSeconds', TRANSITION: 'transitionSeconds', UNKNOWN: 'unknownSeconds' }
+  const durationsSeconds = Object.fromEntries(PHYSICAL_STATES.map((state) => {
+    const supplied = rawSummary[durationSecondsKey[state]]
+    return [state, typeof supplied === 'number' && Number.isFinite(supplied) && supplied >= 0 ? supplied : durationsMs[state] / 1_000]
+  })) as Record<PhysicalState, number>
 
   const rawPolicy = record.policy
   const policy = isRecord(rawPolicy) && isJsonValue(rawPolicy) ? rawPolicy : {}
@@ -277,6 +291,7 @@ function parsePhysicalState(value: unknown): PhysicalStateResponse {
     policy,
     summary: {
       durationsMs,
+      durationsSeconds,
       segmentCount:
         typeof rawSummary.segmentCount === 'number' &&
         Number.isInteger(rawSummary.segmentCount) &&
@@ -312,10 +327,24 @@ export class TelemetryApiClient implements TelemetryClient {
     )
   }
 
-  async getSources(requestId?: string): Promise<TelemetrySource[]> {
+  async getSources(requestId?: string, signal?: AbortSignal): Promise<TelemetrySource[]> {
     return parseSources(
-      await this.request('/api/telemetry/sources', undefined, requestId),
+      await this.request('/api/telemetry/sources', undefined, requestId, 'GET', undefined, signal),
     )
+  }
+
+  async getCapabilities(sourceId: number, requestId?: string, signal?: AbortSignal): Promise<TelemetryCapabilitiesResponse> {
+    return parseCapabilitiesResponse(await this.request(`/api/telemetry/sources/${sourceId}/capabilities`, undefined, requestId, 'GET', undefined, signal))
+  }
+
+  async getMachineSpeedHistory(sourceId: number, fromUtc: string, toUtc: string, requestId?: string, signal?: AbortSignal): Promise<TelemetryMachineSpeedHistory> {
+    return parseMachineSpeedHistory(await this.request(`/api/telemetry/sources/${sourceId}/machine-speed-history`, { fromUtc, toUtc }, requestId, 'GET', undefined, signal))
+  }
+
+  async querySemanticHistory(sourceId: number, query: TelemetrySemanticHistoryQuery, requestId?: string, signal?: AbortSignal): Promise<TelemetrySemanticHistoryResponse> {
+    const rangeMs = Date.parse(query.toUtc) - Date.parse(query.fromUtc)
+    if (!Number.isFinite(rangeMs) || rangeMs <= 0 || rangeMs > 2 * 60 * 60 * 1_000 || query.signals.length < 1 || query.signals.length > 50 || query.signals.some(({ canonicalId, deckNumber, representation }) => !canonicalId || canonicalId.length > 200 || (deckNumber !== undefined && (!Number.isSafeInteger(deckNumber) || deckNumber < 1)) || (representation !== 'samples' && representation !== 'changes'))) throw new TelemetryApiError('request_invalid', 400)
+    return parseSemanticHistoryResponse(await this.request(`/api/telemetry/sources/${sourceId}/semantic-history/query`, undefined, requestId, 'POST', query, signal))
   }
 
   async getPhysicalState(
@@ -323,12 +352,16 @@ export class TelemetryApiClient implements TelemetryClient {
     fromUtc: string,
     toUtc: string,
     requestId?: string,
+    signal?: AbortSignal,
   ): Promise<PhysicalStateResponse> {
     return parsePhysicalState(
       await this.request(
         `/api/telemetry/sources/${sourceId}/physical-state`,
         { fromUtc, toUtc },
         requestId,
+        'GET',
+        undefined,
+        signal,
       ),
     )
   }
@@ -337,6 +370,9 @@ export class TelemetryApiClient implements TelemetryClient {
     path: string,
     query: Record<string, string> | undefined,
     requestId: string | undefined,
+    method: 'GET' | 'POST' = 'GET',
+    body?: unknown,
+    externalSignal?: AbortSignal,
   ): Promise<unknown> {
     const url = new URL(path.replace(/^\//, ''), `${this.baseUrl}/`)
     for (const [key, value] of Object.entries(query ?? {})) {
@@ -345,21 +381,24 @@ export class TelemetryApiClient implements TelemetryClient {
 
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs)
+    const cancel = () => controller.abort()
+    externalSignal?.addEventListener('abort', cancel, { once: true })
 
     try {
       const response = await this.fetchImplementation(url, {
+        method,
         headers: {
           Accept: 'application/json',
+          ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
           ...(requestId ? { 'X-Request-Id': requestId } : {}),
         },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
         signal: controller.signal,
       })
 
       if (!response.ok) {
-        throw new TelemetryApiError(
-          response.status === 404 ? 'not_found' : 'upstream_http',
-          response.status,
-        )
+        const kind = response.status === 404 ? 'not_found' : response.status === 400 ? 'request_invalid' : response.status === 413 ? 'payload_too_large' : response.status >= 500 ? 'unavailable' : 'upstream_http'
+        throw new TelemetryApiError(kind, response.status)
       }
 
       try {
@@ -372,11 +411,12 @@ export class TelemetryApiClient implements TelemetryClient {
         throw error
       }
       if (controller.signal.aborted) {
-        throw new TelemetryApiError('timeout')
+        throw new TelemetryApiError(externalSignal?.aborted ? 'cancelled' : 'timeout')
       }
       throw new TelemetryApiError('unavailable')
     } finally {
       clearTimeout(timeout)
+      externalSignal?.removeEventListener('abort', cancel)
     }
   }
 }

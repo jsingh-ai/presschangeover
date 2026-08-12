@@ -1,5 +1,5 @@
 import pg from 'pg'
-import type { AppDatabaseConfig, ClassificationAuthorizationConfig } from '../config.js'
+import type { AppDatabaseConfig } from '../config.js'
 import type { Request } from 'express'
 import { InMemoryClassificationRepository, PostgresClassificationRepository } from './classification-repository.js'
 import { ClassificationService } from './classification-service.js'
@@ -19,11 +19,9 @@ export function createClassificationService(config: AppDatabaseConfig) {
 
 export type ClassificationAuthorizer = (request: Request) => ClassificationActor
 
-export function createClassificationAuthorizer(config: ClassificationAuthorizationConfig, writableStoreConfigured: boolean): ClassificationAuthorizer {
-  return (request) => {
-    if (!writableStoreConfigured || !config.trustedProxy) return { id: 'anonymous', canEdit: false }
-    const supplied = request.header('X-ProcessIntelligence-Authenticated-User')?.trim().toLowerCase()
-    if (!supplied || !/^[a-z0-9._\\@-]{1,128}$/.test(supplied)) return { id: 'anonymous', canEdit: false }
-    return { id: supplied, canEdit: config.adminActors.includes(supplied) }
-  }
+export function createClassificationAuthorizer(writableStoreConfigured: boolean): ClassificationAuthorizer {
+  return () => ({
+    id: writableStoreConfigured ? 'application-user' : 'read-only-memory',
+    canEdit: writableStoreConfigured,
+  })
 }

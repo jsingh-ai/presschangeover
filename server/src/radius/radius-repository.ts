@@ -236,6 +236,10 @@ export class RadiusRepository {
       toUtc,
       this.config.effectiveCutoverUtc,
     ]
+    const legacyWindowValues = [
+      ...windowValues,
+      Math.max(1, Math.floor(this.config.staleSeconds / 2)),
+    ]
     const legacyColumns = `machine_id AS "machineId", event_type AS "eventType",
       status_code AS "statusCode", fetched_at AS "fetchedAtUtc",
       status_description AS "statusDescription"`
@@ -251,13 +255,26 @@ export class RadiusRepository {
         [String(machineId), fromUtc, this.config.effectiveCutoverUtc],
       ),
       this.executor.query(
-        `SELECT ${legacyColumns} FROM ${this.legacyTable}
-         WHERE machine_id = $1
-           AND fetched_at >= $2::timestamptz
-           AND fetched_at < $3::timestamptz
-           AND fetched_at < $4::timestamptz
-         ORDER BY fetched_at ASC, id ASC`,
-        windowValues,
+        `WITH legacy_observed AS (
+           SELECT ${legacyColumns},
+                  concat_ws(E'\\x1f', coalesce(event_type, ''), coalesce(status_code, ''), coalesce(status_description, '')) AS "identityKey",
+                  lag(concat_ws(E'\\x1f', coalesce(event_type, ''), coalesce(status_code, ''), coalesce(status_description, '')))
+                    OVER (PARTITION BY machine_id ORDER BY fetched_at, id) AS "previousIdentityKey",
+                  row_number() OVER (
+                    PARTITION BY machine_id, floor(extract(epoch FROM fetched_at) / $5::double precision)
+                    ORDER BY fetched_at DESC, id DESC
+                  ) AS "heartbeatRank"
+           FROM ${this.legacyTable}
+           WHERE machine_id = $1
+             AND fetched_at >= $2::timestamptz
+             AND fetched_at < $3::timestamptz
+             AND fetched_at < $4::timestamptz
+         )
+         SELECT "machineId", "eventType", "statusCode", "fetchedAtUtc", "statusDescription"
+         FROM legacy_observed
+         WHERE "heartbeatRank" = 1 OR "previousIdentityKey" IS DISTINCT FROM "identityKey"
+         ORDER BY "fetchedAtUtc" ASC`,
+        legacyWindowValues,
       ),
       this.executor.query(
         `SELECT ${eventColumns} FROM ${this.eventsTable}
@@ -288,6 +305,107 @@ export class RadiusRepository {
         (left, right) =>
           Date.parse(left.fetchedAtUtc) - Date.parse(right.fetchedAtUtc),
       )
+  }
+
+  async getObservationsForMachines(
+    machineIds: number[],
+    fromUtc: string,
+    toUtc: string,
+  ): Promise<Map<number, RadiusObservation[]>> {
+    const result = new Map(machineIds.map((machineId) => [machineId, [] as RadiusObservation[]]))
+    if (machineIds.length === 0) return result
+    const machineIdValues = machineIds.map(String)
+    const values = [
+      machineIdValues,
+      fromUtc,
+      toUtc,
+      this.config.effectiveCutoverUtc,
+    ]
+    const legacyWindowValues = [
+      ...values,
+      Math.max(1, Math.floor(this.config.staleSeconds / 2)),
+    ]
+    const seedValues = [machineIdValues, fromUtc, this.config.effectiveCutoverUtc]
+    const legacyColumns = `source.machine_id AS "machineId", source.event_type AS "eventType",
+      source.status_code AS "statusCode", source.fetched_at AS "fetchedAtUtc",
+      source.status_description AS "statusDescription"`
+    const eventColumns = `source.machine_id AS "machineId", source.event_type AS "eventType",
+      source.status_code AS "statusCode", source.started_at AS "fetchedAtUtc",
+      source.status_description AS "statusDescription"`
+    const [legacySeeds, legacyWindow, eventSeeds, eventWindow] = await Promise.all([
+      this.executor.query(
+        `SELECT seed.*
+         FROM unnest($1::text[]) AS requested(machine_id)
+         CROSS JOIN LATERAL (
+           SELECT ${legacyColumns} FROM ${this.legacyTable} AS source
+           WHERE source.machine_id = requested.machine_id
+             AND source.fetched_at < LEAST($2::timestamptz, $3::timestamptz)
+           ORDER BY source.fetched_at DESC, source.id DESC LIMIT 1
+         ) AS seed
+         ORDER BY seed."machineId"`,
+        seedValues,
+      ),
+      this.executor.query(
+        `WITH legacy_observed AS (
+           SELECT source.machine_id AS "machineId", source.event_type AS "eventType",
+                  source.status_code AS "statusCode", source.fetched_at AS "fetchedAtUtc",
+                  source.status_description AS "statusDescription",
+                  concat_ws(E'\\x1f', coalesce(source.event_type, ''), coalesce(source.status_code, ''), coalesce(source.status_description, '')) AS "identityKey",
+                  lag(concat_ws(E'\\x1f', coalesce(source.event_type, ''), coalesce(source.status_code, ''), coalesce(source.status_description, '')))
+                    OVER (PARTITION BY source.machine_id ORDER BY source.fetched_at, source.id) AS "previousIdentityKey",
+                  row_number() OVER (
+                    PARTITION BY source.machine_id, floor(extract(epoch FROM source.fetched_at) / $5::double precision)
+                    ORDER BY source.fetched_at DESC, source.id DESC
+                  ) AS "heartbeatRank"
+           FROM ${this.legacyTable} AS source
+           WHERE source.machine_id = ANY($1::text[])
+             AND source.fetched_at >= $2::timestamptz
+             AND source.fetched_at < $3::timestamptz
+             AND source.fetched_at < $4::timestamptz
+         )
+         SELECT "machineId", "eventType", "statusCode", "fetchedAtUtc", "statusDescription"
+         FROM legacy_observed
+         WHERE "heartbeatRank" = 1 OR "previousIdentityKey" IS DISTINCT FROM "identityKey"
+         ORDER BY "machineId", "fetchedAtUtc"`,
+        legacyWindowValues,
+      ),
+      this.executor.query(
+        `SELECT seed.*
+         FROM unnest($1::text[]) AS requested(machine_id)
+         CROSS JOIN LATERAL (
+           SELECT ${eventColumns} FROM ${this.eventsTable} AS source
+           WHERE source.machine_id = requested.machine_id
+             AND source.started_at >= $3::timestamptz
+             AND source.started_at < $2::timestamptz
+           ORDER BY source.started_at DESC, source.id DESC LIMIT 1
+         ) AS seed
+         ORDER BY seed."machineId"`,
+        seedValues,
+      ),
+      this.executor.query(
+        `SELECT observed.*
+         FROM unnest($1::text[]) AS requested(machine_id)
+         CROSS JOIN LATERAL (
+           SELECT ${eventColumns} FROM ${this.eventsTable} AS source
+           WHERE source.machine_id = requested.machine_id
+             AND source.started_at >= GREATEST($2::timestamptz, $4::timestamptz)
+             AND source.started_at < $3::timestamptz
+           ORDER BY source.started_at ASC, source.id ASC
+         ) AS observed
+         ORDER BY observed."machineId", observed."fetchedAtUtc"`,
+        values,
+      ),
+    ])
+    const eventSeedMachines = new Set(eventSeeds.rows.map((row) => Number(row.machineId)))
+    const rows = [
+      ...legacySeeds.rows.filter((row) => !eventSeedMachines.has(Number(row.machineId))).map((row) => mapObservation(row, 'legacy')),
+      ...eventSeeds.rows.map((row) => mapObservation(row, 'compact')),
+      ...legacyWindow.rows.map((row) => mapObservation(row, 'legacy')),
+      ...eventWindow.rows.map((row) => mapObservation(row, 'compact')),
+    ]
+    for (const observation of rows) result.get(observation.machineId)?.push(observation)
+    for (const observations of result.values()) observations.sort((left, right) => Date.parse(left.fetchedAtUtc) - Date.parse(right.fetchedAtUtc))
+    return result
   }
 
   async getPollRuns(fromUtc: string, toUtc: string): Promise<RadiusPollRun[]> {

@@ -408,6 +408,53 @@ export interface RadiusPressOverview {
   timelineSegments: RadiusStatusSegment[]
 }
 
+export type OverviewRankingExclusionReason = 'coverage_below_80_percent' | 'observed_time_below_30_minutes'
+export interface OverviewPressContribution {
+  pressKey: RadiusPressKey; displayName: string; durationSeconds: number; shareOfCategoryPercent: number
+}
+export interface OverviewFamilyAllocation {
+  key: string; name: string; durationSeconds: number; nonProductionSeconds: number
+  shareOfGroupPercent: number; shareOfRadiusStatePercent: number; shareOfObservedPercent: number
+  sourceIdentityCount: number; needsClassification: boolean; pressContributions: OverviewPressContribution[]
+}
+export interface OverviewGroupAllocation {
+  key: string; name: string; description: string; lightColor: string; darkColor: string
+  durationSeconds: number; shareOfRadiusStatePercent: number; shareOfObservedPercent: number; nonProductionSeconds: number
+  families: OverviewFamilyAllocation[]; needsClassification: boolean; pressContributions: OverviewPressContribution[]
+}
+export interface OverviewRadiusStateAllocation {
+  eventType: string; displayLabel: string; durationSeconds: number; shareOfObservedPercent: number
+  canonicalProductionSeconds: number; nonProductionSeconds: number; nonProductionShareOfObservedPercent: number
+  operationalGroups: OverviewGroupAllocation[]; largestNonProductionGroupKey: string | null; largestNonProductionFamilyKey: string | null
+}
+export type OverviewTimelineClassificationStatus = 'mapped' | 'needs_classification' | 'unavailable'
+export interface OverviewTimelineInterval {
+  intervalId: string; startUtc: string; endUtc: string; durationSeconds: number; isUnavailable: boolean
+  eventType: string | null; radiusStateLabel: string; operationalGroupKey: string | null; operationalGroupLabel: string
+  operationalGroupLightColor: string | null; operationalGroupDarkColor: string | null
+  processFamilyKey: string | null; processFamilyLabel: string | null; classificationStatus: OverviewTimelineClassificationStatus
+}
+export interface OverviewPressAllocation {
+  pressKey: RadiusPressKey; displayName: string; wallClockSeconds: number; observedSeconds: number; unavailableSeconds: number
+  coveragePercent: number; productionSeconds: number; productionSharePercent: number | null
+  nonProductionSeconds: number; nonProductionSharePercent: number | null; fleetProductionRank: number | null
+  productionDeltaVsFleetMedianPoints: number | null; rankingEligible: boolean; rankingExclusionReason: OverviewRankingExclusionReason | null
+  classificationCoveragePercent: number; needsClassificationSeconds: number; largestNonProductionRadiusStateEventType: string | null
+  radiusStateBreakdown: OverviewRadiusStateAllocation[]; timelineIntervals: OverviewTimelineInterval[]
+}
+export interface OverviewDecisionSupport {
+  minimumCoveragePercent: 80; minimumObservedSeconds: 1800; classificationVersion: number
+  fleetSummary: {
+    wallClockSeconds: number; observedSeconds: number; unavailableSeconds: number; coveragePercent: number
+    productionSeconds: number; productionSharePercent: number | null; nonProductionSeconds: number; nonProductionSharePercent: number | null
+    rankablePressCount: number; pressCount: number; productionMedianPercent: number | null
+    classificationCoveragePercent: number; needsClassificationSeconds: number; largestNonProductionRadiusStateEventType: string | null
+  }
+  pressAllocations: OverviewPressAllocation[]; rankingPressKeys: RadiusPressKey[]; topRunningPressKeys: RadiusPressKey[]
+  needsAttentionPressKeys: RadiusPressKey[]; fleetRadiusStateBreakdown: OverviewRadiusStateAllocation[]
+  focusItems: string[]; excludedPressKeys: RadiusPressKey[]
+}
+
 export interface RadiusOverview {
   fromUtc: string
   toUtc: string
@@ -428,15 +475,16 @@ export interface RadiusOverview {
   }
   unmappedPressKeys: RadiusPressKey[]
   presses: RadiusPressOverview[]
-  episodeAnalysis: FleetEpisodeAnalysis
-  operationalAnalytics: OperationalAnalytics
+  episodeAnalysis?: FleetEpisodeAnalysis
+  operationalAnalytics?: OperationalAnalytics
   classificationVersion?: number
   operationalGroups?: OperationalGroup[]
+  decisionSupport?: OverviewDecisionSupport
 }
 
 export type RunComparisonDirection = 'faster' | 'slower' | 'typical' | 'longer' | 'shorter' | 'low_support'
 export interface RunBenchmarkStats { sampleRuns: number; samplePresses: number; sufficientSupport: boolean; average: number | null; median: number | null; delta: number | null; percentDelta: number | null; percentile: number | null }
-export interface OperationalRunSegment { segmentId: string; exactIdentity: string | null; eventType: string | null; statusCode: string | null; statusDescription: string | null; startUtc: string; endUtc: string; durationSeconds: number; phase: 'pre-production' | 'production'; isUnavailable: boolean; isShortRunAttempt: boolean }
+export interface OperationalRunSegment { segmentId: string; exactIdentity: string | null; eventType: string | null; statusCode: string | null; statusDescription: string | null; startUtc: string; endUtc: string; durationSeconds: number; phase: 'pre-production' | 'production'; isUnavailable: boolean; isShortRunAttempt: boolean; operationalGroupKey?: string | null; operationalGroupName?: string | null; processFamilyKey?: string | null; processFamilyName?: string | null; classificationStatus?: 'mapped' | 'needs_classification' | 'unavailable' }
 export interface OperationalRunStatusSummary {
   exactIdentity: string; eventType: string; statusCode: string | null; statusDescription: string; totalDurationSeconds: number; preProductionDurationSeconds: number; occurrenceCount: number; preProductionContributionPercent: number | null
   samePress: RunBenchmarkStats & { eligibleRuns: number; containingRuns: number; occurrenceFrequencyPercent: number | null; typicalOccurrenceCount: number | null; occurrenceDelta: number | null; direction: 'longer' | 'shorter' | 'typical' | 'low_support' }
@@ -453,6 +501,27 @@ export interface OperationalRun {
   flags: string[]; rank: { timeToProduction: number | null; productionDuration: number | null; comparableRuns: number }
 }
 export interface OperationalRunComparison { pressKey: RadiusPressKey; displayName: string; fromUtc: string; toUtc: string; confirmationSeconds: number; samePressMinimumRuns: number; fleetMinimumPresses: number; fleetMinimumRuns: number; similarRelativeTolerance: number; similarAbsoluteSeconds: number; runs: OperationalRun[] }
+
+export type ActivityLevel = 'radius_state' | 'operational_group' | 'process_family' | 'exact_status'
+export interface ActivitySelection { level: ActivityLevel; key: string; label: string }
+export interface ActivityCatalogItem extends ActivitySelection { description: string | null; eventType: string | null; statusCode: string | null; statusDescription: string | null; operationalGroupKey: string | null; operationalGroupName: string | null; processFamilyKey: string | null; processFamilyName: string | null; needsClassification: boolean }
+export interface ActivityOccurrence { occurrenceId: string; pressKey: RadiusPressKey; displayName: string; startUtc: string; endUtc: string; durationSeconds: number; eventType: string; radiusStateLabel: string; operationalGroupKey: string; operationalGroupName: string; processFamilyKey: string; processFamilyName: string; exactIdentities: Array<{ identity: string; eventType: string; statusCode: string | null; statusDescription: string; durationSeconds: number; needsClassification: boolean }> }
+export interface ActivityAnalysis {
+  fromUtc: string; toUtc: string; classificationVersion: number; selection: ActivityCatalogItem; catalog: ActivityCatalogItem[]
+  summary: { totalDurationSeconds: number; occurrenceCount: number; medianOccurrenceSeconds: number | null; p95OccurrenceSeconds: number | null; longestOccurrenceSeconds: number; pressesObserved: number; scopePresses: number; shareOfObservedPercent: number; sourceCoveragePercent: number; classificationCoveragePercent: number }
+  pressBreakdown: Array<{ pressKey: RadiusPressKey; displayName: string; durationSeconds: number; occurrenceCount: number; medianOccurrenceSeconds: number | null; shareOfObservedPercent: number; coveragePercent: number }>
+  radiusStateComposition: Array<{ eventType: string; label: string; durationSeconds: number; percentage: number }>
+  semanticBreakdown: Array<{ key: string; label: string; level: 'operational_group' | 'process_family' | 'exact_status'; durationSeconds: number; percentage: number }>
+  trend: Array<{ bucketStartUtc: string; durationSeconds: number; occurrenceCount: number }>; trendBucket: 'hour' | 'day'
+  durationDistribution: Array<{ key: string; label: string; occurrenceCount: number }>; occurrences: ActivityOccurrence[]; totalOccurrenceCount: number; evidenceLimit: number
+}
+export type PatternMatchMode = 'contains_all' | 'in_order'
+export interface RunPatternEvidence { runId: string; pressKey: RadiusPressKey; displayName: string; startUtc: string; endUtc: string; totalDurationSeconds: number; timeToProductionSeconds: number | null; productionDurationSeconds: number; shortRunAttemptCount: number; transitionCount: number; isPartial: boolean; dataInterrupted: boolean; eligible: boolean; groupSequence: string[]; familySequence: string[]; selectedActivitySeconds: number; conditionDurations: Array<{ conditionKey: string; durationSeconds: number }> }
+export interface PatternSummary { patternKey: string; classificationVersion: number; orderedGroupKeys: string[]; orderedGroupLabels: string[]; runCount: number; runSharePercent: number; pressesObserved: number; medianTimeToProductionSeconds: number | null; medianPreProductionSeconds: number | null; medianProductionSeconds: number | null; shortAttemptRunCount: number; matchedRunIds: string[]; containsReentry: boolean; pressStats: Array<{ pressKey: RadiusPressKey; displayName: string; matchedRuns: number; eligibleRuns: number; matchRatePercent: number; medianTimeToProductionSeconds: number | null }>; familyVariations: Array<{ orderedFamilyKeys: string[]; orderedFamilyLabels: string[]; runCount: number; runShareWithinPatternPercent: number }> }
+export interface PatternAnalysis {
+  fromUtc: string; toUtc: string; classificationVersion: number; catalog: ActivityCatalogItem[]; totalRuns: number; eligibleRuns: number; excludedPartialRuns: number; excludedInterruptedRuns: number; excludedOpenRuns: number; uniquePatternCount: number; shortAttemptRuns: number; patterns: PatternSummary[]; selectedPattern: PatternSummary | null; matchedRuns: RunPatternEvidence[]; evidenceLimit: number
+  builder: null | { conditions: ActivityCatalogItem[]; matchMode: PatternMatchMode; redundantConditionMessage: string | null; matchedRuns: number; matchSharePercent: number; pressesObserved: number; medianTimeToProductionSeconds: number | null; medianSelectedActivitySeconds: number | null; totalSelectedActivitySeconds: number; pressStats: Array<{ pressKey: RadiusPressKey; displayName: string; matchedRuns: number; eligibleRuns: number; matchRatePercent: number; selectedActivitySeconds: number; medianTimeToProductionSeconds: number | null }>; topPatterns: Array<{ patternKey: string; labels: string[]; runCount: number; percentageOfMatches: number }> }
+}
 
 export interface RadiusPressEpisodes {
   fromUtc: string
@@ -508,5 +577,20 @@ export interface ClassificationWorkspace {
   families: ProcessFamily[]; versions: Array<{ version: number; publishedAtUtc: string; publishedBy: string; changeCount: number }>
   audit: Array<{ id: string; version: number | null; action: string; target: string; summary: string; actor: string; atUtc: string }>
   unmappedCount: number; reviewRequiredCount: number; canEdit: boolean; actor: string | null; persistence: 'postgresql' | 'memory'
+  observedIdentityStatus: 'fresh' | 'cached' | 'unavailable'; observedIdentityAsOf: string | null
+}
+
+export interface ClassificationSearchResult {
+  id: string; type: 'group' | 'family' | 'exact_status'; title: string; score: number; matchReason: string; description: string | null
+  groups: Array<{ key: OperationalGroupKey; displayName: string }>
+  family: { key: ProcessFamilyKey; displayName: string } | null
+  eventType: string | null; statusCode: string | null; statusDescription: string | null
+  needsClassification: boolean; publishedClassification: boolean
+}
+
+export interface ClassificationSearchResponse {
+  query: string; publishedVersion: number
+  observedIdentityStatus: 'fresh' | 'cached' | 'unavailable'; observedIdentityAsOf: string | null
+  results: ClassificationSearchResult[]
 }
 export interface ClassificationValidation { valid: boolean; errors: string[]; warnings: string[]; mappedCount: number; fallbackCount: number; reviewRequiredCount: number }

@@ -4,11 +4,13 @@ import { areaFromPathname, areaPath, operationalSectionFromSearch, pressFromLoca
 import { oppositeTheme, resolveTheme } from '../src/theme'
 
 describe('analytics and administration navigation context', () => {
-  it('recognizes the three analytics routes and State Classification administration', () => {
+  it('recognizes analytics, Intelligent Search, and State Classification routes', () => {
     assert.equal(areaFromPathname('/overview'), 'overview')
     assert.equal(areaFromPathname('/operational-analysis'), 'operational-analysis')
     assert.equal(areaFromPathname('/patterns-episodes'), 'patterns-episodes')
     assert.equal(areaPath('patterns-episodes'), '/patterns-episodes')
+    assert.equal(areaFromPathname('/intelligent-search'), 'intelligent-search')
+    assert.equal(areaPath('intelligent-search'), '/intelligent-search')
     assert.equal(areaFromPathname('/administration/state-classification'), 'state-classification')
     assert.equal(areaPath('state-classification'), '/administration/state-classification')
     assert.equal(areaFromPathname('/press/press7'), 'overview')

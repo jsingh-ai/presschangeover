@@ -117,6 +117,9 @@ test('hybrid observation SQL is bounded, read-only, and uses text machine IDs', 
     config.effectiveCutoverUtc,
   ])
   assert.match(calls[1].sql, /fetched_at < \$4::timestamptz/)
+  assert.match(calls[1].sql, /"heartbeatRank" = 1/)
+  assert.match(calls[1].sql, /"previousIdentityKey" IS DISTINCT FROM "identityKey"/)
+  assert.equal(calls[1].values?.[4], 90)
   assert.match(calls[2].sql, /"public"\."machine_status_events"/)
   assert.match(calls[2].sql, /ORDER BY started_at DESC, id DESC LIMIT 1/)
   assert.deepEqual(calls[2].values, [
@@ -130,6 +133,43 @@ test('hybrid observation SQL is bounded, read-only, and uses text machine IDs', 
   }
 })
 
+test('fleet Overview loads hybrid observations in four set-based read-only queries without N+1 access', async () => {
+  const calls: Array<{ sql: string; values?: unknown[] }> = []
+  const executor: RadiusQueryExecutor = {
+    query: async (sql, values) => {
+      assertPostgresParameterContract(sql, values)
+      calls.push({ sql, values })
+      if (sql.includes('machine_status_events') && sql.includes('AS seed')) return { rows: [{ machineId: '203', eventType: 'G', statusCode: '150', statusDescription: 'Run Production', fetchedAtUtc: new Date('2026-08-10T14:30:00.000Z') }] }
+      if (sql.includes('machine_status_history') && sql.includes('AS seed')) return { rows: [
+        { machineId: '203', eventType: 'M', statusCode: '16', statusDescription: 'Make Ready', fetchedAtUtc: new Date('2026-08-10T14:28:00.000Z') },
+        { machineId: '205', eventType: 'B', statusCode: '99', statusDescription: 'Plates: Wash', fetchedAtUtc: new Date('2026-08-10T14:28:00.000Z') },
+      ] }
+      return { rows: [] }
+    },
+  }
+  const result = await new RadiusRepository(executor, config, 'America/Chicago').getObservationsForMachines(
+    [203, 205],
+    '2026-08-10T15:00:00.000Z',
+    '2026-08-10T16:00:00.000Z',
+  )
+  assert.equal(calls.length, 4)
+  assert.equal(calls.every(({ values }) => Array.isArray(values?.[0]) && (values?.[0] as string[]).join(',') === '203,205'), true)
+  assert.equal(result.get(203)?.length, 1)
+  assert.equal(result.get(203)?.[0].sourceGeneration, 'compact')
+  assert.equal(result.get(205)?.[0].sourceGeneration, 'legacy')
+  assert.match(calls[1].sql, /machine_id = ANY\(\$1::text\[\]\)/)
+  assert.match(calls[1].sql, /"heartbeatRank" = 1/)
+  assert.match(calls[1].sql, /"previousIdentityKey" IS DISTINCT FROM "identityKey"/)
+  assert.equal(calls[1].values?.[4], 90)
+  for (const { sql } of calls) {
+    assert.doesNotMatch(sql, /^\s*(INSERT|UPDATE|DELETE|TRUNCATE|ALTER|CREATE|DROP)\b/i)
+  }
+  for (const index of [0, 2, 3]) {
+    assert.match(calls[index].sql, /unnest\(\$1::text\[\]\)/)
+    assert.match(calls[index].sql, /CROSS JOIN LATERAL/)
+  }
+})
+
 test('a prior compact event supersedes the legacy fallback seed', async () => {
   const executor: RadiusQueryExecutor = {
     query: async (sql) => {
@@ -140,7 +180,7 @@ test('a prior compact event supersedes the legacy fallback seed', async () => {
           fetchedAtUtc: new Date('2026-08-10T15:00:00.000Z'),
         }] }
       }
-      if (sql.includes('machine_status_history') && sql.includes('DESC')) {
+      if (sql.includes('machine_status_history') && sql.includes('DESC LIMIT 1')) {
         return { rows: [{
           machineId: '203', eventType: 'B', statusDescription: 'Non Productive',
           fetchedAtUtc: new Date('2026-08-10T14:27:52.383Z'),

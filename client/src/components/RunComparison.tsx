@@ -94,10 +94,11 @@ function StatusBenchmark({ status, selectedSegment }: { status: OperationalRunSt
   </section>
 }
 
-export function RunComparison({ selectedPress, comparison, overview, onSelectPress, onInspectSegment, onInspectOverviewSegment, showIndividualRuns = true }: {
+export function RunComparison({ selectedPress, comparison, overview, initialRunId, onSelectPress, onInspectSegment, onInspectOverviewSegment, showIndividualRuns = true }: {
   selectedPress?: RadiusPressKey
   comparison?: OperationalRunComparison
   overview?: RadiusOverview
+  initialRunId?: string
   onSelectPress?(pressKey: RadiusPressKey | undefined): void
   onInspectSegment(segment: OperationalRunSegment): void
   onInspectOverviewSegment?(pressKey: RadiusPressKey, segment: RadiusStatusSegment): void
@@ -109,10 +110,10 @@ export function RunComparison({ selectedPress, comparison, overview, onSelectPre
   const [hoveredItem, setHoveredItem] = useState<RunTooltipPosition>()
 
   useEffect(() => {
-    setSelectedRunId(comparison?.runs[0]?.runId)
+    setSelectedRunId(comparison?.runs.some(({ runId }) => runId === initialRunId) ? initialRunId : comparison?.runs[0]?.runId)
     setSelectedStatusIdentity(undefined)
     setSelectedSegmentId(undefined)
-  }, [comparison?.pressKey, comparison?.fromUtc, comparison?.toUtc])
+  }, [comparison?.pressKey, comparison?.fromUtc, comparison?.toUtc, initialRunId])
 
   const selectedRun = comparison?.runs.find(({ runId }) => runId === selectedRunId) ?? comparison?.runs[0]
   const selectedStatus = selectedRun?.statusSummaries.find(({ exactIdentity }) => exactIdentity === selectedStatusIdentity)

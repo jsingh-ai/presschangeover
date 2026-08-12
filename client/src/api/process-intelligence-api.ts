@@ -14,6 +14,11 @@ import type {
   OperationalGroupKey,
   ProcessFamilyKey,
   MappingConfidence,
+  ClassificationSearchResponse,
+  ActivityAnalysis,
+  ActivitySelection,
+  PatternAnalysis,
+  PatternMatchMode,
 } from '../types/api'
 
 export class ApiRequestError extends Error {
@@ -74,10 +79,26 @@ export function getRadiusHealth() {
   return getJson<RadiusHealth>('/api/radius/health')
 }
 
-export function getRadiusOverview(fromUtc: string, toUtc: string) {
+export function getRadiusOverview(fromUtc: string, toUtc: string, decisionOnly = false) {
   return getJson<RadiusOverview>(
-    `/api/radius/overview?${rangeQuery(fromUtc, toUtc)}`,
+    `/api/radius/overview?${rangeQuery(fromUtc, toUtc)}${decisionOnly ? '&view=decision' : ''}`,
   )
+}
+
+export function getActivityAnalysis(fromUtc: string, toUtc: string, selection?: ActivitySelection, pressKey?: RadiusPressKey) {
+  const parameters = new URLSearchParams({ fromUtc, toUtc })
+  if (selection) { parameters.set('level', selection.level); parameters.set('key', selection.key) }
+  if (pressKey) parameters.set('pressKey', pressKey)
+  return getJson<ActivityAnalysis>(`/api/radius/activity-analysis?${parameters.toString()}`)
+}
+
+export function getPatternAnalysis(fromUtc: string, toUtc: string, input: { selectedPatternKey?: string; conditions?: ActivitySelection[]; matchMode?: PatternMatchMode; pressKey?: RadiusPressKey } = {}) {
+  const parameters = new URLSearchParams({ fromUtc, toUtc })
+  if (input.selectedPatternKey) parameters.set('patternKey', input.selectedPatternKey)
+  if (input.conditions?.length) parameters.set('conditions', JSON.stringify(input.conditions.map(({ level, key }) => ({ level, key }))))
+  if (input.matchMode) parameters.set('matchMode', input.matchMode)
+  if (input.pressKey) parameters.set('pressKey', input.pressKey)
+  return getJson<PatternAnalysis>(`/api/radius/pattern-analysis?${parameters.toString()}`)
 }
 
 export function getRadiusPressEpisodes(
@@ -100,6 +121,10 @@ export function getRadiusEpisode(
 }
 
 export function getClassificationWorkspace() { return getJson<ClassificationWorkspace>('/api/classification/workspace') }
+export function searchClassifications(query: string, limit = 10) {
+  const parameters = new URLSearchParams({ q: query, limit: String(limit) })
+  return getJson<ClassificationSearchResponse>(`/api/classification/search?${parameters.toString()}`)
+}
 export function createClassificationDraft(expectedVersion: number) { return sendJson<ClassificationDraft>('/api/classification/draft', 'POST', { expectedVersion }) }
 export function updateClassificationGroup(groupKey: OperationalGroupKey, expectedRevision: number | null, changes: object) { return sendJson<ClassificationDraft>(`/api/classification/draft/groups/${groupKey}`, 'PATCH', { ...changes, expectedRevision }) }
 export function updateClassifications(expectedRevision: number | null, identities: Array<{ eventType: string; statusCode: string | null; statusDescription: string }>, changes: { operationalGroupKey?: OperationalGroupKey; processFamilyKey?: ProcessFamilyKey; displayLabel?: string | null; explanation?: string; confidence?: MappingConfidence; needsReview?: boolean; defaultTimelineVisibility?: boolean; obsolete?: boolean }) { return sendJson<ClassificationDraft>('/api/classification/draft/classifications', 'PATCH', { identities, expectedRevision, ...changes }) }

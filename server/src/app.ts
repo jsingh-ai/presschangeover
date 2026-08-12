@@ -8,7 +8,7 @@ import {
   TelemetryApiError,
   type TelemetryClient,
 } from './telemetry/telemetry-api-client.js'
-import { RADIUS_PRESS_KEYS, type RadiusPressKey } from './radius/models.js'
+import { RADIUS_PRESS_KEYS, type ActivityLevel, type ActivitySelection, type PatternMatchMode, type RadiusPressKey } from './radius/models.js'
 import {
   RadiusNotFoundError,
   type RadiusService,
@@ -19,12 +19,18 @@ import type { ClassificationAuthorizer } from './classification/create-classific
 import { ClassificationConflictError } from './classification/classification-repository.js'
 import { ClassificationForbiddenError, ClassificationService, ClassificationValidationError } from './classification/classification-service.js'
 import { OPERATIONAL_GROUP_KEYS, PROCESS_FAMILY_KEYS, type MappingConfidence, type OperationalGroupKey, type ProcessFamilyKey, type RadiusIdentity } from './classification/models.js'
+import { ObservedIdentityCache, type ObservedIdentitySnapshot } from './classification/observed-identity-cache.js'
 import { exactRadiusIdentity } from './radius/radius-identity.js'
+import { TelemetryFoundationService } from './telemetry/telemetry-foundation-service.js'
+import { PHYSICAL_EVIDENCE_CATEGORIES, TELEMETRY_REPRESENTATIONS, type CuratedPhysicalEvidenceRequest, type TelemetryRepresentation, type TelemetrySemanticHistoryQuery } from './telemetry/telemetry-contracts.js'
 
 const MAX_PHYSICAL_STATE_RANGE_MS = 2 * 60 * 60 * 1_000
 const MAX_RADIUS_RANGE_MS = 31 * 24 * 60 * 60 * 1_000
 const SAFE_REQUEST_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/
 const UTC_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/
+const DEFAULT_CLASSIFICATION_SEARCH_LIMIT = 10
+const MAX_CLASSIFICATION_SEARCH_LIMIT = 20
+const ACTIVITY_LEVELS = new Set<ActivityLevel>(['radius_state', 'operational_group', 'process_family', 'exact_status'])
 
 interface Logger {
   info(message: string): void
@@ -109,6 +115,33 @@ function parseUtcTimestamp(value: unknown, errorCode: string): string {
   return value
 }
 
+function parseActivitySelection(levelValue: unknown, keyValue: unknown): ActivitySelection | undefined {
+  if (levelValue === undefined && keyValue === undefined) return undefined
+  if (typeof levelValue !== 'string' || !ACTIVITY_LEVELS.has(levelValue as ActivityLevel) || typeof keyValue !== 'string' || !keyValue || keyValue.length > 300) throw new RequestValidationError('invalid_activity_selection')
+  return { level: levelValue as ActivityLevel, key: keyValue, label: keyValue }
+}
+
+function parseOptionalPressKey(value: unknown): RadiusPressKey | undefined {
+  if (value === undefined) return undefined
+  if (typeof value !== 'string') throw new RequestValidationError('invalid_press_key')
+  return parsePressKey(value)
+}
+
+function parsePatternConditions(value: unknown): ActivitySelection[] {
+  if (value === undefined) return []
+  if (typeof value !== 'string' || value.length > 2_000) throw new RequestValidationError('invalid_pattern_conditions')
+  let parsed: unknown
+  try { parsed = JSON.parse(value) } catch { throw new RequestValidationError('invalid_pattern_conditions') }
+  if (!Array.isArray(parsed) || parsed.length > 6) throw new RequestValidationError('invalid_pattern_conditions')
+  return parsed.map((item) => {
+    if (!item || typeof item !== 'object') throw new RequestValidationError('invalid_pattern_conditions')
+    const candidate = item as Record<string, unknown>
+    const selection = parseActivitySelection(candidate.level, candidate.key)
+    if (!selection) throw new RequestValidationError('invalid_pattern_conditions')
+    return selection
+  })
+}
+
 function validateRange(query: Request['query']): {
   fromUtc: string
   toUtc: string
@@ -125,6 +158,51 @@ function validateRange(query: Request['query']): {
   }
 
   return { fromUtc, toUtc }
+}
+
+function validateBodyRange(body: Record<string, unknown>): { fromUtc: string; toUtc: string } {
+  const fromUtc = parseUtcTimestamp(body.fromUtc, 'invalid_from_utc')
+  const toUtc = parseUtcTimestamp(body.toUtc, 'invalid_to_utc')
+  const rangeMs = Date.parse(toUtc) - Date.parse(fromUtc)
+  if (rangeMs <= 0) throw new RequestValidationError('invalid_time_range')
+  if (rangeMs > MAX_PHYSICAL_STATE_RANGE_MS) throw new RequestValidationError('time_range_too_large')
+  return { fromUtc, toUtc }
+}
+
+function parseRepresentation(value: unknown): TelemetryRepresentation {
+  if (typeof value !== 'string' || !TELEMETRY_REPRESENTATIONS.includes(value as TelemetryRepresentation)) throw new RequestValidationError('invalid_telemetry_representation')
+  return value as TelemetryRepresentation
+}
+
+function parseSemanticQuery(body: unknown): TelemetrySemanticHistoryQuery {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new RequestValidationError('invalid_telemetry_query')
+  const raw = body as Record<string, unknown>
+  const { fromUtc, toUtc } = validateBodyRange(raw)
+  if (typeof raw.includeSeed !== 'boolean' || !Array.isArray(raw.signals) || raw.signals.length < 1 || raw.signals.length > 50) throw new RequestValidationError('invalid_telemetry_query')
+  const signals = raw.signals.map((candidate) => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) throw new RequestValidationError('invalid_telemetry_selector')
+    const item = candidate as Record<string, unknown>
+    if (typeof item.canonicalId !== 'string' || !/^[a-z0-9_.]{1,200}$/.test(item.canonicalId)) throw new RequestValidationError('invalid_telemetry_selector')
+    if (item.deckNumber !== undefined && (!Number.isSafeInteger(item.deckNumber) || Number(item.deckNumber) < 1 || Number(item.deckNumber) > 100)) throw new RequestValidationError('invalid_telemetry_selector')
+    return { canonicalId: item.canonicalId, ...(item.deckNumber === undefined ? {} : { deckNumber: Number(item.deckNumber) }), representation: parseRepresentation(item.representation) }
+  })
+  return { fromUtc, toUtc, includeSeed: raw.includeSeed, signals }
+}
+
+function parseEvidenceRequest(body: unknown): CuratedPhysicalEvidenceRequest {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new RequestValidationError('invalid_evidence_request')
+  const raw = body as Record<string, unknown>
+  const { fromUtc, toUtc } = validateBodyRange(raw)
+  if (typeof raw.includeSeed !== 'boolean' || !Array.isArray(raw.categories) || raw.categories.length < 1 || !raw.categories.every((item) => typeof item === 'string' && PHYSICAL_EVIDENCE_CATEGORIES.includes(item as typeof PHYSICAL_EVIDENCE_CATEGORIES[number]))) throw new RequestValidationError('invalid_evidence_request')
+  if (raw.deckNumbers !== undefined && (!Array.isArray(raw.deckNumbers) || raw.deckNumbers.length > 10 || !raw.deckNumbers.every((deck) => Number.isSafeInteger(deck) && Number(deck) >= 1 && Number(deck) <= 100))) throw new RequestValidationError('invalid_evidence_request')
+  return { fromUtc, toUtc, includeSeed: raw.includeSeed, categories: [...new Set(raw.categories)] as CuratedPhysicalEvidenceRequest['categories'], ...(raw.deckNumbers === undefined ? {} : { deckNumbers: [...new Set(raw.deckNumbers as number[])] }), representation: parseRepresentation(raw.representation) }
+}
+
+function cancellationSignal(request: Request, response: Response): AbortSignal {
+  const controller = new AbortController()
+  request.once('aborted', () => controller.abort())
+  response.once('close', () => { if (!response.writableEnded) controller.abort() })
+  return controller.signal
 }
 
 function validateRadiusRange(query: Request['query']): {
@@ -174,6 +252,11 @@ export function createApp({
   classificationAuthorizer = () => ({ id: 'anonymous', canEdit: false }),
 }: CreateAppOptions) {
   const app = express()
+  const telemetry = new TelemetryFoundationService(telemetryClient)
+  const observedIdentityCache = new ObservedIdentityCache(
+    () => radiusService.getObservedIdentities?.() ?? Promise.resolve([]),
+    { onRefreshError: () => { if (logger) logger.error('classification_observed_identity_refresh_unavailable') } },
+  )
 
   app.use((request, response, next) => {
     const requestId = requestIdFrom(request)
@@ -220,6 +303,40 @@ export function createApp({
     }),
   )
 
+  app.get('/api/telemetry/presses', asyncRoute(async (request, response) => {
+    response.status(200).json(await telemetry.sources.presses(String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.get('/api/telemetry/presses/:pressKey/capabilities', asyncRoute(async (request, response) => {
+    const result = await telemetry.capabilities.get(parsePressKey(request.params.pressKey), String(response.locals.requestId), cancellationSignal(request, response))
+    const { sourceId: _sourceId, ...publicResult } = result
+    response.status(200).json(publicResult)
+  }))
+
+  app.get('/api/telemetry/presses/:pressKey/speed', asyncRoute(async (request, response) => {
+    const { fromUtc, toUtc } = validateRange(request.query)
+    response.status(200).json(await telemetry.speed(parsePressKey(request.params.pressKey), fromUtc, toUtc, String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.get('/api/telemetry/presses/:pressKey/motion', asyncRoute(async (request, response) => {
+    const { fromUtc, toUtc } = validateRange(request.query)
+    response.status(200).json(await telemetry.motion(parsePressKey(request.params.pressKey), fromUtc, toUtc, String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.post('/api/telemetry/presses/:pressKey/semantic-history', asyncRoute(async (request, response) => {
+    response.status(200).json(await telemetry.semanticHistory(parsePressKey(request.params.pressKey), parseSemanticQuery(request.body), String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.post('/api/telemetry/presses/:pressKey/context', asyncRoute(async (request, response) => {
+    if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)) throw new RequestValidationError('invalid_context_request')
+    const { fromUtc, toUtc } = validateBodyRange(request.body as Record<string, unknown>)
+    response.status(200).json(await telemetry.context(parsePressKey(request.params.pressKey), fromUtc, toUtc, String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.post('/api/telemetry/presses/:pressKey/evidence', asyncRoute(async (request, response) => {
+    response.status(200).json(await telemetry.evidence(parsePressKey(request.params.pressKey), parseEvidenceRequest(request.body), String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
   app.get(
     '/api/telemetry/sources',
     asyncRoute(async (_request, response) => {
@@ -264,7 +381,40 @@ export function createApp({
     '/api/radius/overview',
     asyncRoute(async (request, response) => {
       const { fromUtc, toUtc } = validateRadiusRange(request.query)
-      response.status(200).json(await radiusService.getOverview(fromUtc, toUtc))
+      const overview = await radiusService.getOverview(fromUtc, toUtc)
+      if (request.query.view === 'decision') {
+        const { episodeAnalysis: _episodeAnalysis, operationalAnalytics: _operationalAnalytics, ...decisionOverview } = overview
+        response.status(200).json({
+          ...decisionOverview,
+          presses: decisionOverview.presses.map((press) => ({ ...press, timelineSegments: [] })),
+        })
+        return
+      }
+      response.status(200).json(overview)
+    }),
+  )
+
+  app.get(
+    '/api/radius/activity-analysis',
+    asyncRoute(async (request, response) => {
+      const { fromUtc, toUtc } = validateRadiusRange(request.query)
+      if (!radiusService.getActivityAnalysis) throw new RadiusUnavailableError()
+      const pressKey = parseOptionalPressKey(request.query.pressKey)
+      response.status(200).json(await radiusService.getActivityAnalysis(fromUtc, toUtc, parseActivitySelection(request.query.level, request.query.key), pressKey))
+    }),
+  )
+
+  app.get(
+    '/api/radius/pattern-analysis',
+    asyncRoute(async (request, response) => {
+      const { fromUtc, toUtc } = validateRadiusRange(request.query)
+      const mode = request.query.matchMode === undefined ? undefined : request.query.matchMode
+      if (mode !== undefined && mode !== 'contains_all' && mode !== 'in_order') throw new RequestValidationError('invalid_pattern_match_mode')
+      const selectedPatternKey = request.query.patternKey
+      if (selectedPatternKey !== undefined && (typeof selectedPatternKey !== 'string' || selectedPatternKey.length > 100)) throw new RequestValidationError('invalid_pattern_key')
+      if (!radiusService.getPatternAnalysis) throw new RadiusUnavailableError()
+      const pressKey = parseOptionalPressKey(request.query.pressKey)
+      response.status(200).json(await radiusService.getPatternAnalysis(fromUtc, toUtc, { selectedPatternKey, conditions: parsePatternConditions(request.query.conditions), matchMode: mode as PatternMatchMode | undefined, pressKey }))
     }),
   )
 
@@ -294,12 +444,29 @@ export function createApp({
     }),
   )
 
-  const classificationWorkspace = async (request: Request) => {
+  const requireClassificationService = () => {
     if (!classificationService) throw new RadiusUnavailableError()
-    const observed = await (radiusService.getObservedIdentities?.() ?? Promise.resolve([]))
-    return classificationService.getWorkspace(observed, classificationAuthorizer(request))
+    return classificationService
   }
-  const classificationObserved = () => radiusService.getObservedIdentities?.() ?? Promise.resolve([])
+  const exposeObservedStatus = (response: Response, observed: ObservedIdentitySnapshot) => {
+    response.setHeader('X-Observed-Identity-Status', observed.status)
+    if (observed.asOfUtc) response.setHeader('X-Observed-Identity-As-Of', observed.asOfUtc)
+  }
+  const classificationWorkspace = async (request: Request, response?: Response) => {
+    const observed = await observedIdentityCache.get()
+    if (response) exposeObservedStatus(response, observed)
+    return requireClassificationService().getWorkspace(
+      observed.identities,
+      classificationAuthorizer(request),
+      observed.status,
+      observed.asOfUtc,
+    )
+  }
+  const classificationObserved = async () => {
+    const observed = await observedIdentityCache.get()
+    if (observed.status === 'unavailable') throw new RadiusUnavailableError()
+    return observed.identities
+  }
   const expectedRevision = (value: unknown, nullable = false): number | null => {
     if (nullable && value === null) return null
     if (!Number.isInteger(value) || Number(value) < 1) throw new RequestValidationError('invalid_draft_revision')
@@ -316,15 +483,28 @@ export function createApp({
     })
   }
 
-  app.get('/api/classification/workspace', asyncRoute(async (request, response) => { response.status(200).json(await classificationWorkspace(request)) }))
-  app.get('/api/classification/groups', asyncRoute(async (request, response) => { response.status(200).json((await classificationWorkspace(request)).effectiveGroups) }))
-  app.get('/api/classification/process-families', asyncRoute(async (request, response) => { response.status(200).json((await classificationWorkspace(request)).families) }))
-  app.get('/api/classification/identities', asyncRoute(async (request, response) => { response.status(200).json((await classificationWorkspace(request)).observedIdentities) }))
-  app.get('/api/classification/classifications', asyncRoute(async (request, response) => { response.status(200).json((await classificationWorkspace(request)).effectiveClassifications) }))
-  app.get('/api/classification/review-required', asyncRoute(async (request, response) => { response.status(200).json((await classificationWorkspace(request)).effectiveClassifications.filter(({ needsReview, isFallback }) => needsReview || isFallback)) }))
-  app.get('/api/classification/draft', asyncRoute(async (request, response) => { response.status(200).json((await classificationWorkspace(request)).draft) }))
-  app.get('/api/classification/versions', asyncRoute(async (request, response) => { response.status(200).json((await classificationWorkspace(request)).versions) }))
-  app.get('/api/classification/audit', asyncRoute(async (request, response) => { response.status(200).json((await classificationWorkspace(request)).audit) }))
+  app.get('/api/classification/workspace', asyncRoute(async (request, response) => { response.status(200).json(await classificationWorkspace(request, response)) }))
+  app.get('/api/classification/groups', asyncRoute(async (_request, response) => { response.status(200).json(await requireClassificationService().getPublishedGroups()) }))
+  app.get('/api/classification/process-families', asyncRoute(async (_request, response) => { response.status(200).json(await requireClassificationService().getPublishedFamilies()) }))
+  app.get('/api/classification/identities', asyncRoute(async (_request, response) => {
+    const observed = await observedIdentityCache.get()
+    exposeObservedStatus(response, observed)
+    response.status(200).json(observed.identities)
+  }))
+  app.get('/api/classification/classifications', asyncRoute(async (_request, response) => { response.status(200).json(await requireClassificationService().getPublishedClassifications()) }))
+  app.get('/api/classification/review-required', asyncRoute(async (request, response) => { response.status(200).json((await classificationWorkspace(request, response)).effectiveClassifications.filter(({ needsReview, isFallback }) => needsReview || isFallback)) }))
+  app.get('/api/classification/draft', asyncRoute(async (_request, response) => { response.status(200).json(await requireClassificationService().getDraft()) }))
+  app.get('/api/classification/versions', asyncRoute(async (_request, response) => { response.status(200).json(await requireClassificationService().listVersions()) }))
+  app.get('/api/classification/audit', asyncRoute(async (_request, response) => { response.status(200).json(await requireClassificationService().listAudit()) }))
+  app.get('/api/classification/search', asyncRoute(async (request, response) => {
+    const query = typeof request.query.q === 'string' ? request.query.q : ''
+    if (!query.trim() || query.length > 128 || !/[\p{L}\p{N}]/u.test(query)) throw new RequestValidationError('invalid_classification_search_query')
+    const rawLimit = request.query.limit
+    const limit = rawLimit === undefined ? DEFAULT_CLASSIFICATION_SEARCH_LIMIT : Number(rawLimit)
+    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_CLASSIFICATION_SEARCH_LIMIT) throw new RequestValidationError('invalid_classification_search_limit')
+    const observed = observedIdentityCache.peekAndRefresh()
+    response.status(200).json(await requireClassificationService().search(query, limit, observed))
+  }))
 
   app.post('/api/classification/draft', asyncRoute(async (request, response) => {
     if (!classificationService) throw new RadiusUnavailableError()
@@ -397,7 +577,7 @@ export function createApp({
       if (error instanceof ClassificationValidationError) { response.status(422).json({ error: 'classification_validation_failed', details: error.errors }); return }
 
       if (error instanceof TelemetryApiError) {
-        const status = error.kind === 'not_found' ? 404 : 503
+        const status = error.kind === 'not_found' || error.kind === 'unsupported_source' ? 404 : error.kind === 'request_invalid' ? 400 : error.kind === 'payload_too_large' ? 413 : 503
         if (logger) {
           logger.error(
             `[${requestId}] ${request.method} ${request.path} ${status} telemetry_${error.kind}`,

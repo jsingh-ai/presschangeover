@@ -1,5 +1,5 @@
 import { exactRadiusIdentity } from '../radius/radius-identity.js'
-import type { OperationalEpisode, RadiusOverview, RadiusPressEpisodes, RadiusStateSegment, RadiusStatusSegment } from '../radius/models.js'
+import type { ActivitySelection, OperationalEpisode, PatternMatchMode, RadiusOverview, RadiusPressEpisodes, RadiusPressKey, RadiusStateSegment, RadiusStatusSegment } from '../radius/models.js'
 import { ClassificationConflictError, type ClassificationRepository } from './classification-repository.js'
 import type {
   ClassificationActor,
@@ -19,6 +19,11 @@ import type {
 } from './models.js'
 import { OPERATIONAL_GROUP_KEYS, PROCESS_FAMILY_KEYS } from './models.js'
 import { SEEDED_OPERATIONAL_GROUPS } from './seeds.js'
+import { ClassificationSearchIndex, normalizeSearchText } from './classification-search.js'
+import type { ObservedIdentitySnapshot, ObservedIdentityStatus } from './observed-identity-cache.js'
+import { buildOverviewDecisionSupport } from '../radius/overview-analytics.js'
+import { analyzeOperationalActivity } from '../radius/activity-analysis.js'
+import { analyzeRunPatterns } from '../radius/pattern-analysis.js'
 
 export class ClassificationValidationError extends Error {
   constructor(public readonly errors: string[]) { super('classification_validation_failed'); this.name = 'ClassificationValidationError' }
@@ -77,15 +82,51 @@ function classifyEpisode(episode: OperationalEpisode, snapshot: ClassificationSn
 function colorValid(value: string) { return /^#[0-9A-Fa-f]{6}$/.test(value) }
 
 export class ClassificationService {
+  private readonly searchIndex = new ClassificationSearchIndex()
+
   constructor(private readonly repository: ClassificationRepository) {}
   get persistence() { return this.repository.persistence }
   async initialize() { await this.repository.initialize() }
+
+  async getPublishedSnapshot() { return this.repository.getPublished() }
+  async getPublishedGroups() {
+    return [...(await this.repository.getPublished()).groups]
+      .sort((left, right) => left.sortOrder - right.sortOrder)
+  }
+  async getPublishedFamilies() {
+    return [...(await this.repository.getPublished()).families]
+      .sort((left, right) => left.sortOrder - right.sortOrder)
+  }
+  async getPublishedClassifications() {
+    return (await this.repository.getPublished()).classifications
+  }
+  async getDraft() { return this.repository.getDraft() }
+  async listVersions() { return this.repository.listVersions() }
+  async listAudit() { return this.repository.listAudit() }
+  async search(query: string, limit: number, observed: ObservedIdentitySnapshot) {
+    if (!normalizeSearchText(query)) throw new ClassificationValidationError(['A searchable query is required.'])
+    return this.searchIndex.search(await this.repository.getPublished(), query, limit, observed)
+  }
 
   async resolve(identity: RadiusIdentity) { return resolveFromSnapshot(identity, await this.repository.getPublished()) }
 
   async classifyOverview(overview: RadiusOverview): Promise<RadiusOverview> {
     const snapshot = await this.repository.getPublished()
-    return { ...overview, classificationVersion: snapshot.version, operationalGroups: snapshot.groups, presses: overview.presses.map((press) => ({ ...press, timelineSegments: press.timelineSegments.map((segment) => classifySegment(segment, snapshot)) })) }
+    const classified = { ...overview, classificationVersion: snapshot.version, operationalGroups: snapshot.groups, presses: overview.presses.map((press) => ({ ...press, timelineSegments: press.timelineSegments.map((segment) => classifySegment(segment, snapshot)) })) }
+    return { ...classified, decisionSupport: buildOverviewDecisionSupport(classified) }
+  }
+
+  async analyzeActivity(overview: RadiusOverview, selection?: ActivitySelection, pressKey?: RadiusPressKey) {
+    const snapshot = await this.repository.getPublished()
+    const classified = { ...overview, classificationVersion: snapshot.version, operationalGroups: snapshot.groups, presses: overview.presses.map((press) => ({ ...press, timelineSegments: press.timelineSegments.map((segment) => classifySegment(segment, snapshot)) })) }
+    return analyzeOperationalActivity({ ...classified, presses: pressKey ? classified.presses.filter((press) => press.pressKey === pressKey) : classified.presses }, snapshot, selection)
+  }
+
+  async analyzePatterns(overview: RadiusOverview, input?: { selectedPatternKey?: string; conditions?: ActivitySelection[]; matchMode?: PatternMatchMode; pressKey?: RadiusPressKey }) {
+    const snapshot = await this.repository.getPublished()
+    const classified = { ...overview, classificationVersion: snapshot.version, operationalGroups: snapshot.groups, presses: overview.presses.map((press) => ({ ...press, timelineSegments: press.timelineSegments.map((segment) => classifySegment(segment, snapshot)) })) }
+    const scoped = { ...classified, presses: input?.pressKey ? classified.presses.filter((press) => press.pressKey === input.pressKey) : classified.presses }
+    return analyzeRunPatterns(scoped, snapshot, input)
   }
 
   async classifyPressEpisodes(result: RadiusPressEpisodes): Promise<RadiusPressEpisodes> {
@@ -97,7 +138,12 @@ export class ClassificationService {
     return classifyEpisode(episode, await this.repository.getPublished())
   }
 
-  async getWorkspace(observedIdentities: ObservedRadiusIdentity[], actor: ClassificationActor): Promise<ClassificationWorkspace> {
+  async getWorkspace(
+    observedIdentities: ObservedRadiusIdentity[],
+    actor: ClassificationActor,
+    observedIdentityStatus: ObservedIdentityStatus = 'fresh',
+    observedIdentityAsOf: string | null = null,
+  ): Promise<ClassificationWorkspace> {
     const [published, draft, versions, audit] = await Promise.all([this.repository.getPublished(), this.repository.getDraft(), this.repository.listVersions(), this.repository.listAudit()])
     const effectiveGroups = draft?.groups ?? published.groups
     const effectiveMappings = draft?.classifications ?? published.classifications
@@ -116,6 +162,7 @@ export class ClassificationService {
       unmappedCount: effectiveClassifications.filter(({ isFallback }) => isFallback).length,
       reviewRequiredCount: effectiveClassifications.filter(({ needsReview }) => needsReview).length,
       canEdit: actor.canEdit, actor: actor.id || null, persistence: this.repository.persistence,
+      observedIdentityStatus, observedIdentityAsOf,
     }
   }
 

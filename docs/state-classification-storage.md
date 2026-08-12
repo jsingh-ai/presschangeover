@@ -46,7 +46,7 @@ The application accepts exactly these five settings as an all-or-nothing group:
 
 When the five settings are absent, reviewed seed semantics remain available in memory for read-only presentation. Draft mutations remain disabled. When configured, startup expects the migration to exist and seeds the first published JSON document if the table has no published row; it never creates database objects at runtime.
 
-Classification editing also remains denied unless a trusted authentication proxy is explicitly configured. Do not enable `PROCESS_INTELLIGENCE_TRUST_AUTH_PROXY` until IIS removes client-supplied identity headers, authenticates the request, and supplies the trusted identity. The normalized identity must also be listed in `PROCESS_INTELLIGENCE_CLASSIFICATION_ADMINS`.
+Classification editing is available to application users whenever the separate writable application store is configured. There is no application-level classification authorization or password gate. When the application store is absent, the workspace remains read-only because in-memory changes would not be durable.
 
 ## Backup and recovery
 

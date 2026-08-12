@@ -39,10 +39,16 @@ export interface PhysicalStateSegment {
   fromUtc: string
   toUtc: string
   durationMs: number
+  durationSeconds?: number
+  actualSpeedAtStart?: number | null
+  targetSpeedAtStart?: number | null
+  targetCommanded?: boolean | null
+  reason?: string
 }
 
 export interface PhysicalStateSummary {
   durationsMs: Record<PhysicalState, number>
+  durationsSeconds?: Record<PhysicalState, number>
   segmentCount: number
 }
 

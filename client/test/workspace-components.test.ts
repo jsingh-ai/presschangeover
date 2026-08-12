@@ -49,17 +49,15 @@ describe('workspace components', () => {
     assert.doesNotMatch(html, /run-row/)
   })
 
-  it('renders all fleet rows initially and only the active row when filtered', () => {
-    const all = renderToStaticMarkup(createElement(RadiusOverview, { overview, onSelectPress() {} }))
-    const filtered = renderToStaticMarkup(createElement(RadiusOverview, { overview, selectedPress: 'press7', onSelectPress() {} }))
-    assert.equal((all.match(/class="timeline-row/g) ?? []).length, 12)
-    assert.equal((filtered.match(/class="timeline-row/g) ?? []).length, 1)
-    assert.match(filtered, /Press 7/)
-    assert.doesNotMatch(filtered, /Press 13/)
-    assert.match(all, /Timeline zoom controls/)
-    assert.match(all, /100%/)
-    assert.match(all, /Scrollable press timeline/)
-    assert.match(filtered, /Focus analytics on Press 7/)
+  it('removes the old fleet-row Activity Focus and press-card analysis behavior from Overview', () => {
+    const all = renderToStaticMarkup(createElement(RadiusOverview, { overview }))
+    const filtered = renderToStaticMarkup(createElement(RadiusOverview, { overview, selectedPress: 'press7' }))
+    for (const html of [all, filtered]) {
+      assert.doesNotMatch(html, /Activity Focus/i)
+      assert.doesNotMatch(html, /Analyze Press/i)
+      assert.doesNotMatch(html, /Focused press investigation/i)
+      assert.doesNotMatch(html, /Episode Comparison|Run Comparison/i)
+    }
   })
 
   it('renders fleet and every press as accessible scope buttons', () => {

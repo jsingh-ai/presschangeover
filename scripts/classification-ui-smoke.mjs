@@ -39,20 +39,20 @@ await command('Page.enable')
 await command('Runtime.enable')
 await command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false })
 await command('Page.navigate', { url: applicationUrl })
-await waitFor(`Boolean(document.querySelector('.classification-columns')) && document.querySelectorAll('.classification-column').length === 8 && document.querySelectorAll('.classification-card').length > 0`, 'classification administration workspace')
+await waitFor(`Boolean(document.querySelector('.classification-admin-workspace')) && document.querySelectorAll('.classification-category-nav button').length === 8 && document.querySelectorAll('.classification-admin-card').length > 0`, 'classification administration workspace')
 
 const report = {}
 report.desktop = await evaluate(`({
-  title: document.querySelector('.classification-hero h1')?.textContent,
+  title: document.querySelector('.classification-admin-hero h1')?.textContent,
   path: location.pathname,
   navigationItems: document.querySelectorAll('.primary-nav-link').length,
-  groups: document.querySelectorAll('.classification-column').length,
-  cards: document.querySelectorAll('.classification-card').length,
-  reviewCards: document.querySelectorAll('.classification-card.needs-review').length,
-  rawIdentity: document.querySelector('.classification-card-main')?.textContent.trim(),
-  readOnly: Boolean(document.querySelector('.classification-permission')),
-  publishDisabled: document.querySelector('.classification-actions .primary-action')?.disabled,
-  internalBoardScroll: document.querySelector('.classification-columns').scrollWidth >= document.querySelector('.classification-columns').clientWidth,
+  groups: document.querySelectorAll('.classification-category-nav button').length,
+  cards: document.querySelectorAll('.classification-admin-card').length,
+  reviewCards: document.querySelectorAll('.classification-admin-card.needs-review').length,
+  rawIdentity: document.querySelector('.classification-admin-card-main')?.textContent.trim(),
+  readOnly: Boolean(document.querySelector('.classification-auth-lock')),
+  publishDisabled: document.querySelector('.classification-workflow .primary-action')?.disabled,
+  internalBoardScroll: document.querySelector('.classification-admin-workspace').scrollWidth > document.querySelector('.classification-admin-workspace').clientWidth,
   pageOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
   theme: document.documentElement.dataset.theme,
 })`)
@@ -60,26 +60,12 @@ if (screenshotBase) await capture(`${screenshotBase}-desktop.png`)
 
 await evaluate(`document.querySelector('.theme-toggle').click()`)
 await delay(250)
-report.alternateTheme = await evaluate(`({theme:document.documentElement.dataset.theme, body:getComputedStyle(document.body).backgroundColor, panel:getComputedStyle(document.querySelector('.classification-board')).backgroundColor, pageOverflow:document.documentElement.scrollWidth>document.documentElement.clientWidth})`)
+report.alternateTheme = await evaluate(`({theme:document.documentElement.dataset.theme, body:getComputedStyle(document.body).backgroundColor, panel:getComputedStyle(document.querySelector('.classification-admin-board')).backgroundColor, pageOverflow:document.documentElement.scrollWidth>document.documentElement.clientWidth})`)
 
 await command('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
 await delay(350)
-report.mobile = await evaluate(`({width:innerWidth, clientWidth:document.documentElement.clientWidth, scrollWidth:document.documentElement.scrollWidth, pageOverflow:document.documentElement.scrollWidth>document.documentElement.clientWidth, boardClient:document.querySelector('.classification-columns').clientWidth, boardScroll:document.querySelector('.classification-columns').scrollWidth, internalBoardScroll:document.querySelector('.classification-columns').scrollWidth>document.querySelector('.classification-columns').clientWidth, actionsVisible:Boolean(document.querySelector('.classification-actions')), groups:document.querySelectorAll('.classification-column').length})`)
+report.mobile = await evaluate(`({width:innerWidth, clientWidth:document.documentElement.clientWidth, scrollWidth:document.documentElement.scrollWidth, pageOverflow:document.documentElement.scrollWidth>document.documentElement.clientWidth, boardClient:document.querySelector('.classification-admin-workspace').clientWidth, boardScroll:document.querySelector('.classification-admin-workspace').scrollWidth, internalBoardScroll:document.querySelector('.classification-admin-workspace').scrollWidth>document.querySelector('.classification-admin-workspace').clientWidth, actionsVisible:Boolean(document.querySelector('.classification-workflow')), groups:document.querySelectorAll('.classification-category-nav button').length})`)
 if (screenshotBase) await capture(`${screenshotBase}-mobile.png`)
-
-await command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false })
-await evaluate(`document.querySelector('.primary-nav-link').click()`)
-await waitFor(`Boolean(document.querySelector('.operational-panel .timeline-view-toggle')) && document.querySelectorAll('.timeline-row').length === 12`, 'semantic fleet timeline')
-report.timeline = await evaluate(`(() => {
-  const buttons=[...document.querySelectorAll('.operational-panel .timeline-view-toggle button')]
-  const before=document.querySelectorAll('.timeline-segment').length
-  const semantic=document.querySelector('.timeline-segment[data-view=operations]')
-  const semanticBackground=semantic?getComputedStyle(semantic).backgroundColor:null
-  buttons.find((button)=>button.textContent.includes('Raw Radius'))?.click()
-  return {buttons:buttons.map((button)=>button.textContent.trim()), before, semanticBackground}
-})()`)
-await waitFor(`Boolean(document.querySelector('.timeline-segment[data-view=raw]'))`, 'Raw Radius timeline view')
-Object.assign(report.timeline, await evaluate(`({after:document.querySelectorAll('.timeline-segment').length, rawAccessibleIdentity:document.querySelector('.timeline-segment[data-view=raw]')?.getAttribute('aria-label'), offlineDistinct:Boolean(document.querySelector('.timeline-segment--offline')), pageOverflow:document.documentElement.scrollWidth>document.documentElement.clientWidth})`))
 
 socket.close()
 process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)

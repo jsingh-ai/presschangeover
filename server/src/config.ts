@@ -26,17 +26,11 @@ export interface ServerConfig {
   telemetryApi: TelemetryApiConfig
   radius: RadiusConfig
   classificationDatabase: AppDatabaseConfig
-  classificationAuthorization: ClassificationAuthorizationConfig
 }
 
 export type AppDatabaseConfig =
   | { enabled: false }
   | { enabled: true; host: '127.0.0.1' | 'localhost'; port: number; database: 'processintelligence_db'; user: 'processintelligence_app'; password: string }
-
-export interface ClassificationAuthorizationConfig {
-  trustedProxy: boolean
-  adminActors: string[]
-}
 
 export type RadiusTimestampMode = 'timestamptz' | 'plant_local_timestamp'
 
@@ -331,13 +325,6 @@ function parseClassificationDatabase(environment: NodeJS.ProcessEnv): AppDatabas
   return { enabled: true, host, port, database: 'processintelligence_db', user: 'processintelligence_app', password: environment.APP_DB_PASSWORD!.trim() }
 }
 
-function parseClassificationAuthorization(environment: NodeJS.ProcessEnv): ClassificationAuthorizationConfig {
-  return {
-    trustedProxy: environment.PROCESS_INTELLIGENCE_TRUST_AUTH_PROXY?.trim().toLowerCase() === 'true',
-    adminActors: [...new Set((environment.PROCESS_INTELLIGENCE_CLASSIFICATION_ADMINS ?? '').split(',').map((value) => value.trim().toLowerCase()).filter(Boolean))],
-  }
-}
-
 export function loadServerConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): ServerConfig {
@@ -351,6 +338,5 @@ export function loadServerConfig(
     },
     radius: parseRadiusConfig(environment),
     classificationDatabase: parseClassificationDatabase(environment),
-    classificationAuthorization: parseClassificationAuthorization(environment),
   }
 }

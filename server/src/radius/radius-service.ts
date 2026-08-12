@@ -15,6 +15,7 @@ import type { EnabledRadiusConfig } from '../config.js'
 import type {
   OperationalEpisode,
   RadiusHealth,
+  RadiusObservation,
   RadiusCurrentState,
   RadiusOverview,
   RadiusPressEpisodes,
@@ -37,7 +38,6 @@ import type { ObservedRadiusIdentity } from '../classification/models.js'
 const EPISODE_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1_000
 const MAX_EPISODE_DETAIL_MS = 31 * 24 * 60 * 60 * 1_000
 const CURRENT_RANGE_TOLERANCE_MS = 10_000
-const PRESS_HISTORY_QUERY_CONCURRENCY = 3
 
 export class RadiusUnavailableError extends Error {
   constructor() {
@@ -56,6 +56,7 @@ export class RadiusNotFoundError extends Error {
 export interface RadiusService {
   getHealth(): Promise<RadiusHealth>
   getOverview(fromUtc: string, toUtc: string): Promise<RadiusOverview>
+  getAnalysisOverview?(fromUtc: string, toUtc: string): Promise<RadiusOverview>
   getPressEpisodes(
     pressKey: RadiusPressKey,
     fromUtc: string,
@@ -66,6 +67,8 @@ export interface RadiusService {
     episodeId: string,
   ): Promise<OperationalEpisode>
   getObservedIdentities?(): Promise<ObservedRadiusIdentity[]>
+  getActivityAnalysis?(fromUtc: string, toUtc: string, selection?: import('./models.js').ActivitySelection, pressKey?: RadiusPressKey): Promise<import('./models.js').ActivityAnalysis>
+  getPatternAnalysis?(fromUtc: string, toUtc: string, input?: { selectedPatternKey?: string; conditions?: import('./models.js').ActivitySelection[]; matchMode?: import('./models.js').PatternMatchMode; pressKey?: RadiusPressKey }): Promise<import('./models.js').PatternAnalysis>
 }
 
 export class UnavailableRadiusService implements RadiusService {
@@ -85,7 +88,9 @@ export class UnavailableRadiusService implements RadiusService {
     throw new RadiusUnavailableError()
   }
 
-  async getObservedIdentities(): Promise<ObservedRadiusIdentity[]> { return [] }
+  async getObservedIdentities(): Promise<ObservedRadiusIdentity[]> {
+    throw new RadiusUnavailableError()
+  }
 }
 
 interface PressData {
@@ -247,6 +252,7 @@ export class DatabaseRadiusService implements RadiusService {
     toUtc: string,
     sharedPollRuns?: RadiusPollRun[],
     sharedCurrentState?: RadiusCurrentState | null,
+    sharedObservations?: RadiusObservation[],
   ): Promise<PressData> {
     const {
       toMs,
@@ -256,12 +262,14 @@ export class DatabaseRadiusService implements RadiusService {
       seedLookbackFromUtc,
     } = this.contextBounds(fromUtc, toUtc)
     const [observations, pollRuns, queriedCurrentStates] = await Promise.all([
-      this.repository.getObservations(
-        mapping.machineId,
-        contextFromUtc,
-        contextToUtc,
-        seedLookbackFromUtc,
-      ),
+      sharedObservations
+        ? Promise.resolve(sharedObservations)
+        : this.repository.getObservations(
+            mapping.machineId,
+            contextFromUtc,
+            contextToUtc,
+            seedLookbackFromUtc,
+          ),
       sharedPollRuns
         ? Promise.resolve(sharedPollRuns)
         : this.repository.getPollRuns(contextFromUtc, contextToUtc),
@@ -343,35 +351,51 @@ export class DatabaseRadiusService implements RadiusService {
     toUtc: string,
     sharedPollRuns: RadiusPollRun[],
     currentByMachine: Map<number, RadiusCurrentState>,
+    observationsByMachine?: Map<number, RadiusObservation[]>,
   ): Promise<PressData[]> {
-    const results: PressData[] = []
-    for (let index = 0; index < mappings.length; index += PRESS_HISTORY_QUERY_CONCURRENCY) {
-      const batch = mappings.slice(index, index + PRESS_HISTORY_QUERY_CONCURRENCY)
-      results.push(...await Promise.all(batch.map((mapping) => this.loadPressData(
+    return Promise.all(mappings.map((mapping) => this.loadPressData(
         mapping,
         fromUtc,
         toUtc,
         sharedPollRuns,
         currentByMachine.get(mapping.machineId) ?? null,
-      ))))
-    }
-    return results
+        observationsByMachine?.get(mapping.machineId),
+      )))
   }
 
   async getOverview(fromUtc: string, toUtc: string): Promise<RadiusOverview> {
-    await this.assertSafeAccess()
     const { contextFromUtc, contextToUtc } = this.contextBounds(fromUtc, toUtc)
+    return this.getOverviewWithinContext(fromUtc, toUtc, contextFromUtc, contextToUtc)
+  }
+
+  async getAnalysisOverview(fromUtc: string, toUtc: string): Promise<RadiusOverview> {
+    const { contextToUtc } = this.contextBounds(fromUtc, toUtc)
+    return this.getOverviewWithinContext(fromUtc, toUtc, fromUtc, contextToUtc)
+  }
+
+  private async getOverviewWithinContext(
+    fromUtc: string,
+    toUtc: string,
+    contextFromUtc: string,
+    contextToUtc: string,
+  ): Promise<RadiusOverview> {
+    await this.assertSafeAccess()
     const mappings = [...this.mappings.values()]
-    const [sharedPollRuns, currentStates] = await Promise.all([
+    const [sharedPollRuns, currentStates, observationsByMachine] = await Promise.all([
       this.repository.getPollRuns(contextFromUtc, contextToUtc),
       this.repository.getCurrentStates(
         mappings.map(({ machineId }) => machineId),
+      ),
+      this.repository.getObservationsForMachines(
+        mappings.map(({ machineId }) => machineId),
+        contextFromUtc,
+        contextToUtc,
       ),
     ])
     const currentByMachine = new Map(
       currentStates.map((state) => [state.machineId, state]),
     )
-    const pressData = await this.loadMappedPressData(mappings, fromUtc, toUtc, sharedPollRuns, currentByMachine)
+    const pressData = await this.loadMappedPressData(mappings, fromUtc, toUtc, sharedPollRuns, currentByMachine, observationsByMachine)
     const rangeSeconds = (Date.parse(toUtc) - Date.parse(fromUtc)) / 1_000
     const presses = pressData.map(
       ({

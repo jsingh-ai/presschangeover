@@ -52,33 +52,17 @@ const runComparison = {
 } as any
 
 describe('operational analytics components', () => {
-  it('keeps the aggregate breakdown and chronological timeline together in the state tab', () => {
-    const html = renderToStaticMarkup(createElement(OperationalAnalysisPage, { analytics, scopeLabel: 'Press 7', overview: timelineOverview, selectedPress: 'press7', runComparison, section: 'state', onSelectSection() {}, onSelectPress() {}, onInspectSegment() {}, onInvestigateStatus() {} }))
-    assert.match(html, /state-breakdown/)
-    assert.match(html, /Press timeline/)
-    assert.match(html, /Press history/)
-    assert.match(html, /Short return attempt/)
-    assert.match(html, /At least 2m/)
-    assert.ok(html.indexOf('Press timeline') < html.indexOf('chronological state detail'))
-    assert.equal((html.match(/press-state-event-list/g) ?? []).length, 1)
-    assert.match(html, /Choose a press for Press history/)
-    assert.match(html, /Synced with the global Press Selection above/)
-    assert.match(html, /Press 7 selected/)
-    assert.doesNotMatch(html, /Run breakdowns/)
-    assert.doesNotMatch(html, /selected-run-analysis/)
-    assert.doesNotMatch(html, /What made this Run different/)
-    assert.doesNotMatch(html, /status-drivers/)
-    assert.doesNotMatch(html, /patterns-panel/)
-    assert.match(html, /analysis-tabs/)
+  it('makes Operational Analysis a one-activity investigation instead of a second Overview or sequence page', () => {
+    const html = renderToStaticMarkup(createElement(OperationalAnalysisPage, { analytics, scopeLabel: 'Press 7', overview: timelineOverview, selectedPress: 'press7' }))
+    assert.match(html, /One activity · magnitude, frequency, where, and when/)
+    assert.match(html, /Select one Radius state, operational group, process family, or exact status/)
+    assert.match(html, /Combinations and ordered behavior belong in Patterns &amp; Episodes/)
+    assert.doesNotMatch(html, /State breakdown|Drivers &amp; recovery|Run breakdowns|Pattern prevalence/)
   })
 
-  it('keeps Status Drivers and Stops & Recovery together in their own tab', () => {
-    const html = renderToStaticMarkup(createElement(OperationalAnalysisPage, { analytics, scopeLabel: 'Press 7', overview: timelineOverview, selectedPress: 'press7', section: 'drivers', onSelectSection() {}, onInspectSegment() {}, onInvestigateStatus() {} }))
-    assert.doesNotMatch(html, /state-breakdown/)
-    assert.doesNotMatch(html, /Press timeline/)
-    assert.match(html, /status-drivers/)
-    assert.match(html, /patterns-panel/)
-    assert.match(html, /Drivers &amp; recovery/)
+  it('does not expose the former duplicated Operational Analysis tabs', () => {
+    const html = renderToStaticMarkup(createElement(OperationalAnalysisPage, { analytics, scopeLabel: 'Press 7', overview: timelineOverview, selectedPress: 'press7' }))
+    assert.doesNotMatch(html, /analysis-tabs|state-breakdown|status-drivers|patterns-panel/)
   })
 
   it('uses the global press scope and explains explicit unavailable spans', () => {

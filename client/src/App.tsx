@@ -10,6 +10,7 @@ import {
 import { AnalyticsEvidenceDrawer } from './components/AnalyticsEvidenceDrawer'
 import { ApplicationShell } from './components/ApplicationShell'
 import { InvestigationDrawer } from './components/InvestigationDrawer'
+import { IntelligentSearchPage } from './components/IntelligentSearchPage'
 import { OperationalAnalysisPage, OverviewPage, PatternsEpisodesPage } from './components/AnalyticsPages'
 import { PressFilterBar } from './components/PressFilterBar'
 import { RangeControls } from './components/RangeControls'
@@ -69,16 +70,13 @@ function App() {
   const [drawerContextSegments, setDrawerContextSegments] = useState<RadiusStatusSegment[]>()
   const [drawerSegment, setDrawerSegment] = useState<RadiusStatusSegment>()
   const [drawerPressLoading, setDrawerPressLoading] = useState(false)
-  const [timelineFocusPress, setTimelineFocusPress] = useState<RadiusPressKey>()
-  const [timelineFocusDetail, setTimelineFocusDetail] = useState<RadiusPressEpisodes>()
   const [episodeDetail, setEpisodeDetail] = useState<OperationalEpisode>()
   const [loading, setLoading] = useState(true)
   const [pressLoading, setPressLoading] = useState(false)
-  const [timelineFocusLoading, setTimelineFocusLoading] = useState(false)
   const [drawerLoading, setDrawerLoading] = useState(false)
   const [error, setError] = useState<string>()
   const [pressError, setPressError] = useState<string>()
-  const [timelineFocusError, setTimelineFocusError] = useState<string>()
+  const operationsArea = area === 'overview' || area === 'operational-analysis' || area === 'patterns-episodes'
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -111,6 +109,7 @@ function App() {
   }, [])
 
   useEffect(() => {
+    if (!operationsArea) { setLoading(false); setError(undefined); return }
     let active = true
     void getProcessIntelligenceHealth().then(() => active && setApiStatus('healthy')).catch(() => active && setApiStatus('unavailable'))
     void getTelemetryHealth().then((health) => {
@@ -130,17 +129,17 @@ function App() {
     let active = true
     setLoading(true)
     setError(undefined)
-    void getRadiusOverview(range.fromUtc, range.toUtc).then((result) => { if (active) setOverview(result) }).catch(() => {
+    void getRadiusOverview(range.fromUtc, range.toUtc, area === 'overview').then((result) => { if (active) setOverview(result) }).catch(() => {
       if (!active) return
       setError(radiusReason === 'not_configured'
         ? 'Radius data is unavailable until a dedicated SELECT-only database login and verified live mappings are configured.'
         : 'Radius operational data could not be loaded for this range.')
     }).finally(() => active && setLoading(false))
     return () => { active = false }
-  }, [range, radiusReason])
+  }, [operationsArea, area, range, radiusReason])
 
   useEffect(() => {
-    if (!selectedPress) { setPressDetail(undefined); setPressError(undefined); return }
+    if (!operationsArea || !selectedPress || area === 'overview') { setPressDetail(undefined); setPressError(undefined); return }
     let active = true
     setPressLoading(true)
     setPressError(undefined)
@@ -150,19 +149,7 @@ function App() {
       .catch(() => active && setPressError('The selected press could not be analyzed for this range.'))
       .finally(() => active && setPressLoading(false))
     return () => { active = false }
-  }, [range, selectedPress])
-
-  useEffect(() => {
-    if (!timelineFocusPress) { setTimelineFocusDetail(undefined); setTimelineFocusError(undefined); setTimelineFocusLoading(false); return }
-    let active = true
-    setTimelineFocusLoading(true)
-    setTimelineFocusError(undefined)
-    void getRadiusPressEpisodes(timelineFocusPress, range.fromUtc, range.toUtc)
-      .then((result) => active && setTimelineFocusDetail(result))
-      .catch(() => active && setTimelineFocusError('The focused press could not be analyzed for this range.'))
-      .finally(() => active && setTimelineFocusLoading(false))
-    return () => { active = false }
-  }, [range, timelineFocusPress])
+  }, [operationsArea, area, range, selectedPress])
 
   useEffect(() => {
     if (investigation?.mode === 'segment' && drawerSegment) {
@@ -226,27 +213,6 @@ function App() {
     setEpisodeDetail(undefined)
   }
 
-  function focusTimelinePress(pressKey: RadiusPressKey) {
-    setTimelineFocusPress(pressKey)
-    setTimelineFocusError(undefined)
-    setEpisodeDetail(undefined)
-  }
-
-  function clearTimelineFocus() {
-    setTimelineFocusPress(undefined)
-    setTimelineFocusDetail(undefined)
-    setTimelineFocusError(undefined)
-    setEpisodeDetail(undefined)
-    window.requestAnimationFrame(() => document.querySelector('.overview-page')?.scrollIntoView({ block: 'start' }))
-  }
-
-  function cycleTimelineFocus(direction: -1 | 1) {
-    if (!timelineFocusPress || !overview) return
-    const index = overview.presses.findIndex(({ pressKey }) => pressKey === timelineFocusPress)
-    const next = overview.presses[index + direction]
-    if (next) focusTimelinePress(next.pressKey)
-  }
-
   function navigateSegment(pressKey: RadiusPressKey, segment: RadiusStatusSegment) {
     const route: InvestigationRoute = { mode: 'segment', pressKey, startUtc: segment.startUtc, endUtc: segment.endUtc }
     window.history.pushState({ processIntelligenceDrawer: true }, '', workspaceUrl(range, selectedPress, route, area, analysisSection))
@@ -272,39 +238,6 @@ function App() {
     if (!selectedPress) return
     const route: InvestigationRoute = { mode: 'attention', findingId: item.episodeId }
     window.history.pushState({ processIntelligenceDrawer: true }, '', workspaceUrl(range, selectedPress, route, area, analysisSection))
-    setEpisodeDetail(episode)
-    setInvestigation(route)
-  }
-
-  function selectTimelineFocusEpisode(episode: OperationalEpisode) {
-    if (!timelineFocusPress || !timelineFocusDetail) return
-    const route: InvestigationRoute = { mode: 'episode', episodeId: episode.episodeId }
-    window.history.replaceState({}, '', workspaceUrl(range, timelineFocusPress, undefined, area, analysisSection))
-    window.history.pushState({ processIntelligenceDrawer: true }, '', workspaceUrl(range, timelineFocusPress, route, area, analysisSection))
-    setSelectedPress(timelineFocusPress)
-    setPressDetail(timelineFocusDetail)
-    setEpisodeDetail(episode)
-    setInvestigation(route)
-  }
-
-  function selectTimelineFocusSegment(segment: RadiusStatusSegment) {
-    if (!timelineFocusPress || !timelineFocusDetail) return
-    const route: InvestigationRoute = { mode: 'segment', startUtc: segment.startUtc, endUtc: segment.endUtc }
-    window.history.replaceState({}, '', workspaceUrl(range, timelineFocusPress, undefined, area, analysisSection))
-    window.history.pushState({ processIntelligenceDrawer: true }, '', workspaceUrl(range, timelineFocusPress, route, area, analysisSection))
-    setSelectedPress(timelineFocusPress)
-    setPressDetail(timelineFocusDetail)
-    setEpisodeDetail(undefined)
-    setInvestigation(route)
-  }
-
-  function selectTimelineFocusFinding(item: EpisodeAttentionItem, episode: OperationalEpisode) {
-    if (!timelineFocusPress || !timelineFocusDetail) return
-    const route: InvestigationRoute = { mode: 'attention', findingId: item.episodeId }
-    window.history.replaceState({}, '', workspaceUrl(range, timelineFocusPress, undefined, area, analysisSection))
-    window.history.pushState({ processIntelligenceDrawer: true }, '', workspaceUrl(range, timelineFocusPress, route, area, analysisSection))
-    setSelectedPress(timelineFocusPress)
-    setPressDetail(timelineFocusDetail)
     setEpisodeDetail(episode)
     setInvestigation(route)
   }
@@ -353,27 +286,12 @@ function App() {
   const selectedFinding = investigation?.mode === 'attention' ? drawerResult?.analysis.attentionItems.find(({ episodeId }) => episodeId === investigation.findingId) : undefined
   const pressAnalyticsReady = Boolean(selectedPress && pressDetail?.press.pressKey === selectedPress && !pressLoading)
   const activeAnalytics = pressAnalyticsReady ? pressDetail?.operationalAnalytics : overview?.operationalAnalytics
-  const selectedScopeLabel = selectedPress ? pressDetail?.press.displayName ?? selectedPress.replace('press', 'Press ') : `All ${overview?.operationalAnalytics.scopePressCount ?? 0} presses`
-  const analyticsScopeLabel = pressAnalyticsReady ? selectedScopeLabel : `All ${overview?.operationalAnalytics.scopePressCount ?? 0} presses`
+  const selectedScopeLabel = selectedPress ? pressDetail?.press.displayName ?? selectedPress.replace('press', 'Press ') : `All ${overview?.operationalAnalytics?.scopePressCount ?? overview?.presses.length ?? 0} presses`
+  const analyticsScopeLabel = pressAnalyticsReady ? selectedScopeLabel : `All ${overview?.operationalAnalytics?.scopePressCount ?? overview?.presses.length ?? 0} presses`
   const dataStatus = radiusStatus === 'healthy' ? 'healthy' : radiusStatus === 'loading' ? 'loading' : 'unavailable'
-  const episodeWorkspace = !pressLoading && !pressError && selectedPress && pressDetail && overview
+  const episodeWorkspace = !pressLoading && !pressError && selectedPress && pressDetail && overview?.episodeAnalysis
     ? <SelectedPressWorkspace result={pressDetail} fleetAnalysis={overview.episodeAnalysis} onClear={() => selectPressScope(undefined)} onSelectEpisode={selectEpisode} onSelectSegment={(segment) => navigateSegment(selectedPress, segment)} onSelectFinding={selectFinding} />
     : undefined
-  const timelineFocusIndex = timelineFocusPress ? overview?.presses.findIndex(({ pressKey }) => pressKey === timelineFocusPress) ?? -1 : -1
-  const timelineFocusName = timelineFocusPress ? overview?.presses.find(({ pressKey }) => pressKey === timelineFocusPress)?.displayName ?? timelineFocusPress.replace('press', 'Press ') : undefined
-  const timelineFocusUpdating = Boolean(timelineFocusPress && (timelineFocusLoading || timelineFocusDetail?.press.pressKey !== timelineFocusPress))
-  const timelineFocusWorkspace = timelineFocusPress && overview
-    ? timelineFocusDetail
-      ? <div className="timeline-focus-shell" aria-busy={timelineFocusUpdating}>
-          {timelineFocusUpdating && !timelineFocusError && <section className="timeline-focus-loading timeline-focus-loading--overlay" aria-live="polite"><i aria-hidden="true" /><strong>Updating to {timelineFocusName}</strong><span>Keeping this investigation in place while its data changes.</span></section>}
-          {timelineFocusError && <section className="timeline-focus-loading timeline-focus-loading--error timeline-focus-loading--overlay" role="alert">{timelineFocusError}</section>}
-          <SelectedPressWorkspace result={timelineFocusDetail} fleetAnalysis={overview.episodeAnalysis} onClear={clearTimelineFocus} onPrevious={() => cycleTimelineFocus(-1)} onNext={() => cycleTimelineFocus(1)} hasPrevious={timelineFocusIndex > 0} hasNext={timelineFocusIndex >= 0 && timelineFocusIndex < overview.presses.length - 1} onBackToOverview={clearTimelineFocus} inline onSelectEpisode={selectTimelineFocusEpisode} onSelectSegment={selectTimelineFocusSegment} onSelectFinding={selectTimelineFocusFinding} />
-        </div>
-      : timelineFocusError
-        ? <section className="timeline-focus-loading timeline-focus-loading--error" role="alert">{timelineFocusError}</section>
-        : <section className="timeline-focus-loading" aria-live="polite"><i aria-hidden="true" /><strong>Preparing {timelineFocusName} investigation</strong><span>The fleet overview remains available while this press is updated.</span></section>
-    : undefined
-
   const context = <>
     <div className="context-summary">
       <div><span>Operational intelligence</span><strong>Process Intelligence</strong><small>{selectedScopeLabel}</small></div>
@@ -392,6 +310,7 @@ function App() {
   </>
 
   const administrationContext = <div className="context-summary administration-context"><div><span>Administration</span><strong>Radius semantics</strong><small>Published mappings govern Operations views; Raw Radius evidence remains unchanged.</small></div><span className="data-health data-health--healthy" role="status"><i aria-hidden="true" />Versioned configuration</span></div>
+  const searchContext = <div className="context-summary search-context"><div><span>Knowledge retrieval</span><strong>Intelligent Search</strong><small>Published classifications remain searchable without live Radius enrichment.</small></div><span className="data-health data-health--healthy" role="status"><i aria-hidden="true" />Deterministic search</span></div>
 
   const footer = <details className="system-status-drawer"><summary>System and dependency health</summary><SystemStatus items={[
     { label: 'ProcessIntelligence API', status: apiStatus },
@@ -400,16 +319,20 @@ function App() {
     { label: 'Telemetry historian', status: historianStatus },
   ]} /></details>
 
-  return <ApplicationShell area={area} theme={theme} onNavigate={navigateArea} onToggleTheme={toggleTheme} context={area === 'state-classification' ? administrationContext : context} footer={footer}>
-    {area !== 'state-classification' && loading && !overview && <section className="panel loading-panel" role="status">Loading Radius operations…</section>}
-    {area !== 'state-classification' && loading && overview && <div className="scope-progress" role="status"><i aria-hidden="true" />Updating the selected time range; current results remain visible.</div>}
-    {area !== 'state-classification' && error && !overview && <section className="panel unavailable-panel"><h1>Radius data unavailable</h1><p>{error}</p><p>Dependency health remains available below.</p></section>}
-    {area !== 'state-classification' && error && overview && <div className="scope-progress scope-progress--error" role="alert">{error} Previous results remain visible.</div>}
-    {area !== 'state-classification' && overview && selectedPress && pressLoading && <div className="scope-progress" role="status"><i aria-hidden="true" />Applying {selectedScopeLabel}; the current timeline remains available.</div>}
-    {area !== 'state-classification' && selectedPress && pressError && !pressLoading && <div className="scope-progress scope-progress--error" role="alert">{pressError}</div>}
-    {overview && activeAnalytics && area === 'overview' && <OverviewPage analytics={activeAnalytics} scopeLabel={analyticsScopeLabel} overview={overview} selectedPress={selectedPress} focusedPress={timelineFocusPress} focusWorkspace={timelineFocusWorkspace} onSelectPress={focusTimelinePress} onClearFocus={clearTimelineFocus} onNavigate={navigateArea} onInvestigateStatus={investigateStatus} onInvestigateAnomaly={investigateAnomaly} />}
-    {overview && activeAnalytics && area === 'operational-analysis' && <OperationalAnalysisPage analytics={activeAnalytics} scopeLabel={analyticsScopeLabel} overview={overview} selectedPress={selectedPress} runComparison={selectedPress && pressDetail?.press.pressKey === selectedPress ? pressDetail.runComparison : undefined} section={analysisSection} onSelectSection={selectAnalysisSection} onSelectPress={selectPressScope} onInspectSegment={navigateSegment} onInvestigateStatus={investigateStatus} />}
-    {overview && activeAnalytics && area === 'patterns-episodes' && <PatternsEpisodesPage analytics={activeAnalytics} scopeLabel={analyticsScopeLabel} onInvestigateAnomaly={investigateAnomaly} episodeWorkspace={episodeWorkspace} />}
+  return <ApplicationShell area={area} theme={theme} onNavigate={navigateArea} onToggleTheme={toggleTheme} context={area === 'state-classification' ? administrationContext : area === 'intelligent-search' ? searchContext : context} footer={footer}>
+    {operationsArea && loading && !overview && <section className="panel loading-panel" role="status">Loading Radius operations…</section>}
+    {operationsArea && loading && overview && <div className="scope-progress" role="status"><i aria-hidden="true" />Updating the selected time range; current results remain visible.</div>}
+    {operationsArea && error && !overview && <section className="panel unavailable-panel"><h1>Radius data unavailable</h1><p>{error}</p><p>Dependency health remains available below.</p></section>}
+    {operationsArea && error && overview && <div className="scope-progress scope-progress--error" role="alert">{error} Previous results remain visible.</div>}
+    {operationsArea && area !== 'overview' && overview && selectedPress && pressLoading && <div className="scope-progress" role="status"><i aria-hidden="true" />Applying {selectedScopeLabel}; the current timeline remains available.</div>}
+    {operationsArea && area !== 'overview' && selectedPress && pressError && !pressLoading && <div className="scope-progress scope-progress--error" role="alert">{pressError}</div>}
+    {overview && area === 'overview' && <OverviewPage overview={overview} selectedPress={selectedPress} />}
+    {overview && activeAnalytics && area === 'operational-analysis' && <OperationalAnalysisPage analytics={activeAnalytics} scopeLabel={analyticsScopeLabel} overview={overview} selectedPress={selectedPress} />}
+    {overview && activeAnalytics && area === 'patterns-episodes' && <PatternsEpisodesPage analytics={activeAnalytics} scopeLabel={analyticsScopeLabel} overview={overview} selectedPress={selectedPress} runComparison={selectedPress && pressDetail?.press.pressKey === selectedPress ? pressDetail.runComparison : undefined} onSelectPress={selectPressScope} onInspectSegment={(segment) => {
+      const source = overview.presses.find(({ pressKey }) => pressKey === selectedPress)?.timelineSegments.find(({ startUtc, endUtc }) => startUtc === segment.startUtc && endUtc === segment.endUtc)
+      if (source && selectedPress) navigateSegment(selectedPress, source)
+    }} />}
+    {area === 'intelligent-search' && <IntelligentSearchPage />}
     {area === 'state-classification' && <StateClassificationPage />}
 
     {investigation && investigation.mode !== 'status' && investigation.mode !== 'anomaly' && drawerResultPress && (drawerResult || drawerPressLoading || (investigation.mode === 'segment' && drawerSegment)) && <InvestigationDrawer route={investigation} result={drawerResult} episode={episodeDetail} segment={selectedSegmentDetail} finding={selectedFinding} loading={investigation.mode === 'segment' ? false : drawerPressLoading || drawerLoading} onClose={closeInvestigation} onSelectSegment={(nextSegment) => navigateSegment(nextSegment.pressKey, nextSegment)} contextSegments={drawerContextSegments} />}

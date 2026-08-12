@@ -16,6 +16,7 @@ const navigation: Array<{ area: AnalyticsArea; label: string; description: strin
   { area: 'overview', label: 'Overview', description: 'Signals and priorities', icon: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4v9Zm0 7h6v-4H4v4Zm10 0h6v-9h-6v9Zm0-16v4h6V4h-6Z" /></svg> },
   { area: 'operational-analysis', label: 'Operational Analysis', description: 'Time and drivers', icon: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3v18M5 17h15M8 14l3-4 3 2 5-7" /></svg> },
   { area: 'patterns-episodes', label: 'Patterns & Episodes', description: 'Behavior and evidence', icon: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h5l2 3h9M4 17h5l2-3h9M17 7l3 3-3 3" /></svg> },
+  { area: 'intelligent-search', label: 'Intelligent Search', description: 'Published operating language', icon: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15.5 15.5 4 4M10.5 17a6.5 6.5 0 1 1 0-13 6.5 6.5 0 0 1 0 13Zm-3-6.5h6M10.5 7.5v6" /></svg> },
   { area: 'state-classification', label: 'State Classification', description: 'Administration', icon: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h10M4 12h16M4 19h12M17 3v4M8 10v4M18 17v4" /></svg> },
 ]
 
