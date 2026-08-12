@@ -84,7 +84,7 @@ describe('one-activity explorer presentation', () => {
 
   it('shows magnitude, frequency, press, state, trend, distribution, semantic, and exact evidence', () => {
     const html = renderToStaticMarkup(createElement(OperationalActivityExplorerView, { data: activity, analytics }))
-    for (const copy of ['Total time', 'Occurrences', 'Median occurrence', 'Longest occurrence', 'Press comparison', 'Radius composition', 'Daily line trend', 'Occurrence duration', 'Process families', 'Exact occurrences', 'B / 123 / Maintenance', 'Physical signature']) assert.match(html, new RegExp(copy))
+    for (const copy of ['Total time', 'Occurrences', 'Median occurrence', 'Longest occurrence', 'Press comparison', 'Occurrence duration', 'Process families', 'Exact occurrences', 'B / 123 / Maintenance', 'Physical signature']) assert.match(html, new RegExp(copy))
     assert.match(html, /Radius Coverage/)
     assert.match(html, /Classification Coverage/)
     assert.match(html, /Load next 46/)
@@ -96,6 +96,8 @@ describe('one-activity explorer presentation', () => {
     assert.doesNotMatch(html, /Stops &amp; Recovery/)
     assert.ok(html.indexOf('Physical signature across the full time range') < html.indexOf('Exact occurrences'))
     assert.ok(html.indexOf('Exact occurrences') < html.indexOf('Press comparison'))
+    assert.doesNotMatch(html, /Radius composition|Radius ↔ semantic meaning|Full-range activity trend|Daily line trend/)
+    assert.match(html, /Press comparison[\s\S]*Duration distribution/)
   })
 
   it('plots complete-range Radius and semantic context while highlighting only the selected activity', () => {
@@ -134,11 +136,11 @@ describe('one-activity explorer presentation', () => {
     assert.doesNotMatch(html, /<select/)
   })
 
-  it('provides local press/state focus and responsive theme-aware styling', () => {
+  it('provides local press focus and responsive theme-aware styling', () => {
     const source = readFileSync(new URL('../src/components/OperationalActivityExplorer.tsx', import.meta.url), 'utf8')
     const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
     assert.match(source, /setPressFocus/)
-    assert.match(source, /setStateFocus/)
+    assert.doesNotMatch(source, /setStateFocus/)
     assert.match(source, /Clear local evidence focus/)
     assert.match(css, /@media \(max-width: 980px\)/)
     assert.match(css, /@media \(max-width: 700px\)/)
