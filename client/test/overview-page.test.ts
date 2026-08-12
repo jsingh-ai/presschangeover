@@ -77,12 +77,12 @@ describe('Radius state hierarchy Overview', () => {
 
   it('keeps the fleet decision layer intact', () => {
     const html = renderToStaticMarkup(createElement(RadiusOverview, { overview }))
-    for (const label of ['Fleet snapshot', 'Top Running Presses', 'Needs Attention', 'What Stands Out']) assert.match(html, new RegExp(label))
+    for (const label of ['Fleet snapshot', 'Highest Run Production Share', 'Worth Reviewing', 'What Stands Out']) assert.match(html, new RegExp(label))
     assert.match(html, /Run Production/)
     assert.doesNotMatch(html, />Good</)
   })
 
-  it('renders Fleet Radius State Allocation with one green Run Production state plus Make Ready, Bad, and Safety', () => {
+  it('renders Fleet Radius State Allocation with raw Radius S-state wording rather than assuming Safety', () => {
     const html = renderToStaticMarkup(createElement(RadiusOverview, { overview }))
     assert.match(html, /Fleet Radius State Allocation/)
     assert.match(html, /100% of observed Radius time per press/)
@@ -90,7 +90,8 @@ describe('Radius state hierarchy Overview', () => {
     assert.doesNotMatch(html, />Good</)
     assert.match(html, /Make Ready/)
     assert.match(html, /Bad/)
-    assert.match(html, /Safety/)
+    assert.match(html, /Radius S state/)
+    assert.doesNotMatch(html, />Safety</)
     assert.match(html, /Select semantic breakdown/)
   })
 
@@ -162,29 +163,39 @@ describe('Radius state hierarchy Overview', () => {
 
   it('renders synchronized Radius and Process tracks on the same timeline', () => {
     const html = renderToStaticMarkup(createElement(RadiusOverview, { overview, selectedPress: 'press11' }))
-    assert.match(html, /Synchronized Radius and Process activity/)
+    assert.match(html, /Synchronized process evidence/)
     assert.match(html, />Radius state</)
     assert.match(html, />Process group</)
-    assert.match(html, /Press 11 radius timeline/)
-    assert.match(html, /Press 11 process timeline/)
+    assert.match(html, /Press 11 synchronized evidence/)
+    assert.match(html, /Scrollable wall-clock timeline/)
     assert.match(html, /Routine Process/)
     assert.match(html, /Adjustment &amp; Quality/)
   })
 
   it('shows Data unavailable on both chronology tracks without classifying it', () => {
     const html = renderToStaticMarkup(createElement(RadiusOverview, { overview, selectedPress: 'press11' }))
-    assert.ok((html.match(/DATA UNAVAILABLE/g) ?? []).length >= 2)
+    assert.ok((html.match(/Data unavailable/g) ?? []).length >= 2)
     assert.match(html, /Machine state is unknown/)
     assert.match(html, /overview-gantt-segment--offline/)
   })
 
   it('provides linked hover/focus and persistent click selection behavior', () => {
-    const source = readFileSync(new URL('../src/components/RadiusOverview.tsx', import.meta.url), 'utf8')
-    assert.match(source, /rangesOverlap\(range, active\)/)
-    assert.match(source, /onMouseEnter=\{\(\) => setHovered\(range\)\}/)
-    assert.match(source, /onFocus=\{\(\) => setHovered\(range\)\}/)
-    assert.match(source, /onClick=\{\(\) => setSelected\(range\)\}/)
-    assert.match(source, /<SelectedPeriod/)
+    const source = readFileSync(new URL('../src/components/SynchronizedTimeline.tsx', import.meta.url), 'utf8')
+    assert.match(source, /overlap\(item, hovered\)/)
+    assert.match(source, /onMouseEnter=\{\(\) => setHovered\(item\)\}/)
+    assert.match(source, /onFocus=\{\(\) => setHovered\(item\)\}/)
+    assert.match(source, /onClick=\{\(\) => onSelect\?\.\(item, track\)\}/)
+    assert.match(source, /selectedId === item\.id/)
+  })
+
+  it('keeps long-range Radius chronology and requires focused physical detail', () => {
+    const modified = structuredClone(overview)
+    modified.toUtc = '2026-08-11T16:00:00.000Z'
+    const html = renderToStaticMarkup(createElement(RadiusOverview, { overview: modified, selectedPress: 'press11' }))
+    assert.match(html, /range is longer than two hours/)
+    assert.match(html, /select an interval to load bounded physical telemetry/)
+    assert.match(html, /Radius recorded/)
+    assert.match(html, /ProcessIntelligence/)
   })
 
   it('keeps the responsive light/dark implementation free of page-level overflow', () => {

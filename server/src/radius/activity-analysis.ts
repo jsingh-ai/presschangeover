@@ -10,9 +10,9 @@ import type {
 } from './models.js'
 import { exactRadiusIdentity } from './radius-identity.js'
 
-export const ACTIVITY_EVIDENCE_LIMIT = 250
+export const ACTIVITY_EVIDENCE_LIMIT = 100
 
-const stateLabels: Record<string, string> = { G: 'Good', M: 'Make Ready', B: 'Bad', S: 'Safety' }
+const stateLabels: Record<string, string> = { G: 'Good', M: 'Make Ready', B: 'Bad', S: 'Radius S state' }
 
 function median(values: number[]): number | null {
   if (!values.length) return null
@@ -166,7 +166,7 @@ function trend(occurrences: ActivityOccurrence[], fromUtc: string, toUtc: string
   return { bucket, values: [...values.values()].sort((a, b) => a.bucketStartUtc.localeCompare(b.bucketStartUtc)) }
 }
 
-export function analyzeOperationalActivity(overview: RadiusOverview, snapshot: ClassificationSnapshot, requested?: ActivitySelection): ActivityAnalysis {
+export function analyzeOperationalActivity(overview: RadiusOverview, snapshot: ClassificationSnapshot, requested?: ActivitySelection, evidencePage: { offset?: number; limit?: number } = {}): ActivityAnalysis {
   const catalog = buildActivityCatalog(overview, snapshot)
   const selection = catalog.find((item) => item.level === requested?.level && item.key === requested.key)
     ?? catalog.find((item) => item.level === 'operational_group' && item.key === 'MAINTENANCE_INTERVENTION')
@@ -206,6 +206,10 @@ export function analyzeOperationalActivity(overview: RadiusOverview, snapshot: C
     fromUtc: overview.fromUtc, toUtc: overview.toUtc, classificationVersion: snapshot.version, selection, catalog,
     summary: { totalDurationSeconds, occurrenceCount: occurrences.length, medianOccurrenceSeconds: median(durations), p95OccurrenceSeconds: durations.length >= 20 ? percentile(durations, .95) : null, longestOccurrenceSeconds: Math.max(0, ...durations), pressesObserved: pressBreakdown.filter(({ occurrenceCount }) => occurrenceCount > 0).length, scopePresses: overview.presses.length, shareOfObservedPercent: percentage(totalDurationSeconds, observedSeconds), sourceCoveragePercent: percentage(observedSeconds, possibleSeconds), classificationCoveragePercent: percentage(mappedSeconds, observedSeconds) },
     pressBreakdown, radiusStateComposition, semanticBreakdown, trend: bucketed.values, trendBucket: bucketed.bucket,
-    durationDistribution: distribution, occurrences: occurrences.slice(0, ACTIVITY_EVIDENCE_LIMIT), totalOccurrenceCount: occurrences.length, evidenceLimit: ACTIVITY_EVIDENCE_LIMIT,
+    durationDistribution: distribution,
+    occurrences: occurrences.slice(evidencePage.offset ?? 0, (evidencePage.offset ?? 0) + Math.min(ACTIVITY_EVIDENCE_LIMIT, evidencePage.limit ?? ACTIVITY_EVIDENCE_LIMIT)),
+    totalOccurrenceCount: occurrences.length,
+    evidenceOffset: evidencePage.offset ?? 0,
+    evidenceLimit: Math.min(ACTIVITY_EVIDENCE_LIMIT, evidencePage.limit ?? ACTIVITY_EVIDENCE_LIMIT),
   }
 }

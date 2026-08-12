@@ -64,7 +64,7 @@ export function radiusStateLabel(eventType: string): string {
   if (eventType === 'G') return 'Run Production'
   if (eventType === 'M') return 'Make Ready'
   if (eventType === 'B') return 'Bad'
-  if (eventType === 'S') return 'Safety'
+  if (eventType === 'S') return 'Radius S state'
   return eventType ? `Other Radius state (${eventType})` : 'Unknown Radius state'
 }
 

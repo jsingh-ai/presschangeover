@@ -513,7 +513,7 @@ export interface ActivityAnalysis {
   radiusStateComposition: Array<{ eventType: string; label: string; durationSeconds: number; percentage: number }>
   semanticBreakdown: Array<{ key: string; label: string; level: 'operational_group' | 'process_family' | 'exact_status'; durationSeconds: number; percentage: number }>
   trend: Array<{ bucketStartUtc: string; durationSeconds: number; occurrenceCount: number }>; trendBucket: 'hour' | 'day'
-  durationDistribution: Array<{ key: string; label: string; occurrenceCount: number }>; occurrences: ActivityOccurrence[]; totalOccurrenceCount: number; evidenceLimit: number
+  durationDistribution: Array<{ key: string; label: string; occurrenceCount: number }>; occurrences: ActivityOccurrence[]; totalOccurrenceCount: number; evidenceOffset: number; evidenceLimit: number
 }
 export type PatternMatchMode = 'contains_all' | 'in_order'
 export interface RunPatternEvidence { runId: string; pressKey: RadiusPressKey; displayName: string; startUtc: string; endUtc: string; totalDurationSeconds: number; timeToProductionSeconds: number | null; productionDurationSeconds: number; shortRunAttemptCount: number; transitionCount: number; isPartial: boolean; dataInterrupted: boolean; eligible: boolean; groupSequence: string[]; familySequence: string[]; selectedActivitySeconds: number; conditionDurations: Array<{ conditionKey: string; durationSeconds: number }> }

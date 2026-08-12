@@ -67,7 +67,7 @@ export interface RadiusService {
     episodeId: string,
   ): Promise<OperationalEpisode>
   getObservedIdentities?(): Promise<ObservedRadiusIdentity[]>
-  getActivityAnalysis?(fromUtc: string, toUtc: string, selection?: import('./models.js').ActivitySelection, pressKey?: RadiusPressKey): Promise<import('./models.js').ActivityAnalysis>
+  getActivityAnalysis?(fromUtc: string, toUtc: string, selection?: import('./models.js').ActivitySelection, pressKey?: RadiusPressKey, evidencePage?: { offset?: number; limit?: number }): Promise<import('./models.js').ActivityAnalysis>
   getPatternAnalysis?(fromUtc: string, toUtc: string, input?: { selectedPatternKey?: string; conditions?: import('./models.js').ActivitySelection[]; matchMode?: import('./models.js').PatternMatchMode; pressKey?: RadiusPressKey }): Promise<import('./models.js').PatternAnalysis>
 }
 

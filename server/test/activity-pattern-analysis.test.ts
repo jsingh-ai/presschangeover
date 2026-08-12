@@ -77,6 +77,20 @@ describe('canonical one-activity analysis', () => {
     assert.equal(value.summary.classificationCoveragePercent, 100)
   })
 
+  it('pages exact occurrence evidence without changing full-scope accounting', () => {
+    const selection = { level: 'radius_state' as const, key: 'M', label: 'Make Ready' }
+    const first = analyzeOperationalActivity(fixture, snapshot, selection, { offset: 0, limit: 1 })
+    const second = analyzeOperationalActivity(fixture, snapshot, selection, { offset: 1, limit: 1 })
+    assert.equal(first.evidenceOffset, 0)
+    assert.equal(second.evidenceOffset, 1)
+    assert.equal(first.evidenceLimit, 1)
+    assert.equal(first.occurrences.length, 1)
+    assert.equal(second.occurrences.length, 1)
+    assert.notEqual(first.occurrences[0]?.occurrenceId, second.occurrences[0]?.occurrenceId)
+    assert.equal(first.totalOccurrenceCount, second.totalOccurrenceCount)
+    assert.equal(first.summary.totalDurationSeconds, second.summary.totalDurationSeconds)
+  })
+
   it('contains no database writes', () => {
     const source = readFileSync(new URL('../src/radius/activity-analysis.ts', import.meta.url), 'utf8')
     assert.doesNotMatch(source, /\b(?:INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|TRUNCATE\s+TABLE|ALTER\s+TABLE|CREATE\s+(?:TABLE|INDEX|TRIGGER))\b/i)

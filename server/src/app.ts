@@ -400,7 +400,10 @@ export function createApp({
       const { fromUtc, toUtc } = validateRadiusRange(request.query)
       if (!radiusService.getActivityAnalysis) throw new RadiusUnavailableError()
       const pressKey = parseOptionalPressKey(request.query.pressKey)
-      response.status(200).json(await radiusService.getActivityAnalysis(fromUtc, toUtc, parseActivitySelection(request.query.level, request.query.key), pressKey))
+      const evidenceOffset = request.query.evidenceOffset === undefined ? 0 : Number(request.query.evidenceOffset)
+      const evidenceLimit = request.query.evidenceLimit === undefined ? undefined : Number(request.query.evidenceLimit)
+      if (!Number.isSafeInteger(evidenceOffset) || evidenceOffset < 0 || (evidenceLimit !== undefined && (!Number.isSafeInteger(evidenceLimit) || evidenceLimit < 1 || evidenceLimit > 100))) throw new RequestValidationError('invalid_activity_evidence_page')
+      response.status(200).json(await radiusService.getActivityAnalysis(fromUtc, toUtc, parseActivitySelection(request.query.level, request.query.key), pressKey, { offset: evidenceOffset, limit: evidenceLimit }))
     }),
   )
 

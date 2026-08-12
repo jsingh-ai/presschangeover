@@ -613,6 +613,7 @@ export interface ActivityAnalysis {
   durationDistribution: Array<{ key: string; label: string; occurrenceCount: number }>
   occurrences: ActivityOccurrence[]
   totalOccurrenceCount: number
+  evidenceOffset: number
   evidenceLimit: number
 }
 

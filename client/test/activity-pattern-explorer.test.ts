@@ -25,7 +25,7 @@ const activity = {
   trend: [{ bucketStartUtc: '2026-08-01T00:00:00.000Z', durationSeconds: 7_200, occurrenceCount: 5 }], trendBucket: 'day',
   durationDistribution: [{ key: 'under_5m', label: '< 5m', occurrenceCount: 7 }, { key: '5_15m', label: '5–15m', occurrenceCount: 20 }, { key: '15_30m', label: '15–30m', occurrenceCount: 12 }, { key: '30_60m', label: '30–60m', occurrenceCount: 7 }, { key: 'over_60m', label: '> 60m', occurrenceCount: 1 }],
   occurrences: [{ occurrenceId: 'o1', pressKey: 'press11', displayName: 'Press 11', startUtc: '2026-08-01T01:00:00.000Z', endUtc: '2026-08-01T01:12:00.000Z', durationSeconds: 720, eventType: 'B', radiusStateLabel: 'Bad', operationalGroupKey: 'MAINTENANCE_INTERVENTION', operationalGroupName: 'Maintenance Intervention', processFamilyKey: 'MAINTENANCE', processFamilyName: 'Maintenance', exactIdentities: [{ identity: 'B\u001f123\u001fMaintenance', eventType: 'B', statusCode: '123', statusDescription: 'Maintenance', durationSeconds: 720, needsClassification: false }] }],
-  totalOccurrenceCount: 47, evidenceLimit: 250,
+  totalOccurrenceCount: 47, evidenceOffset: 0, evidenceLimit: 100,
 } as ActivityAnalysis
 
 const analytics = { productionStops: { anchorCount: 20, resolvedCount: 18, censoredCount: 2 }, beforeSuccessfulProduction: { anchorCount: 16 } } as OperationalAnalytics
@@ -41,10 +41,11 @@ const patterns = { fromUtc: activity.fromUtc, toUtc: activity.toUtc, classificat
 describe('one-activity explorer presentation', () => {
   it('shows magnitude, frequency, press, state, trend, distribution, semantic, and exact evidence', () => {
     const html = renderToStaticMarkup(createElement(OperationalActivityExplorerView, { data: activity, analytics }))
-    for (const copy of ['Total time', 'Occurrences', 'Median occurrence', 'Longest occurrence', 'By press', 'Radius states that recorded this activity', 'Daily trend', 'Occurrence duration', 'Process families', 'Occurrence evidence', 'B / 123 / Maintenance']) assert.match(html, new RegExp(copy))
-    assert.match(html, /Radius source coverage/)
-    assert.match(html, /Classification coverage/)
-    assert.match(html, /Stops &amp; Recovery/)
+    for (const copy of ['Total time', 'Occurrences', 'Median occurrence', 'Longest occurrence', 'Press comparison', 'Radius composition', 'Daily line trend', 'Occurrence duration', 'Process families', 'Exact occurrences', 'B / 123 / Maintenance', 'Physical signature']) assert.match(html, new RegExp(copy))
+    assert.match(html, /Radius Coverage/)
+    assert.match(html, /Classification Coverage/)
+    assert.match(html, /Load next 46/)
+    assert.doesNotMatch(html, /Stops &amp; Recovery/)
   })
 
   it('provides local press/state focus and responsive theme-aware styling', () => {
@@ -63,7 +64,7 @@ describe('one-activity explorer presentation', () => {
 describe('pattern-first presentation', () => {
   it('shows discovered prevalence, rate denominators, family variations, and matched Runs', () => {
     const html = renderToStaticMarkup(createElement(DiscoveredPatterns, { data: patterns, onPattern() {}, onPressFocus() {} }))
-    for (const copy of ['Eligible completed Runs', 'Unique group-level patterns', 'Pattern prevalence', 'Selected pattern', 'Pattern prevalence by press', '37.5% · 9/24', 'Family variations', 'Matched Run evidence']) assert.match(html, new RegExp(copy))
+    for (const copy of ['Eligible Runs', 'Unique patterns', 'Pattern prevalence', 'Selected pattern', 'Match rate by press', '9 / 24 · 37.5%', 'Process Family variations', 'Matched Run evidence']) assert.match(html, new RegExp(copy))
     assert.match(html, /Changeover &amp; Setup.*Routine Process.*Production/)
   })
 
@@ -71,7 +72,7 @@ describe('pattern-first presentation', () => {
     const builderData = { ...patterns, builder: { conditions: [catalog[1], catalog[2]], matchMode: 'contains_all', redundantConditionMessage: null, matchedRuns: 12, matchSharePercent: 6.5, pressesObserved: 5, medianTimeToProductionSeconds: 3_780, medianSelectedActivitySeconds: 900, totalSelectedActivitySeconds: 16_620, pressStats: [{ pressKey: 'press11', displayName: 'Press 11', matchedRuns: 5, eligibleRuns: 19, matchRatePercent: 26.3, selectedActivitySeconds: 7_200, medianTimeToProductionSeconds: 4_000 }], topPatterns: [{ patternKey: pattern.patternKey, labels: pattern.orderedGroupLabels, runCount: 6, percentageOfMatches: 50 }] } } as PatternAnalysis
     const html = renderToStaticMarkup(createElement(Builder, { data: builderData, conditions: [catalog[1], catalog[2]], mode: 'contains_all', onConditions() {}, onMode() {}, onRefresh() {} }))
     for (const copy of ['Maintenance Intervention', 'Cleaning / Wash', 'Contains All', 'In This Order', 'Matched Runs', 'Matched Run evidence', 'union of matching intervals']) assert.match(html, new RegExp(copy))
-    assert.match(html, /5\/19/)
+    assert.match(html, /5 \/ 19 · 26.3%/)
     assert.doesNotMatch(html, /Good Pattern|Bad Pattern|Watch Pattern/)
   })
 })

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useMemo } from 'react'
 import { statusLabel, supportText } from '../analytics-presentation'
 import { formatDuration } from '../episode-presentation'
 import { formatPlantDateTime } from '../time-ranges'
 import type { OperationalAnalytics } from '../types/api'
 import type { InvestigationRoute } from '../workspace-state'
+import { EvidenceDrawerShell } from './EvidenceDrawerShell'
 
 interface Props {
   route: Extract<InvestigationRoute, { mode: 'status' } | { mode: 'anomaly' }>
@@ -13,9 +14,6 @@ interface Props {
 }
 
 export function AnalyticsEvidenceDrawer({ route, analytics, scopeLabel, onClose }: Props) {
-  const panel = useRef<HTMLElement>(null)
-  const closeButton = useRef<HTMLButtonElement>(null)
-  const returnFocus = useRef<HTMLElement | null>(null)
   const driver = route.mode === 'status' ? analytics.statusDrivers.find(({ identity }) => identity === route.statusIdentity) : undefined
   const anomaly = route.mode === 'anomaly' ? analytics.anomalies.find(({ anomalyId }) => anomalyId === route.anomalyId) : undefined
   const anomalyRelationship = useMemo(() => anomaly && analytics.relationshipGroups.find((group) =>
@@ -25,32 +23,7 @@ export function AnalyticsEvidenceDrawer({ route, analytics, scopeLabel, onClose 
     .filter((group) => group.anchor.identity === driver.identity && group.maxTransitions === 1 && group.outcomes.length > 0)
     .map((group) => ({ group, outcome: group.outcomes[0] })) : [], [analytics, driver])
 
-  useEffect(() => {
-    returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    closeButton.current?.focus()
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-      if (event.key !== 'Tab' || !panel.current) return
-      const focusable = [...panel.current.querySelectorAll<HTMLElement>('button, [href], select, summary, [tabindex]:not([tabindex="-1"])')].filter((item) => !item.hasAttribute('disabled'))
-      if (focusable.length === 0) return
-      const first = focusable[0]
-      const last = focusable.at(-1)!
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
-      if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => {
-      window.removeEventListener('keydown', onKeyDown)
-      returnFocus.current?.focus()
-    }
-  }, [onClose])
-
-  return <div className="drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <aside ref={panel} className="investigation-side-panel" role="dialog" aria-modal="true" aria-labelledby="analytics-drawer-title">
-      <header className="drawer-header">
-        <div><p className="eyebrow">Investigation · {route.mode}</p><h2 id="analytics-drawer-title">{scopeLabel}</h2></div>
-        <button ref={closeButton} type="button" className="drawer-close" aria-label="Close investigation" onClick={onClose}>×</button>
-      </header>
+  return <EvidenceDrawerShell eyebrow={`Evidence · ${route.mode}`} title={scopeLabel} context="Radius and ProcessIntelligence evidence" onClose={onClose}>
       {driver && <div className="drawer-content">
         <div className="drawer-focus-title"><span>{driver.category} · exact Radius identity</span><strong>{statusLabel(driver)}</strong></div>
         <dl className="drawer-summary compact-facts">
@@ -84,6 +57,5 @@ export function AnalyticsEvidenceDrawer({ route, analytics, scopeLabel, onClose 
         <p className="annotation-disclaimer">{analytics.annotationDisclaimer}</p>
       </div>}
       {!driver && !anomaly && <p className="drawer-missing">This analytics evidence is not present in the selected range and filter.</p>}
-    </aside>
-  </div>
+  </EvidenceDrawerShell>
 }

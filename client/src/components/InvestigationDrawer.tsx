@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useMemo } from 'react'
 import { completionLabel, formatDuration, signedDurationDifference } from '../episode-presentation'
 import { formatPlantDateTime } from '../time-ranges'
 import type {
@@ -11,6 +11,8 @@ import type {
 import type { InvestigationRoute } from '../workspace-state'
 import { EpisodeDetail } from './EpisodeDetail'
 import { SegmentDetail } from './SegmentDetail'
+import { EvidenceDrawerShell } from './EvidenceDrawerShell'
+import { PhysicalEvidencePanel } from './PhysicalEvidencePanel'
 
 interface Props {
   route: Exclude<InvestigationRoute, { mode: 'status' } | { mode: 'anomaly' }>
@@ -88,9 +90,6 @@ function phaseLabel(segment: RadiusStatusSegment | undefined, emptyLabel = 'No a
 }
 
 export function InvestigationDrawer({ route, result, episode, segment, finding, loading = false, onClose, onSelectSegment, contextSegments }: Props) {
-  const panel = useRef<HTMLElement>(null)
-  const closeButton = useRef<HTMLButtonElement>(null)
-  const returnFocus = useRef<HTMLElement | null>(null)
   const segmentEpisode = useMemo(() => result ? findEpisodeForSegment(result, segment) : undefined, [result, segment])
   const contextEpisode = route.mode === 'segment' ? segmentEpisode : episode
   const phases = surroundingPhases(result, segment, contextSegments)
@@ -99,26 +98,6 @@ export function InvestigationDrawer({ route, result, episode, segment, finding, 
   const confirmedProduction = result && episode?.confirmedProductionStartUtc
     ? result.timelineSegments.find((candidate) => candidate.kind === 'radius' && candidate.isProduction && Date.parse(candidate.startUtc) <= Date.parse(episode.confirmedProductionStartUtc!) && Date.parse(candidate.endUtc) > Date.parse(episode.confirmedProductionStartUtc!))
     : undefined
-
-  useEffect(() => {
-    returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    closeButton.current?.focus()
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-      if (event.key !== 'Tab' || !panel.current) return
-      const focusable = [...panel.current.querySelectorAll<HTMLElement>('button, [href], select, summary, [tabindex]:not([tabindex="-1"])')].filter((item) => !item.hasAttribute('disabled'))
-      if (focusable.length === 0) return
-      const first = focusable[0]
-      const last = focusable.at(-1)!
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
-      if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    return () => {
-      window.removeEventListener('keydown', onKeyDown)
-      returnFocus.current?.focus()
-    }
-  }, [onClose])
 
   const stateSegment = segment?.kind === 'radius' ? segment as RadiusStateSegment : undefined
   const benchmark = stateSegment && result?.analysis.phaseBenchmarks.find(
@@ -131,13 +110,7 @@ export function InvestigationDrawer({ route, result, episode, segment, finding, 
 
   const segmentPressLabel = route.mode === 'segment' && route.pressKey ? route.pressKey.replace('press', 'Press ') : undefined
   const pressLabel = result?.press.displayName ?? segmentPressLabel ?? 'Press investigation'
-  return <div className="drawer-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}>
-    <aside ref={panel} className="investigation-side-panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
-      <header className={`drawer-header drawer-header--${stateSegment ? stateTone(stateSegment) : 'neutral'}`}>
-        <div><p className="eyebrow">Investigation · {route.mode}</p><h2 id="drawer-title">{pressLabel}</h2><span className="drawer-header-context">{route.mode === 'segment' ? 'Exact status evidence' : 'Operational evidence'}</span></div>
-        <button ref={closeButton} type="button" className="drawer-close" aria-label="Close investigation" onClick={onClose}>×</button>
-      </header>
-      {loading && <div className="drawer-loading" role="status">Loading investigation…</div>}
+  return <EvidenceDrawerShell eyebrow={`Evidence · ${route.mode}`} title={pressLabel} context={route.mode === 'segment' ? 'Exact Radius interval' : 'Operational evidence'} tone={stateSegment ? stateTone(stateSegment) : 'neutral'} loading={loading} onClose={onClose}>
       {!loading && route.mode === 'segment' && segment && <div className="drawer-content">
         <section className="drawer-state-context" aria-label="Adjacent Radius states">
           <button
@@ -172,6 +145,7 @@ export function InvestigationDrawer({ route, result, episode, segment, finding, 
         </div>
         {stateSegment?.returnToProduction === 'confirmed' && <p className="confirmation-note">Confirmed production evidence: {formatPlantDateTime(stateSegment.startUtc)} to {formatPlantDateTime(stateSegment.endUtc)} CT. The episode ended at {formatPlantDateTime(segmentEpisode?.endUtc ?? stateSegment.startUtc)} CT.</p>}
         <SegmentDetail segment={segment} embedded />
+        {segment.kind === 'radius' && <PhysicalEvidencePanel pressKey={segment.pressKey} fromUtc={segment.startUtc} toUtc={segment.endUtc} />}
         <section className="drawer-analysis" aria-label="Phase comparison">
           <h3>Episode context</h3>
           <dl className="compact-facts">
@@ -200,7 +174,7 @@ export function InvestigationDrawer({ route, result, episode, segment, finding, 
         <EpisodeDetail episode={episode} label={profile?.descriptor} embedded />
       </div>}
       {!loading && result && route.mode === 'attention' && finding && episode && <div className="drawer-content">
-        <div className="drawer-focus-title"><span>Why this needs attention</span><strong>{finding.descriptor}</strong></div>
+        <div className="drawer-focus-title"><span>Why this is worth reviewing</span><strong>{finding.descriptor}</strong></div>
         <p className="exception-summary">This is a deterministic exception from the observed Radius sequence—not a predicted cause. The evidence below shows the exact interval, the rule that triggered it, the comparison cohort, and what happened during recovery.</p>
         <section className="exception-evidence-card">
           <h3>What happened</h3>
@@ -240,6 +214,5 @@ export function InvestigationDrawer({ route, result, episode, segment, finding, 
         <EpisodeDetail episode={episode} label={profile?.descriptor} embedded />
       </div>}
       {!loading && result && ((route.mode === 'segment' && !segment) || (route.mode === 'episode' && !episode) || (route.mode === 'attention' && (!episode || !finding))) && <p className="drawer-missing">This investigation is not present in the selected range.</p>}
-    </aside>
-  </div>
+  </EvidenceDrawerShell>
 }

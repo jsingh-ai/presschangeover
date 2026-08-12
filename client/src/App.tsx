@@ -14,7 +14,6 @@ import { IntelligentSearchPage } from './components/IntelligentSearchPage'
 import { OperationalAnalysisPage, OverviewPage, PatternsEpisodesPage } from './components/AnalyticsPages'
 import { PressFilterBar } from './components/PressFilterBar'
 import { RangeControls } from './components/RangeControls'
-import { SelectedPressWorkspace } from './components/SelectedPressWorkspace'
 import { SystemStatus } from './components/SystemStatus'
 import { StateClassificationPage } from './components/StateClassificationPage'
 import { areaFromPathname, operationalSectionFromSearch, pressFromLocation, type AnalyticsArea, type OperationalSection } from './navigation'
@@ -111,44 +110,48 @@ function App() {
   useEffect(() => {
     if (!operationsArea) { setLoading(false); setError(undefined); return }
     let active = true
-    void getProcessIntelligenceHealth().then(() => active && setApiStatus('healthy')).catch(() => active && setApiStatus('unavailable'))
-    void getTelemetryHealth().then((health) => {
+    const controller = new AbortController()
+    void getProcessIntelligenceHealth(controller.signal).then(() => active && setApiStatus('healthy')).catch(() => active && setApiStatus('unavailable'))
+    void getTelemetryHealth(controller.signal).then((health) => {
       if (!active) return
       setTelemetryStatus(health.telemetryApi.status === 'healthy' ? 'healthy' : 'unavailable')
       setHistorianStatus(health.historian.status === 'healthy' ? 'healthy' : 'unavailable')
     }).catch(() => { if (active) { setTelemetryStatus('unavailable'); setHistorianStatus('unavailable') } })
-    void getRadiusHealth().then((health) => {
+    void getRadiusHealth(controller.signal).then((health) => {
       if (!active) return
       setRadiusStatus(health.status === 'healthy' ? 'healthy' : 'unavailable')
       setRadiusReason(health.reason)
     }).catch(() => { if (active) { setRadiusStatus('unavailable'); setRadiusReason('not_configured') } })
-    return () => { active = false }
-  }, [])
+    return () => { active = false; controller.abort() }
+  }, [operationsArea])
 
   useEffect(() => {
+    if (!operationsArea) return
     let active = true
+    const controller = new AbortController()
     setLoading(true)
     setError(undefined)
-    void getRadiusOverview(range.fromUtc, range.toUtc, area === 'overview').then((result) => { if (active) setOverview(result) }).catch(() => {
+    void getRadiusOverview(range.fromUtc, range.toUtc, area === 'overview', controller.signal).then((result) => { if (active) setOverview(result) }).catch(() => {
       if (!active) return
       setError(radiusReason === 'not_configured'
         ? 'Radius data is unavailable until a dedicated SELECT-only database login and verified live mappings are configured.'
         : 'Radius operational data could not be loaded for this range.')
     }).finally(() => active && setLoading(false))
-    return () => { active = false }
+    return () => { active = false; controller.abort() }
   }, [operationsArea, area, range, radiusReason])
 
   useEffect(() => {
     if (!operationsArea || !selectedPress || area === 'overview') { setPressDetail(undefined); setPressError(undefined); return }
     let active = true
+    const controller = new AbortController()
     setPressLoading(true)
     setPressError(undefined)
     setEpisodeDetail(undefined)
-    void getRadiusPressEpisodes(selectedPress, range.fromUtc, range.toUtc)
+    void getRadiusPressEpisodes(selectedPress, range.fromUtc, range.toUtc, controller.signal)
       .then((result) => active && setPressDetail(result))
       .catch(() => active && setPressError('The selected press could not be analyzed for this range.'))
       .finally(() => active && setPressLoading(false))
-    return () => { active = false }
+    return () => { active = false; controller.abort() }
   }, [operationsArea, area, range, selectedPress])
 
   useEffect(() => {
@@ -163,12 +166,13 @@ function App() {
       return
     }
     let active = true
+    const controller = new AbortController()
     setDrawerPressLoading(true)
-    void getRadiusPressEpisodes(drawerPress, range.fromUtc, range.toUtc)
+    void getRadiusPressEpisodes(drawerPress, range.fromUtc, range.toUtc, controller.signal)
       .then((result) => active && setDrawerPressDetail(result))
       .catch(() => active && setDrawerPressDetail(undefined))
       .finally(() => active && setDrawerPressLoading(false))
-    return () => { active = false }
+    return () => { active = false; controller.abort() }
   }, [range, drawerPress, selectedPress, pressDetail, investigation, drawerSegment])
 
   useEffect(() => {
@@ -177,9 +181,10 @@ function App() {
     const inRangeEpisode = pressDetail.episodes.find((episode) => episode.episodeId === episodeId)
     if (inRangeEpisode) { setEpisodeDetail(inRangeEpisode); setDrawerLoading(false); return }
     let active = true
+    const controller = new AbortController()
     setDrawerLoading(true)
-    void getRadiusEpisode(selectedPress, episodeId).then((episode) => active && setEpisodeDetail(episode)).catch(() => active && setEpisodeDetail(undefined)).finally(() => active && setDrawerLoading(false))
-    return () => { active = false }
+    void getRadiusEpisode(selectedPress, episodeId, controller.signal).then((episode) => active && setEpisodeDetail(episode)).catch(() => active && setEpisodeDetail(undefined)).finally(() => active && setDrawerLoading(false))
+    return () => { active = false; controller.abort() }
   }, [selectedPress, investigation, pressDetail])
 
   function navigateArea(nextArea: AnalyticsArea, section?: OperationalSection) {
@@ -289,9 +294,6 @@ function App() {
   const selectedScopeLabel = selectedPress ? pressDetail?.press.displayName ?? selectedPress.replace('press', 'Press ') : `All ${overview?.operationalAnalytics?.scopePressCount ?? overview?.presses.length ?? 0} presses`
   const analyticsScopeLabel = pressAnalyticsReady ? selectedScopeLabel : `All ${overview?.operationalAnalytics?.scopePressCount ?? overview?.presses.length ?? 0} presses`
   const dataStatus = radiusStatus === 'healthy' ? 'healthy' : radiusStatus === 'loading' ? 'loading' : 'unavailable'
-  const episodeWorkspace = !pressLoading && !pressError && selectedPress && pressDetail && overview?.episodeAnalysis
-    ? <SelectedPressWorkspace result={pressDetail} fleetAnalysis={overview.episodeAnalysis} onClear={() => selectPressScope(undefined)} onSelectEpisode={selectEpisode} onSelectSegment={(segment) => navigateSegment(selectedPress, segment)} onSelectFinding={selectFinding} />
-    : undefined
   const context = <>
     <div className="context-summary">
       <div><span>Operational intelligence</span><strong>Process Intelligence</strong><small>{selectedScopeLabel}</small></div>
@@ -326,12 +328,16 @@ function App() {
     {operationsArea && error && overview && <div className="scope-progress scope-progress--error" role="alert">{error} Previous results remain visible.</div>}
     {operationsArea && area !== 'overview' && overview && selectedPress && pressLoading && <div className="scope-progress" role="status"><i aria-hidden="true" />Applying {selectedScopeLabel}; the current timeline remains available.</div>}
     {operationsArea && area !== 'overview' && selectedPress && pressError && !pressLoading && <div className="scope-progress scope-progress--error" role="alert">{pressError}</div>}
-    {overview && area === 'overview' && <OverviewPage overview={overview} selectedPress={selectedPress} />}
-    {overview && activeAnalytics && area === 'operational-analysis' && <OperationalAnalysisPage analytics={activeAnalytics} scopeLabel={analyticsScopeLabel} overview={overview} selectedPress={selectedPress} />}
-    {overview && activeAnalytics && area === 'patterns-episodes' && <PatternsEpisodesPage analytics={activeAnalytics} scopeLabel={analyticsScopeLabel} overview={overview} selectedPress={selectedPress} runComparison={selectedPress && pressDetail?.press.pressKey === selectedPress ? pressDetail.runComparison : undefined} onSelectPress={selectPressScope} onInspectSegment={(segment) => {
-      const source = overview.presses.find(({ pressKey }) => pressKey === selectedPress)?.timelineSegments.find(({ startUtc, endUtc }) => startUtc === segment.startUtc && endUtc === segment.endUtc)
-      if (source && selectedPress) navigateSegment(selectedPress, source)
+    {overview && area === 'overview' && <OverviewPage overview={overview} selectedPress={selectedPress} onInspectInterval={(pressKey, interval) => {
+      const cached = overview.presses.find((press) => press.pressKey === pressKey)?.timelineSegments.find((segment) => segment.startUtc === interval.startUtc && segment.endUtc === interval.endUtc)
+      if (cached) { navigateSegment(pressKey, cached); return }
+      void getRadiusPressEpisodes(pressKey, overview.fromUtc, overview.toUtc).then((detail) => {
+        const source = detail.timelineSegments.find((segment) => segment.startUtc === interval.startUtc && segment.endUtc === interval.endUtc)
+        if (source) navigateSegment(pressKey, source)
+      })
     }} />}
+    {overview && activeAnalytics && area === 'operational-analysis' && <OperationalAnalysisPage analytics={activeAnalytics} scopeLabel={analyticsScopeLabel} overview={overview} selectedPress={selectedPress} />}
+    {overview && activeAnalytics && area === 'patterns-episodes' && <PatternsEpisodesPage analytics={activeAnalytics} scopeLabel={analyticsScopeLabel} overview={overview} selectedPress={selectedPress} />}
     {area === 'intelligent-search' && <IntelligentSearchPage />}
     {area === 'state-classification' && <StateClassificationPage />}
 

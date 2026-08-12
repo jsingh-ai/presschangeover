@@ -70,7 +70,7 @@ describe('operational analytics', () => {
       { category: 'Good', durationSeconds: 1800, occurrenceCount: 3, productionSeconds: 1800 },
       { category: 'Make Ready', durationSeconds: 900, occurrenceCount: 2, productionSeconds: 0 },
       { category: 'Bad', durationSeconds: 300, occurrenceCount: 1, productionSeconds: 0 },
-      { category: 'Safety', durationSeconds: 300, occurrenceCount: 1, productionSeconds: 0 },
+      { category: 'Radius S state', durationSeconds: 300, occurrenceCount: 1, productionSeconds: 0 },
     ])
   })
 

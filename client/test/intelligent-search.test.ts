@@ -11,7 +11,7 @@ Object.assign(globalThis, { React })
 
 function result(overrides: Partial<ClassificationSearchResult>): ClassificationSearchResult {
   return {
-    id: 'exact:M-16', type: 'exact_status', title: 'Make Ready', score: 1_100, matchReason: 'Exact status match', description: 'Published mapping',
+    id: 'exact:M\u001f16\u001fMake Ready', type: 'exact_status', title: 'Make Ready', score: 1_100, matchReason: 'Exact status match', description: 'Published mapping',
     groups: [{ key: 'CHANGEOVER_SETUP', displayName: 'Changeover & Setup' }], family: { key: 'MAKE_READY', displayName: 'Make Ready' },
     eventType: 'M', statusCode: '16', statusDescription: 'Make Ready', needsClassification: false, publishedClassification: true,
     ...overrides,
@@ -27,7 +27,7 @@ describe('Intelligent Search presentation', () => {
     const html = renderToStaticMarkup(createElement(IntelligentSearchPage))
     assert.match(html, /Intelligent Search/)
     assert.match(html, /role="search"/)
-    assert.match(html, /Search statuses, process families, or operating concepts/)
+    assert.match(html, /Search statuses, Process Families, or Operational Groups/)
     assert.match(html, /Make Ready, Plates: Wash, press problem/)
     assert.match(html, /never changes a classification/)
   })
@@ -51,8 +51,15 @@ describe('Intelligent Search presentation', () => {
     const html = renderToStaticMarkup(createElement(IntelligentSearchResults, { response: response([result({})]) }))
     assert.match(html, /Exact Radius status/)
     assert.match(html, /Changeover &amp; Setup/)
-    assert.match(html, /Event \/ code/)
-    assert.match(html, /M \/ 16/)
+    assert.match(html, /Radius recorded/)
+    assert.match(html, /M \/ 16 \/ Make Ready/)
+    assert.match(html, /Classified as Group/)
+    assert.match(html, /Analyze Activity/)
+    assert.match(html, /Find Runs/)
+    assert.match(html, /View Mapping/)
+    assert.match(html, /\/operational-analysis\?activityLevel=exact_status&amp;activityKey=M%1F16%1FMake\+Ready/)
+    assert.match(html, /\/patterns-episodes\?patternTab=builder&amp;patternMode=contains_all/)
+    assert.match(html, /\/administration\/state-classification\?identity=M%1F16%1FMake\+Ready/)
     assert.match(html, /Published v1/)
     assert.match(html, /tabindex="0"/)
   })
@@ -61,19 +68,20 @@ describe('Intelligent Search presentation', () => {
     const family = result({ id: 'family:MAKE_READY', type: 'family', title: 'Make Ready', eventType: null, statusCode: null, statusDescription: null, family: { key: 'MAKE_READY', displayName: 'Make Ready' } })
     const group = result({ id: 'group:PRODUCTION', type: 'group', title: 'Production', eventType: null, statusCode: null, statusDescription: null, family: null, groups: [{ key: 'PRODUCTION', displayName: 'Production' }] })
     const html = renderToStaticMarkup(createElement(IntelligentSearchResults, { response: response([family, group]) }))
-    assert.match(html, /Process family/)
+    assert.match(html, /Process Family/)
     assert.match(html, /Used across groups/)
-    assert.match(html, /Classification group/)
+    assert.match(html, /Operational Group/)
     assert.match(html, /Stable key/)
   })
 
   it('marks unknown observed identities as Needs classification with no inferred hierarchy', () => {
     const unknown = result({ id: 'observed:Z', title: 'Unreviewed operator value', groups: [], family: null, eventType: 'Z', statusCode: 'NEW', statusDescription: 'Unreviewed operator value', needsClassification: true, publishedClassification: false })
     const html = renderToStaticMarkup(createElement(IntelligentSearchResults, { response: response([unknown], 'fresh') }))
-    assert.match(html, /Needs classification/)
-    assert.match(html, /Z \/ NEW/)
-    assert.doesNotMatch(html, /<dt>Group<\/dt>/)
-    assert.doesNotMatch(html, /<dt>Family<\/dt>/)
+    assert.match(html, /Needs Classification/)
+    assert.match(html, /Z \/ NEW \/ Unreviewed operator value/)
+    assert.match(html, /Open exact identity in Classification Admin/)
+    assert.doesNotMatch(html, /<dt>Classified as Group<\/dt>/)
+    assert.doesNotMatch(html, /<dt>Process Family<\/dt>/)
   })
 
   it('renders loading, error, unavailable-enrichment, and no-result states', () => {

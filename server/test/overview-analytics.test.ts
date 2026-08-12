@@ -95,13 +95,13 @@ describe('Overview decision-support accounting', () => {
     assert.equal(allocation.coveragePercent, 50)
   })
 
-  it('derives Run Production, Make Ready, Bad, and Safety only from event type', () => {
+  it('derives broad states from event type without assuming Radius S means Safety', () => {
     const result = buildOverviewDecisionSupport(overview([press('press3', [
       production(900), setup(900),
       { duration: 900, eventType: 'B', code: '95', description: 'Press Problem / Impression', group: 'ADJUSTMENT_QUALITY', family: 'IMPRESSION_REGISTER_PRINT_QUALITY' },
       { duration: 900, eventType: 'S', code: '1', description: 'Safety', group: 'WAITING_IDLE_HOLD', family: 'UNKNOWN' },
     ])])).pressAllocations[0]
-    assert.deepEqual(result.radiusStateBreakdown.map(({ eventType, displayLabel }) => [eventType, displayLabel]), [['G', 'Run Production'], ['M', 'Make Ready'], ['B', 'Bad'], ['S', 'Safety']])
+    assert.deepEqual(result.radiusStateBreakdown.map(({ eventType, displayLabel }) => [eventType, displayLabel]), [['G', 'Run Production'], ['M', 'Make Ready'], ['B', 'Bad'], ['S', 'Radius S state']])
     assert.deepEqual(result.radiusStateBreakdown.map(({ durationSeconds }) => durationSeconds), [900, 900, 900, 900])
   })
 

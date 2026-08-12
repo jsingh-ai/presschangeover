@@ -63,7 +63,7 @@ function category(eventType: string): string {
   if (eventType === 'G') return 'Good'
   if (eventType === 'M') return 'Make Ready'
   if (eventType === 'B') return 'Bad'
-  if (eventType === 'S') return 'Safety'
+  if (eventType === 'S') return 'Radius S state'
   return `Other (${eventType || 'Unclassified'})`
 }
 

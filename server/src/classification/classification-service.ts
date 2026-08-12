@@ -116,10 +116,10 @@ export class ClassificationService {
     return { ...classified, decisionSupport: buildOverviewDecisionSupport(classified) }
   }
 
-  async analyzeActivity(overview: RadiusOverview, selection?: ActivitySelection, pressKey?: RadiusPressKey) {
+  async analyzeActivity(overview: RadiusOverview, selection?: ActivitySelection, pressKey?: RadiusPressKey, evidencePage?: { offset?: number; limit?: number }) {
     const snapshot = await this.repository.getPublished()
     const classified = { ...overview, classificationVersion: snapshot.version, operationalGroups: snapshot.groups, presses: overview.presses.map((press) => ({ ...press, timelineSegments: press.timelineSegments.map((segment) => classifySegment(segment, snapshot)) })) }
-    return analyzeOperationalActivity({ ...classified, presses: pressKey ? classified.presses.filter((press) => press.pressKey === pressKey) : classified.presses }, snapshot, selection)
+    return analyzeOperationalActivity({ ...classified, presses: pressKey ? classified.presses.filter((press) => press.pressKey === pressKey) : classified.presses }, snapshot, selection, evidencePage)
   }
 
   async analyzePatterns(overview: RadiusOverview, input?: { selectedPatternKey?: string; conditions?: ActivitySelection[]; matchMode?: PatternMatchMode; pressKey?: RadiusPressKey }) {

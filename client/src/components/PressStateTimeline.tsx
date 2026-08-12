@@ -37,7 +37,7 @@ function categoryLabel(eventType: string | null): string {
   if (eventType === 'G') return 'Good'
   if (eventType === 'M') return 'Make Ready'
   if (eventType === 'B') return 'Bad'
-  if (eventType === 'S') return 'Safety'
+  if (eventType === 'S') return 'Radius S state'
   return eventType || 'Unavailable'
 }
 
@@ -111,7 +111,7 @@ export function PressStateTimeline({ overview, selectedPress, onInspectSegment, 
       <div><span>Sustained Run rule</span><strong>At least {formatDuration(threshold)}</strong></div>
     </div>
 
-    {timelineView === 'operations' ? <div className="press-state-legend semantic-legend" aria-label="Operational group legend">{overview.operationalGroups?.map((group) => <span key={group.key} style={{ '--semantic-light': group.lightColor, '--semantic-dark': group.darkColor } as React.CSSProperties}>{group.displayName}</span>)}<span className="legend-offline">Data unavailable</span></div> : <div className="press-state-legend" aria-label="Raw Radius state legend"><span className="legend-production">Run Production</span><span className="legend-make-ready">Make Ready</span><span className="legend-bad">Bad</span><span className="legend-safety">Safety</span><span className="legend-other">Other</span><span className="legend-offline">Data unavailable</span><span className="legend-short-run">Short Run attempt</span></div>}
+    {timelineView === 'operations' ? <div className="press-state-legend semantic-legend" aria-label="Operational group legend">{overview.operationalGroups?.map((group) => <span key={group.key} style={{ '--semantic-light': group.lightColor, '--semantic-dark': group.darkColor } as React.CSSProperties}>{group.displayName}</span>)}<span className="legend-offline">Data unavailable</span></div> : <div className="press-state-legend" aria-label="Raw Radius state legend"><span className="legend-production">Run Production</span><span className="legend-make-ready">Make Ready</span><span className="legend-bad">Bad</span><span className="legend-safety">Radius S state</span><span className="legend-other">Other</span><span className="legend-offline">Data unavailable</span><span className="legend-short-run">Short Run attempt</span></div>}
 
     {press.timelineSegments.length === 0 ? <p className="empty-state">No observed Radius state spans are available for {press.displayName} in this period.</p> : <>
       <div className="press-state-timeline-scroll" tabIndex={0} aria-label={`Scrollable chronological Radius timeline for ${press.displayName}`}>

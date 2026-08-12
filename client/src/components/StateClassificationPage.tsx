@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   createClassificationDraft,
   discardClassificationDraft,
@@ -18,6 +18,7 @@ import type {
   ProcessFamilyKey,
   RadiusStateClassification,
 } from '../types/api'
+import { EvidenceDrawerShell } from './EvidenceDrawerShell'
 
 type EffectiveClassification = ClassificationWorkspace['effectiveClassifications'][number]
 
@@ -167,17 +168,25 @@ export function StateClassificationPage() {
   const [mappingFilter, setMappingFilter] = useState('ALL')
   const [reviewFilter, setReviewFilter] = useState('ALL')
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [inspected, setInspected] = useState<string>()
+  const [inspected, setInspected] = useState<string | undefined>(() => new URLSearchParams(typeof window === 'undefined' ? '' : window.location.search).get('identity') ?? undefined)
+  const [pendingConfirmation, setPendingConfirmation] = useState<'publish' | 'discard'>()
   const [bulkGroup, setBulkGroup] = useState<OperationalGroupKey>('ADMIN_UNKNOWN')
   const [activeGroupKey, setActiveGroupKey] = useState<OperationalGroupKey>()
   const [editedGroup, setEditedGroup] = useState<OperationalGroup>()
 
-  async function refresh(quiet = false) {
+  async function refresh(quiet = false, signal?: AbortSignal) {
     if (!quiet) setLoading(true)
     try {
-      const next = await getClassificationWorkspace()
+      const next = await getClassificationWorkspace(signal)
       setWorkspace(next)
-      setActiveGroupKey((current) => current && next.effectiveGroups.some(({ key }) => key === current) ? current : next.effectiveGroups[0]?.key)
+      const query = new URLSearchParams(window.location.search)
+      const requestedGroup = query.get('group') as OperationalGroupKey | null
+      const requestedFamily = query.get('family')
+      const requestedIdentity = query.get('identity')
+      const identity = requestedIdentity ? next.effectiveClassifications.find((item) => item.identity === requestedIdentity) : undefined
+      setActiveGroupKey((current) => identity?.operationalGroupKey ?? (requestedGroup && next.effectiveGroups.some(({ key }) => key === requestedGroup) ? requestedGroup : current && next.effectiveGroups.some(({ key }) => key === current) ? current : next.effectiveGroups[0]?.key))
+      if (requestedFamily && next.families.some(({ key }) => key === requestedFamily)) setFamily(requestedFamily)
+      if (requestedIdentity) setInspected(requestedIdentity)
       setError(undefined)
     } catch {
       setError('State classifications could not be loaded. The Radius data source or application classification store may be unavailable.')
@@ -186,7 +195,20 @@ export function StateClassificationPage() {
     }
   }
 
-  useEffect(() => { void refresh() }, [])
+  useEffect(() => {
+    const controller = new AbortController()
+    void refresh(false, controller.signal)
+    const restore = () => setInspected(new URLSearchParams(window.location.search).get('identity') ?? undefined)
+    window.addEventListener('popstate', restore)
+    return () => { controller.abort(); window.removeEventListener('popstate', restore) }
+  }, [])
+
+  useEffect(() => {
+    if (!workspace?.draft) return
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = '' }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [Boolean(workspace?.draft)])
 
   async function mutate(action: () => Promise<unknown>, success: string) {
     setBusy(true)
@@ -280,7 +302,7 @@ export function StateClassificationPage() {
       defaultTimelineVisibility: data.get('defaultTimelineVisibility') === 'on',
       obsolete: data.get('obsolete') === 'on',
     }), 'Classification details saved to the draft. Validate and publish to make them live.')
-    if (saved) setInspected(undefined)
+    if (saved) closeInspector()
   }
 
   async function validateDraft() {
@@ -302,12 +324,26 @@ export function StateClassificationPage() {
 
   async function publishDraft() {
     if (!workspace?.canEdit || !workspace.draft || !validation?.valid || validatedRevision !== workspace.draft.revision) return
-    if (!window.confirm(`Publish classification version ${workspace.published.version + 1}? This will make the validated draft active across ProcessIntelligence.`)) return
     await mutate(
       () => publishClassificationDraft(workspace.draft!.revision),
       `Published v${workspace.published.version + 1}. It is now the active classification across ProcessIntelligence.`,
     )
+    setPendingConfirmation(undefined)
   }
+
+  const openInspector = (identity: string) => {
+    const url = new URL(window.location.href)
+    url.searchParams.set('identity', identity)
+    window.history.pushState({ processIntelligenceEvidenceDrawer: true }, '', `${url.pathname}?${url.searchParams}`)
+    setInspected(identity)
+  }
+  const closeInspector = useCallback(() => {
+    setInspected(undefined)
+    if ((window.history.state as { processIntelligenceEvidenceDrawer?: boolean } | null)?.processIntelligenceEvidenceDrawer) { window.history.back(); return }
+    const url = new URL(window.location.href)
+    url.searchParams.delete('identity')
+    window.history.replaceState({}, '', `${url.pathname}?${url.searchParams}`)
+  }, [])
 
   if (loading) return <section className="classification-page" aria-busy="true"><header className="classification-admin-hero classification-skeleton"><span /><span /><span /></header><div className="classification-skeleton-grid">{Array.from({ length: 8 }, (_, index) => <span key={index} />)}</div></section>
   if (!workspace) return <section className="panel unavailable-panel"><h1>State Classification unavailable</h1><p>{error}</p><button type="button" onClick={() => void refresh()}>Try again</button></section>
@@ -346,10 +382,11 @@ export function StateClassificationPage() {
       validation={validation}
       validatedRevision={validatedRevision}
       onStartDraft={() => void mutate(() => createClassificationDraft(workspace.published.version), `Draft for v${workspace.published.version + 1} is ready.`)}
-      onDiscard={() => workspace.draft && window.confirm('Discard every unpublished classification change? The active published version will not change.') && void mutate(() => discardClassificationDraft(workspace.draft!.revision), 'Draft discarded. The published classification remains active.')}
+      onDiscard={() => setPendingConfirmation('discard')}
       onValidate={() => void validateDraft()}
-      onPublish={() => void publishDraft()}
+      onPublish={() => setPendingConfirmation('publish')}
     />
+    {pendingConfirmation && <section className="classification-confirmation" role="alertdialog" aria-modal="false" aria-labelledby="classification-confirmation-title"><div><p className="eyebrow">Confirm classification workflow</p><h2 id="classification-confirmation-title">{pendingConfirmation === 'publish' ? `Publish v${workspace.published.version + 1}?` : 'Discard unpublished draft?'}</h2><p>{pendingConfirmation === 'publish' ? 'The validated draft will become active across ProcessIntelligence. Raw Radius evidence is unchanged.' : 'All unpublished classification changes will be removed. The active published version remains unchanged.'}</p></div><div><button type="button" className={pendingConfirmation === 'publish' ? 'primary-action' : 'danger-button'} onClick={() => pendingConfirmation === 'publish' ? void publishDraft() : workspace.draft && void mutate(() => discardClassificationDraft(workspace.draft!.revision), 'Draft discarded. The published classification remains active.').then(() => setPendingConfirmation(undefined))}>{pendingConfirmation === 'publish' ? 'Publish validated draft' : 'Discard draft'}</button><button type="button" className="secondary-button" onClick={() => setPendingConfirmation(undefined)}>Cancel</button></div></section>}
 
     <section className="classification-admin-board" aria-labelledby="classification-board-title">
       <div className="classification-section-heading classification-board-heading">
@@ -408,7 +445,7 @@ export function StateClassificationPage() {
               busy={busy}
               selected={selected.has(item.identity)}
               onToggle={() => toggleSelected(item.identity)}
-              onInspect={() => setInspected(item.identity)}
+              onInspect={() => openInspector(item.identity)}
               onMove={(groupKey) => void move([item], groupKey)}
             />)}
             {visibleItems.length === 0 && <div className="classification-admin-empty"><span aria-hidden="true">⌕</span><strong>No states match in this category</strong><p>Clear filters or choose another operational category.</p></div>}
@@ -434,13 +471,13 @@ export function StateClassificationPage() {
       </div>
     </section>
 
-    {inspector && <div className="drawer-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setInspected(undefined)}><aside className="investigation-side-panel classification-inspector classification-admin-inspector" role="dialog" aria-modal="true" aria-labelledby="classification-inspector-title"><header className="drawer-header"><div><p className="eyebrow">Exact Radius evidence</p><h2 id="classification-inspector-title">Classification inspector</h2></div><button type="button" className="drawer-close" onClick={() => setInspected(undefined)} aria-label="Close classification inspector">×</button></header>
+    {inspector && <EvidenceDrawerShell eyebrow="Evidence · exact Radius identity" title="Classification inspector" context="Source identity is read-only; authorized edits remain draft-only" onClose={closeInspector} className="classification-inspector classification-admin-inspector">
       <form onSubmit={(event) => { event.preventDefault(); void saveInspector(event.currentTarget) }}>
         <section className="drawer-section"><h3>Read-only source identity</h3><dl className="compact-facts"><div><dt>Event type</dt><dd>{inspector.eventType || '—'}</dd></div><div><dt>Status code</dt><dd>{inspector.statusCode ?? '—'}</dd></div><div><dt>Exact description</dt><dd>{inspector.statusDescription || '(empty)'}</dd></div><div><dt>Observed records</dt><dd>{inspector.eventCount.toLocaleString()}</dd></div><div><dt>Last seen</dt><dd>{dateLabel(inspector.lastSeenUtc)}</dd></div></dl></section>
         <section className="drawer-section inspector-fields"><h3>Draft classification</h3><label>Operational category<select name="group" defaultValue={inspector.operationalGroupKey} disabled={!workspace.canEdit}>{workspace.effectiveGroups.map((group) => <option key={group.key} value={group.key}>{group.displayName}</option>)}</select></label><label>Process family<select name="family" defaultValue={inspector.processFamilyKey} disabled={!workspace.canEdit}>{workspace.families.map((item) => <option key={item.key} value={item.key}>{item.displayName}</option>)}</select></label><label>Display label<input name="displayLabel" defaultValue={inspector.displayLabel ?? ''} disabled={!workspace.canEdit} /></label><label>Internal explanation<textarea name="explanation" defaultValue={inspector.explanation} disabled={!workspace.canEdit} /></label><label>Mapping confidence<select name="confidence" defaultValue={inspector.confidence} disabled={!workspace.canEdit}><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select></label><label className="check-field"><input name="needsReview" type="checkbox" defaultChecked={inspector.needsReview} disabled={!workspace.canEdit} />Needs review</label><label className="check-field"><input name="defaultTimelineVisibility" type="checkbox" defaultChecked={inspector.defaultTimelineVisibility} disabled={!workspace.canEdit} />Visible on timeline by default</label><label className="check-field"><input name="obsolete" type="checkbox" defaultChecked={inspector.obsolete} disabled={!workspace.canEdit} />Obsolete source state</label></section>
-        <footer className="drawer-actions"><button type="submit" disabled={!workspace.canEdit || busy}>Save to draft</button><button type="button" className="secondary-button" onClick={() => setInspected(undefined)}>Close</button></footer>
+        <footer className="drawer-actions"><button type="submit" disabled={!workspace.canEdit || busy}>Save to draft</button><button type="button" className="secondary-button" onClick={closeInspector}>Close</button></footer>
       </form>
-    </aside></div>}
+    </EvidenceDrawerShell>}
 
     <section className="classification-version-history">
       <div className="classification-section-heading"><div><p className="eyebrow">Version record</p><h2>Published history and audit</h2><p>The highest published version is the configuration currently used by the application.</p></div></div>

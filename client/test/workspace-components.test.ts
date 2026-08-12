@@ -127,6 +127,6 @@ describe('workspace components', () => {
     assert.match(adjacentHtml, /Next state/)
     assert.doesNotMatch(adjacentHtml, /Previous state[^]*disabled/)
     assert.match(episodeHtml, /Operational episode/)
-    assert.match(findingHtml, /Why this needs attention/)
+    assert.match(findingHtml, /Why this is worth reviewing/)
   })
 })
