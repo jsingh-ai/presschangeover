@@ -1867,6 +1867,24 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
 .intelligent-search-guide details { overflow: hidden; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: .45rem; }
 .intelligent-search-guide summary { padding: .7rem .8rem; color: var(--text-strong); cursor: pointer; font-size: .72rem; font-weight: 850; }
 .intelligent-search-guide summary small { margin-left: .35rem; color: var(--muted); font-size: .58rem; font-weight: 650; }
+.search-index { display: grid; gap: .6rem; padding: 0 .75rem .75rem; }
+.search-index-intro { margin: 0; color: var(--muted); font-size: .6rem; line-height: 1.45; }
+.search-index-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .4rem; }
+.search-index-tabs button { display: grid; gap: .12rem; padding: .6rem; color: var(--muted-strong); background: var(--surface); border: 1px solid var(--border); border-radius: .4rem; cursor: pointer; text-align: left; }
+.search-index-tabs button strong { font-size: .68rem; }
+.search-index-tabs button small { color: var(--muted); font-size: .55rem; }
+.search-index-tabs button.active { color: var(--primary); background: var(--primary-soft); border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
+.search-index-filter { display: grid; grid-template-columns: auto minmax(12rem, 1fr); align-items: center; gap: .6rem; color: var(--muted-strong); font-size: .62rem; font-weight: 800; }
+.search-index-filter input { min-width: 0; padding: .52rem .6rem; color: var(--text); background: var(--surface); border: 1px solid var(--border-strong); border-radius: .4rem; font: inherit; }
+.search-index-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .35rem; max-height: 27rem; overflow-y: auto; padding: .15rem; }
+.search-index-list--identities { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.search-index-list > button { display: grid; align-content: start; gap: .15rem; min-height: 4rem; padding: .55rem .6rem; color: var(--text); background: var(--surface); border: 1px solid var(--border); border-radius: .38rem; cursor: pointer; text-align: left; }
+.search-index-list > button:hover, .search-index-list > button:focus-visible { border-color: var(--primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 15%, transparent); }
+.search-index-list > button strong { color: var(--text-strong); font-size: .65rem; }
+.search-index-list > button small { color: var(--muted); font-size: .55rem; line-height: 1.4; }
+.search-index-state, .search-index-note { margin: 0; padding: .8rem; color: var(--muted); background: var(--surface); border: 1px dashed var(--border-strong); border-radius: .4rem; font-size: .64rem; }
+.search-index-note { color: var(--muted-strong); background: color-mix(in srgb, #d69220 12%, var(--surface)); border-style: solid; }
+.search-index-count { margin: 0; color: var(--muted); font-size: .57rem; }
 .search-example-groups, .search-destination-guide { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .55rem; padding: 0 .75rem .75rem; }
 .search-example-groups article, .search-destination-guide article { display: grid; align-content: start; gap: .25rem; padding: .65rem; background: var(--surface); border: 1px solid var(--border); border-radius: .4rem; }
 .search-example-groups h3 { font-size: .7rem; }
@@ -1914,6 +1932,7 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
 @media (max-width: 860px) {
   .intelligent-search-hero { grid-template-columns: 1fr; gap: 1.2rem; }
   .search-guide-paths, .search-example-groups, .search-destination-guide { grid-template-columns: 1fr; }
+  .search-index-list, .search-index-list--identities { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .search-press-scope { grid-template-columns: 1fr; }
   .search-press-scope > div[role="group"] { justify-content: flex-start; }
 }
@@ -1922,6 +1941,8 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
   .intelligent-search-form > div { grid-template-columns: 1fr; }
   .intelligent-search-guide > header, .intelligent-search-results > header { display: grid; }
   .intelligent-search-guide > header > a { justify-self: start; }
+  .search-index-tabs, .search-index-list, .search-index-list--identities { grid-template-columns: 1fr; }
+  .search-index-filter { grid-template-columns: 1fr; }
   .search-result-scope { justify-items: start; text-align: left; }
   .search-result-heading { display: grid; }
   .search-result-heading small { white-space: normal; }

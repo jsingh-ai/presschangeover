@@ -3,9 +3,9 @@ import { readFile } from 'node:fs/promises'
 import { describe, it } from 'node:test'
 import React, { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { searchClassifications } from '../src/api/process-intelligence-api'
-import { IntelligentSearchPage, IntelligentSearchResults } from '../src/components/IntelligentSearchPage'
-import type { ClassificationSearchResponse, ClassificationSearchResult } from '../src/types/api'
+import { getClassificationFamilies, getClassificationGroups, getClassificationIdentities, searchClassifications } from '../src/api/process-intelligence-api'
+import { IntelligentSearchIndex, IntelligentSearchPage, IntelligentSearchResults } from '../src/components/IntelligentSearchPage'
+import type { ClassificationSearchResponse, ClassificationSearchResult, ClassificationWorkspace, OperationalGroup, ProcessFamily } from '../src/types/api'
 
 Object.assign(globalThis, { React })
 
@@ -30,7 +30,12 @@ describe('Intelligent Search presentation', () => {
     assert.match(html, /What work, Radius wording, or code are you looking for/)
     assert.match(html, /Try Make Ready, Cleaning, Register, or 150/)
     assert.match(html, /What are you trying to find/)
-    assert.match(html, /Browse search examples/)
+    assert.match(html, /Browse the search index/)
+    assert.match(html, /every exact identity currently observed in the Radius data/)
+    assert.match(html, /Types of Work/)
+    assert.match(html, /Specific Work/)
+    assert.match(html, /Radius Codes/)
+    assert.match(html, /Quick search examples/)
     assert.match(html, /Type of work/)
     assert.match(html, /Specific work/)
     assert.match(html, /Radius wording or code/)
@@ -55,6 +60,36 @@ describe('Intelligent Search presentation', () => {
       assert.match(requested, /limit=10/)
       assert.equal(body.results[0].type, 'exact_status')
     } finally { globalThis.fetch = originalFetch }
+  })
+
+  it('loads the three read-only index sources independently', async () => {
+    const originalFetch = globalThis.fetch
+    const requested: string[] = []
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      requested.push(url)
+      const body = url.endsWith('/groups') ? [] : url.endsWith('/process-families') ? [] : []
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }) as typeof fetch
+    try {
+      await Promise.all([getClassificationGroups(), getClassificationFamilies(), getClassificationIdentities()])
+      assert.deepEqual(requested.sort(), ['/api/classification/groups', '/api/classification/identities', '/api/classification/process-families'])
+    } finally { globalThis.fetch = originalFetch }
+  })
+
+  it('renders every available index kind as understandable selectable entries', () => {
+    const groups: OperationalGroup[] = [{ id: 'group-changeover', key: 'CHANGEOVER_SETUP', displayName: 'Changeover & Setup', description: 'Job setup work.', lightColor: '#123456', darkColor: '#abcdef', icon: 'changeover', sortOrder: 20 }]
+    const families: ProcessFamily[] = [{ id: 'family-wash', key: 'CLEANING_WASH', displayName: 'Cleaning / Wash', description: 'Cleaning work.', sortOrder: 30 }]
+    const identities: ClassificationWorkspace['observedIdentities'] = [{ identity: 'M\u001f16\u001fMake Ready', eventType: 'M', statusCode: '16', statusDescription: 'Make Ready', eventCount: 42, lastSeenUtc: '2026-08-12T12:00:00.000Z' }]
+    const initialData = { groups, families, identities }
+    const groupHtml = renderToStaticMarkup(createElement(IntelligentSearchIndex, { initialData, initialKind: 'groups', onPick() {} }))
+    const familyHtml = renderToStaticMarkup(createElement(IntelligentSearchIndex, { initialData, initialKind: 'families', onPick() {} }))
+    const identityHtml = renderToStaticMarkup(createElement(IntelligentSearchIndex, { initialData, initialKind: 'identities', onPick() {} }))
+    assert.match(groupHtml, /Changeover &amp; Setup/)
+    assert.match(groupHtml, /1 available/)
+    assert.match(familyHtml, /Cleaning \/ Wash/)
+    assert.match(identityHtml, /Make Ready/)
+    assert.match(identityHtml, /M \/ 16 · observed 42 times/)
   })
 
   it('renders exact-status hierarchy and preserved Radius identity metadata', () => {

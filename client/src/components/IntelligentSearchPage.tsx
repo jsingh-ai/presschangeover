@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
-import { searchClassifications } from '../api/process-intelligence-api'
+import { getClassificationFamilies, getClassificationGroups, getClassificationIdentities, searchClassifications } from '../api/process-intelligence-api'
 import { pressFromLocation } from '../navigation'
-import type { ActivityLevel, ClassificationSearchResponse, ClassificationSearchResult, RadiusPressKey } from '../types/api'
+import type { ActivityLevel, ClassificationSearchResponse, ClassificationSearchResult, ClassificationWorkspace, OperationalGroup, ProcessFamily, RadiusPressKey } from '../types/api'
 
 const SEARCH_PRESSES: Array<{ key: RadiusPressKey; label: string }> = [3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15].map((number) => ({ key: `press${number}` as RadiusPressKey, label: `Press ${number}` }))
 const SEARCH_EXAMPLES = [
@@ -9,6 +9,9 @@ const SEARCH_EXAMPLES = [
   { title: 'Specific work', copy: 'Use a Process Family when you know the kind of work involved.', values: ['Cleaning / Wash', 'Impression / Register / Print Quality', 'Make Ready'] },
   { title: 'Radius wording or code', copy: 'Use the exact operator wording or a raw status code when you have it.', values: ['Plates: Wash', 'Run Production', '150'] },
 ]
+
+type SearchIndexKind = 'groups' | 'families' | 'identities'
+interface SearchIndexData { groups: OperationalGroup[]; families: ProcessFamily[]; identities: ClassificationWorkspace['observedIdentities'] }
 
 function resultTypeLabel(result: ClassificationSearchResult): string {
   if (result.needsClassification) return 'Needs Classification'
@@ -73,11 +76,55 @@ export function IntelligentSearchResults({ response, loading = false, error, pre
   </section>
 }
 
+export function IntelligentSearchIndex({ onPick, initialData, initialKind = 'groups' }: { onPick(value: string): void; initialData?: SearchIndexData; initialKind?: SearchIndexKind }) {
+  const [data, setData] = useState<SearchIndexData>(initialData ?? { groups: [], families: [], identities: [] })
+  const [kind, setKind] = useState<SearchIndexKind>(initialKind)
+  const [filter, setFilter] = useState('')
+  const [loading, setLoading] = useState(!initialData)
+  const [partial, setPartial] = useState(false)
+
+  useEffect(() => {
+    if (initialData) return
+    const controller = new AbortController()
+    void Promise.allSettled([getClassificationGroups(controller.signal), getClassificationFamilies(controller.signal), getClassificationIdentities(controller.signal)]).then(([groups, families, identities]) => {
+      if (controller.signal.aborted) return
+      setData({
+        groups: groups.status === 'fulfilled' ? groups.value : [],
+        families: families.status === 'fulfilled' ? families.value : [],
+        identities: identities.status === 'fulfilled' ? identities.value : [],
+      })
+      setPartial([groups, families, identities].some(({ status }) => status === 'rejected'))
+      setLoading(false)
+    })
+    return () => controller.abort()
+  }, [initialData])
+
+  const normalized = filter.trim().toLocaleLowerCase()
+  const items = kind === 'groups'
+    ? [...data.groups].sort((a, b) => a.sortOrder - b.sortOrder).map((item) => ({ id: item.id, title: item.displayName, meta: item.description, search: item.displayName }))
+    : kind === 'families'
+      ? [...data.families].sort((a, b) => a.sortOrder - b.sortOrder || a.displayName.localeCompare(b.displayName)).map((item) => ({ id: item.id, title: item.displayName, meta: item.description, search: item.displayName }))
+      : [...data.identities].sort((a, b) => a.statusDescription.localeCompare(b.statusDescription) || (a.statusCode ?? '').localeCompare(b.statusCode ?? '', undefined, { numeric: true })).map((item) => ({ id: item.identity, title: item.statusDescription || '(empty Radius description)', meta: `${item.eventType || '—'} / ${item.statusCode || 'No code'} · observed ${item.eventCount.toLocaleString()} ${item.eventCount === 1 ? 'time' : 'times'}`, search: item.statusDescription || item.statusCode || item.eventType }))
+  const visible = normalized ? items.filter((item) => `${item.title} ${item.meta}`.toLocaleLowerCase().includes(normalized)) : items
+  const counts = { groups: data.groups.length, families: data.families.length, identities: data.identities.length }
+  const labels: Record<SearchIndexKind, string> = { groups: 'Types of Work', families: 'Specific Work', identities: 'Radius Codes' }
+
+  return <div className="search-index">
+    <p className="search-index-intro">Types of Work and Specific Work come from the published classification. Radius Codes lists every exact identity currently observed in the Radius data.</p>
+    <div className="search-index-tabs" role="tablist" aria-label="Search index sections">{(['groups', 'families', 'identities'] as const).map((key) => <button type="button" role="tab" aria-selected={kind === key} className={kind === key ? 'active' : ''} key={key} onClick={() => { setKind(key); setFilter('') }}><strong>{labels[key]}</strong><small>{loading ? 'Loading…' : `${counts[key]} available`}</small></button>)}</div>
+    <label className="search-index-filter">Filter {labels[kind]}<input type="search" value={filter} onChange={(event) => setFilter(event.target.value)} placeholder={kind === 'identities' ? 'Filter by description, event type, or code' : `Filter ${labels[kind].toLocaleLowerCase()}`} /></label>
+    {partial && <p className="search-index-note">Part of the index is temporarily unavailable. The available sections remain usable.</p>}
+    {loading ? <div className="search-index-state" role="status">Loading the published index…</div> : visible.length ? <div className={`search-index-list search-index-list--${kind}`}>{visible.map((item) => <button type="button" key={item.id} data-search-value={item.search} onClick={() => onPick(item.search)}><strong>{item.title}</strong><small>{item.meta}</small></button>)}</div> : <div className="search-index-state">No {labels[kind].toLocaleLowerCase()} match this filter.</div>}
+    {!loading && <p className="search-index-count">Showing {visible.length} of {items.length} {labels[kind].toLocaleLowerCase()}. Click any item to search for it.</p>}
+  </div>
+}
+
 function SearchGuide({ onExample, pressKey }: { onExample(value: string): void; pressKey?: RadiusPressKey }) {
   return <section className="intelligent-search-guide" aria-labelledby="search-guide-title">
     <header><div><span className="eyebrow">Start here</span><h2 id="search-guide-title">What are you trying to find?</h2><p>Search helps you find a work term first, then opens the right page with that term already selected.</p></div><a href={launchUrl('/patterns-episodes', { press: pressKey, patternTab: 'discovered' })}>Browse repeated patterns</a></header>
     <div className="search-guide-paths"><article><span>1</span><div><strong>Find the name</strong><p>Search a type of work, specific Process Family, Radius description, or code.</p></div></article><article><span>2</span><div><strong>Choose the investigation</strong><p>Analyze its time, start a three-step pattern, or review how it is classified.</p></div></article><article><span>3</span><div><strong>Keep the press focus</strong><p>{pressKey ? `${pressLabel(pressKey)} will stay selected when you open evidence.` : 'Choose a press below when the question is about one machine.'}</p></div></article></div>
-    <details open><summary>Browse search examples <small>click any example to search</small></summary><div className="search-example-groups">{SEARCH_EXAMPLES.map((group) => <article key={group.title}><h3>{group.title}</h3><p>{group.copy}</p><div>{group.values.map((value) => <button type="button" key={value} onClick={() => onExample(value)}>{value}</button>)}</div></article>)}</div></details>
+    <details open><summary>Browse the search index <small>open a section and pick what you recognize</small></summary><IntelligentSearchIndex onPick={onExample} /></details>
+    <details><summary>Quick search examples <small>use these when you just want a starting point</small></summary><div className="search-example-groups">{SEARCH_EXAMPLES.map((group) => <article key={group.title}><h3>{group.title}</h3><p>{group.copy}</p><div>{group.values.map((value) => <button type="button" key={value} onClick={() => onExample(value)}>{value}</button>)}</div></article>)}</div></details>
     <details><summary>Which page should I open after searching?</summary><div className="search-destination-guide"><article><strong>Operational Analysis</strong><span>Use this to see when one activity happened and how much time it used.</span></article><article><strong>Patterns &amp; Episodes</strong><span>Use this to add the result as one step in a journey of at least three steps.</span></article><article><strong>Classification</strong><span>Use this to understand why an exact Radius status has its current Group and Family.</span></article></div></details>
   </section>
 }

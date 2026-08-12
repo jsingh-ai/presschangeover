@@ -15,6 +15,8 @@ import type {
   ProcessFamilyKey,
   MappingConfidence,
   ClassificationSearchResponse,
+  OperationalGroup,
+  ProcessFamily,
   ActivityAnalysis,
   ActivitySelection,
   PatternAnalysis,
@@ -166,6 +168,9 @@ export function getRadiusEpisode(
 }
 
 export function getClassificationWorkspace(signal?: AbortSignal) { return getJson<ClassificationWorkspace>('/api/classification/workspace', signal) }
+export function getClassificationGroups(signal?: AbortSignal) { return getJson<OperationalGroup[]>('/api/classification/groups', signal) }
+export function getClassificationFamilies(signal?: AbortSignal) { return getJson<ProcessFamily[]>('/api/classification/process-families', signal) }
+export function getClassificationIdentities(signal?: AbortSignal) { return getJson<ClassificationWorkspace['observedIdentities']>('/api/classification/identities', signal) }
 export function searchClassifications(query: string, limit = 10, signal?: AbortSignal) {
   const parameters = new URLSearchParams({ q: query, limit: String(limit) })
   return getJson<ClassificationSearchResponse>(`/api/classification/search?${parameters.toString()}`, signal)
