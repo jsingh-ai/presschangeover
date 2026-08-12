@@ -184,6 +184,8 @@ report.interactions.overviewTelemetry = await evaluate(`(() => {
     eventMarkerCount: timeline.querySelectorAll('.synchronized-timeline__event').length,
   }
 })()`)
+await evaluate(`document.querySelector('.overview-gantt')?.scrollIntoView({ block: 'start' })`)
+await delay(300)
 await capture('1440-overview-telemetry')
 
 await evaluate(`document.querySelector('.overview-selected-period .primary-action')?.click()`)
@@ -194,8 +196,8 @@ await waitFor(`!document.querySelector('.evidence-drawer-shell')`, 'Escape close
 report.interactions.drawerClosed = true
 
 await navigate(routeUrl('/overview', { preset: 'custom', fromUtc: longStart.toISOString(), toUtc: customEnd.toISOString(), press: 'press5' }), routes[0].ready, 'long custom range')
-report.interactions.longRange = await evaluate(`({ limitation: document.querySelector('.telemetry-range-note')?.textContent, radiusTrack: Boolean(document.querySelector('[aria-label="Radius recorded intervals"]')), semanticTrack: Boolean(document.querySelector('[aria-label="ProcessIntelligence intervals"]')) })`)
-if (!report.interactions.longRange.limitation) throw new Error('Long-range telemetry limitation was not visible')
+report.interactions.longRange = await evaluate(`({ limitation: document.querySelector('.telemetry-range-note')?.textContent, radiusTrack: Boolean(document.querySelector('[aria-label="Radius recorded intervals"]')), groupTrack: Boolean(document.querySelector('[aria-label="Operational Group intervals"]')), familyTrack: Boolean(document.querySelector('[aria-label="Process Family intervals"]')) })`)
+if (!report.interactions.longRange.limitation || !report.interactions.longRange.radiusTrack || !report.interactions.longRange.groupTrack || !report.interactions.longRange.familyTrack) throw new Error('Long-range Radius/Group/Family chronology was incomplete')
 
 await navigate(routeUrl('/operational-analysis', matrixRange), routes[1].ready, 'Operational occurrence evidence')
 const occurrence = await evaluate(`Boolean(document.querySelector('.activity-evidence tbody tr'))`)
@@ -233,6 +235,8 @@ if (occurrence) {
       summary: document.querySelector('.physical-signature-facts')?.textContent,
     }
   })()`)
+  await evaluate(`document.querySelector('.physical-signature-summary')?.scrollIntoView({ block: 'start' })`)
+  await delay(300)
   await capture('1440-operational-focused-telemetry')
   await evaluate(`document.querySelector('.physical-signature-summary .primary-action')?.click()`)
   await waitFor(`Boolean(document.querySelector('.evidence-drawer-shell'))`, 'occurrence drawer')
@@ -272,6 +276,8 @@ report.interactions.runTelemetry = await evaluate(`(() => {
     physicalEvents: labels.includes('Physical Events event markers'),
   }
 })()`)
+await evaluate(`document.querySelector('.evidence-drawer-shell .synchronized-timeline')?.scrollIntoView({ block: 'start' })`)
+await delay(300)
 await capture('1440-pattern-run-telemetry')
 await command('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' })
 await waitFor(`!document.querySelector('.evidence-drawer-shell')`, 'Run drawer close')
