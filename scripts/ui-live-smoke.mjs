@@ -356,7 +356,7 @@ await waitFor(`(() => {
     && labels.includes('Physical Motion intervals')
     && labels.some((label) => label?.startsWith('Actual Speed.'))
     && labels.includes('Context changes event markers')
-    && labels.includes('Physical Events event markers')
+    && (labels.includes('Physical Events event markers') || drawer.textContent.includes('No deck, register, impression, wash, or pump changes were observed in this range.'))
 })()`, 'unified Run telemetry timeline')
 report.interactions.runTelemetry = await evaluate(`(() => {
   const drawer = document.querySelector('.evidence-drawer-shell')
@@ -371,7 +371,7 @@ report.interactions.runTelemetry = await evaluate(`(() => {
     family: labels.includes('Process Family intervals'),
     motion: labels.includes('Physical Motion intervals'),
     speed: labels.some((label) => label?.startsWith('Actual Speed.')),
-    physicalEvents: labels.includes('Physical Events event markers'),
+    physicalEvents: labels.includes('Physical Events event markers') ? 'markers shown' : drawer.textContent.includes('No deck, register, impression, wash, or pump changes were observed in this range.') ? 'no changes observed' : 'missing',
   }
 })()`)
 await evaluate(`document.querySelector('.evidence-drawer-shell .synchronized-timeline')?.scrollIntoView({ block: 'start' })`)
