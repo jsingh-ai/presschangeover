@@ -5,11 +5,11 @@ import React, { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { runLayerIntervals } from '../src/components/RunEvidenceDrawer'
 import { radiusChangeTrack, timelineFamilyLabel } from '../src/components/RadiusOverview'
-import { clusterTimelineEvents, SynchronizedTimeline } from '../src/components/SynchronizedTimeline'
-import { contextEventTrack, contextIntervalTracks, curatedCategoriesForCapabilities, physicalChangeLabel, physicalEventTrack, type PressTelemetryEvidenceState } from '../src/components/TelemetryEvidenceTimeline'
+import { clusterTimelineEvents, numericPaths, SynchronizedTimeline } from '../src/components/SynchronizedTimeline'
+import { actualSpeedTrack, contextDisplayValue, contextEventTrack, contextIntervalTracks, curatedCategoriesForCapabilities, mergeTelemetryEvidenceChunks, physicalChangeLabel, physicalEventTrack, telemetryEvidenceChunks, type PressTelemetryEvidenceState } from '../src/components/TelemetryEvidenceTimeline'
 import { UnifiedProcessTimeline } from '../src/components/UnifiedProcessTimeline'
 import type { OperationalRun, OverviewTimelineInterval } from '../src/types/api'
-import type { CuratedPhysicalEvidence, ProductionContextEvidence, SemanticSignalEvidence, SignalCapability, TelemetryChange } from '../src/types/evidence'
+import type { CuratedPhysicalEvidence, PressSpeedEvidence, ProductionContextEvidence, SemanticSignalEvidence, SignalCapability, TelemetryChange } from '../src/types/evidence'
 
 Object.assign(globalThis, { React })
 
@@ -120,6 +120,40 @@ describe('primary telemetry visual integration', () => {
     assert.match(overviewSource, /radiusEventTrack=\{radiusEvents\}/)
     assert.doesNotMatch(overviewSource, /Open exact evidence/)
     assert.match(appSource, /!\(area === 'overview' && investigation\.mode === 'segment'\)/)
+    assert.match(appSource, /window\.setInterval\(refreshLiveRange, 60_000\)/)
+  })
+
+  it('composes exact two-hour historian slices across the selected range', () => {
+    const chunks = telemetryEvidenceChunks('2026-08-11T12:00:00.000Z', '2026-08-11T16:00:00.000Z')
+    assert.deepEqual(chunks, [
+      { fromUtc: '2026-08-11T12:00:00.000Z', toUtc: '2026-08-11T14:00:00.000Z' },
+      { fromUtc: '2026-08-11T14:00:00.000Z', toUtc: '2026-08-11T16:00:00.000Z' },
+    ])
+    const speed = (from: string, to: string, samples: PressSpeedEvidence['actual']['samples']): PressSpeedEvidence => ({ pressKey: 'press5', displayName: 'Press 5', sourceKey: 'press5', fromUtc: from, toUtc: to, actual: { canonicalId: 'machine.speed.actual', observationState: 'SUPPORTED_WITH_OBSERVATIONS', sourceUnit: null, canonicalUnitStatus: 'unverified', samples }, setpoint: null })
+    const firstSample = { ...value('2026-08-11T13:59:59.000Z', 800), valueKind: 'numeric' as const, value: 800 }
+    const boundarySample = { ...value('2026-08-11T14:00:00.000Z', 800), valueKind: 'numeric' as const, value: 800 }
+    const merged = mergeTelemetryEvidenceChunks([
+      { speed: speed(chunks[0]!.fromUtc, chunks[0]!.toUtc, [firstSample, boundarySample]), error: false },
+      { speed: speed(chunks[1]!.fromUtc, chunks[1]!.toUtc, [boundarySample, { ...value('2026-08-11T15:00:00.000Z', 0), valueKind: 'numeric' as const, value: 0 }]), error: false },
+    ], chunks[0]!.fromUtc, chunks[1]!.toUtc)
+    assert.equal(merged.speed?.actual.samples.length, 3)
+    assert.equal(merged.speed?.fromUtc, '2026-08-11T12:00:00.000Z')
+    assert.equal(merged.speed?.toUtc, '2026-08-11T16:00:00.000Z')
+  })
+
+  it('renders actual speed as one last-observed step trace and rejects zero-array context identifiers', () => {
+    const samples = [
+      { ...value('2026-08-11T12:00:00.000Z', 800), valueKind: 'numeric' as const, value: 800 },
+      { ...value('2026-08-11T12:05:00.000Z', 800), valueKind: 'numeric' as const, value: 800 },
+      { ...value('2026-08-11T12:10:00.000Z', 0), valueKind: 'numeric' as const, value: 0 },
+    ]
+    const speed = { pressKey: 'press5', displayName: 'Press 5', sourceKey: 'press5', fromUtc, toUtc, actual: { canonicalId: 'machine.speed.actual', observationState: 'SUPPORTED_WITH_OBSERVATIONS', sourceUnit: null, canonicalUnitStatus: 'unverified', samples }, setpoint: null } as PressSpeedEvidence
+    const track = actualSpeedTrack(speed)!
+    assert.equal(track.connectObservedGaps, true)
+    assert.equal(track.interpolation, 'step')
+    assert.equal(numericPaths(samples, Date.parse(fromUtc), 10 * 60_000, 1000, 88, track.connectObservedGaps, track.interpolation).paths.length, 1)
+    assert.deepEqual(contextDisplayValue('[0, 0, 0, 0, 0, 0]'), { label: 'No usable source value', usable: false })
+    assert.deepEqual(contextDisplayValue('913231'), { label: '913231', usable: true })
   })
 
   it('explains published Unknown-family mappings without hiding review-required identities', () => {

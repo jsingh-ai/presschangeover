@@ -166,7 +166,7 @@ describe('Radius state hierarchy Overview', () => {
     assert.match(html, /Synchronized process evidence/)
     assert.match(html, />Radius state</)
     assert.match(html, />Process group</)
-    assert.match(html, /Press 11 synchronized evidence/)
+    assert.match(html, /Press 11 complete selected-range synchronized evidence/)
     assert.match(html, /Scrollable wall-clock timeline/)
     assert.match(html, /Routine Process/)
     assert.match(html, /Adjustment &amp; Quality/)
@@ -188,17 +188,27 @@ describe('Radius state hierarchy Overview', () => {
     assert.match(source, /selectedId === item\.id/)
   })
 
-  it('keeps long-range Radius chronology and integrates bounded physical detail on-page', () => {
+  it('integrates the complete selected telemetry range through 24 hours', () => {
     const modified = structuredClone(overview)
     modified.toUtc = '2026-08-11T16:00:00.000Z'
     const html = renderToStaticMarkup(createElement(RadiusOverview, { overview: modified, selectedPress: 'press11' }))
-    assert.match(html, /Select any interval to update the bounded telemetry window below/)
-    assert.match(html, /Focused telemetry for the selected interval/)
-    assert.match(html, /bounded to two hours/)
+    assert.match(html, /Telemetry covers the complete selected range/)
+    assert.match(html, /No two-hour focus window is substituted/)
+    assert.match(html, /complete selected-range synchronized evidence/)
+    assert.doesNotMatch(html, /Focused telemetry for the selected interval/)
     assert.match(html, /Radius recorded/)
     assert.match(html, /Operational Group/)
     assert.match(html, /Process Family/)
     assert.doesNotMatch(html, /Open exact evidence/)
+  })
+
+  it('keeps an explicit bounded fallback only beyond the supported 24-hour telemetry range', () => {
+    const modified = structuredClone(overview)
+    modified.toUtc = '2026-08-12T14:00:01.000Z'
+    const html = renderToStaticMarkup(createElement(RadiusOverview, { overview: modified, selectedPress: 'press11' }))
+    assert.match(html, /This range exceeds 24 hours/)
+    assert.match(html, /Focused telemetry for the selected interval/)
+    assert.match(html, /bounded to two hours/)
   })
 
   it('keeps the responsive light/dark implementation free of page-level overflow', () => {

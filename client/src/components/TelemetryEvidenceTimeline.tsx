@@ -1,12 +1,20 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { getCuratedPhysicalEvidence, getPressMotion, getPressSpeed, getPressTelemetryCapabilities, getProductionContext } from '../api/process-intelligence-api'
 import { formatPlantDateTime } from '../time-ranges'
 import type { RadiusPressKey } from '../types/api'
-import type { CuratedPhysicalEvidence, PhysicalEvidenceCategory, PressMotionEvidence, PressSpeedEvidence, PressTelemetryCapabilities, ProductionContextEvidence, ProductionContextField, SemanticSignalEvidence, SignalCapability, TelemetryChange } from '../types/evidence'
+import type { ContextChange, CuratedPhysicalEvidence, PhysicalEvidenceCategory, PressMotionEvidence, PressSpeedEvidence, PressTelemetryCapabilities, ProductionContextEvidence, ProductionContextField, SemanticSignalEvidence, SignalCapability, SpeedSignalEvidence, TelemetryChange, TimedNumericSample, TimedStateInterval, TimedTelemetryValue } from '../types/evidence'
 import type { TimelineEvent, TimelineEventTrack, TimelineIntervalTrack, TimelineNumericTrack } from './SynchronizedTimeline'
 
 const TWO_HOURS_MS = 2 * 60 * 60 * 1_000
+export const MAX_FULL_TELEMETRY_RANGE_MS = 24 * 60 * 60 * 1_000
 export const CONTEXT_LABELS: Record<ProductionContextField, string> = { job: 'Job', order: 'Order', recipe: 'Recipe', customer: 'Customer', material: 'Material', roll: 'Roll' }
+
+export function contextDisplayValue(value: unknown): { label: string; usable: boolean } {
+  const raw = String(value ?? '')
+  if (!raw.trim()) return { label: 'Blank source value', usable: false }
+  if (/^\[\s*0(?:\s*,\s*0)*\s*\]$/.test(raw)) return { label: 'No usable source value', usable: false }
+  return { label: raw, usable: true }
+}
 
 export interface BoundedEvidenceRange { fromUtc: string; toUtc: string; focused: boolean }
 
@@ -48,32 +56,183 @@ export interface PressTelemetryEvidenceState {
 
 interface StoredEvidence extends Omit<PressTelemetryEvidenceState, 'range'> { key: string }
 
-export function usePressTelemetryEvidence(pressKey: RadiusPressKey | undefined, fromUtc: string, toUtc: string, options: { enabled?: boolean; padShortRange?: boolean } = {}): PressTelemetryEvidenceState {
+interface EvidenceChunk { fromUtc: string; toUtc: string }
+interface ChunkEvidence {
+  context?: ProductionContextEvidence
+  motion?: PressMotionEvidence
+  speed?: PressSpeedEvidence
+  physical?: CuratedPhysicalEvidence
+  error: boolean
+}
+
+export function telemetryEvidenceChunks(fromUtc: string, toUtc: string): EvidenceChunk[] {
+  const from = Date.parse(fromUtc)
+  const to = Date.parse(toUtc)
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return []
+  const chunks: EvidenceChunk[] = []
+  let cursor = from
+  while (cursor < to) {
+    const nextBoundary = (Math.floor(cursor / TWO_HOURS_MS) + 1) * TWO_HOURS_MS
+    const chunkEnd = Math.min(to, nextBoundary)
+    chunks.push({ fromUtc: new Date(cursor).toISOString(), toUtc: new Date(chunkEnd).toISOString() })
+    cursor = chunkEnd
+  }
+  return chunks
+}
+
+function uniqueBy<T>(items: T[], identity: (item: T) => string): T[] {
+  return [...new Map(items.map((item) => [identity(item), item])).values()]
+}
+
+function timedIdentity(item: TimedTelemetryValue): string {
+  return `${item.observedAtUtc}:${item.valueKind}:${String(item.value)}`
+}
+
+function changeIdentity(item: TelemetryChange): string {
+  return `${timedIdentity(item)}:${item.previousValueKind}:${String(item.previousValue)}`
+}
+
+function mergeSpeedSignal(signals: SpeedSignalEvidence[]): SpeedSignalEvidence | undefined {
+  const first = signals[0]
+  if (!first) return undefined
+  const samples = uniqueBy(signals.flatMap(({ samples }) => samples), timedIdentity).sort((left, right) => Date.parse(left.observedAtUtc) - Date.parse(right.observedAtUtc)) as TimedNumericSample[]
+  return { ...first, observationState: samples.length ? 'SUPPORTED_WITH_OBSERVATIONS' : 'SUPPORTED_WITH_NO_SAMPLES_IN_RANGE', samples }
+}
+
+function mergeMotionSegments(evidence: PressMotionEvidence[]): TimedStateInterval[] {
+  const merged: TimedStateInterval[] = []
+  for (const chunk of evidence.sort((left, right) => Date.parse(left.fromUtc) - Date.parse(right.fromUtc))) {
+    const segments = [...chunk.segments].sort((left, right) => Date.parse(left.fromUtc) - Date.parse(right.fromUtc))
+    const previous = merged.at(-1)
+    const warmup = segments[0]
+    const resolved = segments[1]
+    if (previous && warmup?.state === 'TRANSITION' && warmup.fromUtc === chunk.fromUtc && warmup.toUtc === resolved?.fromUtc && previous.toUtc === warmup.fromUtc && previous.state === resolved.state && warmup.reason?.startsWith('DEBOUNCE_')) {
+      previous.toUtc = warmup.toUtc
+      previous.durationMs += warmup.durationMs
+      previous.durationSeconds = previous.durationMs / 1_000
+      segments.shift()
+    }
+    for (const segment of segments) {
+      const prior = merged.at(-1)
+      if (prior && prior.state === segment.state && prior.toUtc === segment.fromUtc) {
+        prior.toUtc = segment.toUtc
+        prior.durationMs += segment.durationMs
+        prior.durationSeconds = prior.durationMs / 1_000
+      } else {
+        merged.push({ ...segment })
+      }
+    }
+  }
+  return merged
+}
+
+export function mergeTelemetryEvidenceChunks(chunks: ChunkEvidence[], fromUtc: string, toUtc: string): Pick<PressTelemetryEvidenceState, 'context' | 'motion' | 'speed' | 'physical'> {
+  const contexts = chunks.flatMap(({ context }) => context ? [context] : [])
+  const speeds = chunks.flatMap(({ speed }) => speed ? [speed] : [])
+  const motions = chunks.flatMap(({ motion }) => motion ? [motion] : [])
+  const physicalEvidence = chunks.flatMap(({ physical }) => physical ? [physical] : [])
+  const result: Pick<PressTelemetryEvidenceState, 'context' | 'motion' | 'speed' | 'physical'> = {}
+
+  if (contexts.length) {
+    const first = contexts[0]!
+    const fields = Object.fromEntries((Object.keys(CONTEXT_LABELS) as ProductionContextField[]).map((field) => {
+      const entries = contexts.map(({ fields }) => fields[field])
+      const base = entries[0]!
+      const changes = uniqueBy(entries.flatMap(({ changes }) => changes), changeIdentity).sort((left, right) => Date.parse(left.observedAtUtc) - Date.parse(right.observedAtUtc))
+      const seed = entries.find(({ seed }) => seed)?.seed ?? null
+      return [field, { ...base, seed, changes, observationState: changes.length ? 'SUPPORTED_WITH_OBSERVATIONS' : seed ? 'SUPPORTED_WITH_SEED_ONLY' : base.observationState }]
+    })) as ProductionContextEvidence['fields']
+    const changes = uniqueBy(contexts.flatMap(({ changes }) => changes), (item: ContextChange) => `${item.atUtc}:${item.field}:${String(item.previousValue)}:${String(item.value)}`).sort((left, right) => Date.parse(left.atUtc) - Date.parse(right.atUtc) || left.field.localeCompare(right.field))
+    result.context = { ...first, fromUtc, toUtc, fields, changes }
+  }
+
+  if (speeds.length) {
+    const first = speeds[0]!
+    const actual = mergeSpeedSignal(speeds.map(({ actual }) => actual))!
+    const setpoint = mergeSpeedSignal(speeds.flatMap(({ setpoint }) => setpoint ? [setpoint] : [])) ?? null
+    result.speed = { ...first, fromUtc, toUtc, actual, setpoint }
+  }
+
+  if (motions.length) {
+    const first = motions[0]!
+    const segments = mergeMotionSegments(motions)
+    const durationsMs = { RUNNING: 0, STOPPED: 0, TRANSITION: 0, UNKNOWN: 0 }
+    segments.forEach(({ state, durationMs }) => { durationsMs[state] += durationMs })
+    result.motion = { ...first, fromUtc, toUtc, segments, summary: { durationsMs, durationsSeconds: Object.fromEntries(Object.entries(durationsMs).map(([state, duration]) => [state, duration / 1_000])) as PressMotionEvidence['summary']['durationsSeconds'], segmentCount: segments.length } }
+  }
+
+  if (physicalEvidence.length) {
+    const first = physicalEvidence[0]!
+    const grouped = new Map<string, SemanticSignalEvidence[]>()
+    physicalEvidence.flatMap(({ signals }) => signals).forEach((signal) => {
+      const key = `${signal.canonicalId}:${signal.deckNumber ?? ''}`
+      grouped.set(key, [...(grouped.get(key) ?? []), signal])
+    })
+    const signals = [...grouped.values()].map((entries) => {
+      const base = entries[0]!
+      const changes = uniqueBy(entries.flatMap(({ changes }) => changes), changeIdentity).sort((left, right) => Date.parse(left.observedAtUtc) - Date.parse(right.observedAtUtc))
+      const samples = uniqueBy(entries.flatMap(({ samples }) => samples), timedIdentity).sort((left, right) => Date.parse(left.observedAtUtc) - Date.parse(right.observedAtUtc))
+      return { ...base, changes, samples, seed: entries.find(({ seed }) => seed)?.seed ?? null, observationState: changes.length || samples.length ? 'SUPPORTED_WITH_OBSERVATIONS' : base.observationState }
+    })
+    result.physical = { ...first, fromUtc, toUtc, requestedCategories: [...new Set(physicalEvidence.flatMap(({ requestedCategories }) => requestedCategories))], capabilities: uniqueBy(physicalEvidence.flatMap(({ capabilities }) => capabilities), ({ canonicalId }) => canonicalId), signals }
+  }
+  return result
+}
+
+async function mapWithConcurrency<T, R>(items: T[], limit: number, task: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length)
+  let cursor = 0
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++
+      results[index] = await task(items[index]!)
+    }
+  }))
+  return results
+}
+
+export function usePressTelemetryEvidence(pressKey: RadiusPressKey | undefined, fromUtc: string, toUtc: string, options: { enabled?: boolean; padShortRange?: boolean; fullRange?: boolean } = {}): PressTelemetryEvidenceState {
   const enabled = options.enabled ?? true
-  const range = useMemo(() => boundedEvidenceRange(fromUtc, toUtc, options.padShortRange ?? true), [fromUtc, toUtc, options.padShortRange])
+  const duration = Date.parse(toUtc) - Date.parse(fromUtc)
+  const useFullRange = options.fullRange === true && duration > 0 && duration <= MAX_FULL_TELEMETRY_RANGE_MS
+  const range = useMemo(() => useFullRange ? { fromUtc, toUtc, focused: false } : boundedEvidenceRange(fromUtc, toUtc, options.padShortRange ?? true), [fromUtc, toUtc, options.padShortRange, useFullRange])
+  const chunks = useMemo(() => useFullRange ? telemetryEvidenceChunks(range.fromUtc, range.toUtc) : [{ fromUtc: range.fromUtc, toUtc: range.toUtc }], [range.fromUtc, range.toUtc, useFullRange])
   const key = `${pressKey ?? ''}:${range.fromUtc}:${range.toUtc}`
   const [stored, setStored] = useState<StoredEvidence>({ key: '', loading: false, error: false })
+  const chunkCache = useRef(new Map<string, ChunkEvidence>())
 
   useEffect(() => {
     if (!enabled || !pressKey) return
     const controller = new AbortController()
     setStored({ key, loading: true, error: false })
     void getPressTelemetryCapabilities(pressKey, controller.signal).then(async (capabilities) => {
-      const next: StoredEvidence = { key, capabilities, loading: true, error: false }
       const supported = (canonicalId: string) => capabilities.capabilities.some((item) => item.canonicalId === canonicalId && item.state === 'SUPPORTED')
-      const requests: Promise<void>[] = []
-      if (supported('machine.speed.actual')) requests.push(getPressSpeed(pressKey, range.fromUtc, range.toUtc, controller.signal).then((value) => { next.speed = value }))
-      if (supported('physical.motion_state')) requests.push(getPressMotion(pressKey, range.fromUtc, range.toUtc, controller.signal).then((value) => { next.motion = value }))
-      if (capabilities.capabilities.some((item) => item.canonicalId.startsWith('production.') && item.state === 'SUPPORTED')) requests.push(getProductionContext(pressKey, range.fromUtc, range.toUtc, controller.signal).then((value) => { next.context = value }))
       const categories = curatedCategoriesForCapabilities(capabilities.capabilities)
-      if (categories.length) requests.push(getCuratedPhysicalEvidence(pressKey, { fromUtc: range.fromUtc, toUtc: range.toUtc, includeSeed: false, categories, representation: 'changes' }, controller.signal).then((value) => { next.physical = value }))
-      const results = await Promise.allSettled(requests)
-      if (!controller.signal.aborted) setStored({ ...next, loading: false, error: results.some(({ status }) => status === 'rejected') })
+      const evidence = await mapWithConcurrency(chunks, 3, async (chunk): Promise<ChunkEvidence> => {
+        const cacheKey = `${pressKey}:${chunk.fromUtc}:${chunk.toUtc}:${categories.join(',')}`
+        const cached = chunkCache.current.get(cacheKey)
+        if (cached) return cached
+        const next: ChunkEvidence = { error: false }
+        const requests: Promise<void>[] = []
+        if (supported('machine.speed.actual')) requests.push(getPressSpeed(pressKey, chunk.fromUtc, chunk.toUtc, controller.signal).then((value) => { next.speed = value }))
+        if (supported('physical.motion_state')) requests.push(getPressMotion(pressKey, chunk.fromUtc, chunk.toUtc, controller.signal).then((value) => { next.motion = value }))
+        if (capabilities.capabilities.some((item) => item.canonicalId.startsWith('production.') && item.state === 'SUPPORTED')) requests.push(getProductionContext(pressKey, chunk.fromUtc, chunk.toUtc, controller.signal).then((value) => { next.context = value }))
+        if (categories.length) requests.push(getCuratedPhysicalEvidence(pressKey, { fromUtc: chunk.fromUtc, toUtc: chunk.toUtc, includeSeed: false, categories, representation: 'changes' }, controller.signal).then((value) => { next.physical = value }))
+        const results = await Promise.allSettled(requests)
+        next.error = results.some(({ status }) => status === 'rejected')
+        if (!next.error && Date.parse(chunk.toUtc) < Date.now() - 60_000) {
+          chunkCache.current.set(cacheKey, next)
+          while (chunkCache.current.size > 128) chunkCache.current.delete(chunkCache.current.keys().next().value!)
+        }
+        return next
+      })
+      const merged = mergeTelemetryEvidenceChunks(evidence, range.fromUtc, range.toUtc)
+      if (!controller.signal.aborted) setStored({ key, capabilities, ...merged, loading: false, error: evidence.some(({ error }) => error) })
     }).catch((error) => {
       if (!controller.signal.aborted && !(error instanceof DOMException && error.name === 'AbortError')) setStored({ key, loading: false, error: true })
     })
     return () => controller.abort()
-  }, [enabled, pressKey, range.fromUtc, range.toUtc, key])
+  }, [enabled, pressKey, range.fromUtc, range.toUtc, key, chunks])
 
   if (!enabled || stored.key !== key) return { range, loading: enabled && Boolean(pressKey), error: false }
   return { range, capabilities: stored.capabilities, context: stored.context, motion: stored.motion, speed: stored.speed, physical: stored.physical, loading: stored.loading, error: stored.error }
@@ -87,14 +246,14 @@ export function contextIntervalTracks(context?: ProductionContextEvidence): Time
     const values = [
       ...(evidence.seed ? [{ atUtc: context.fromUtc, value: evidence.seed.value }] : []),
       ...evidence.changes.map((change) => ({ atUtc: change.observedAtUtc, value: change.value })),
-    ].sort((left, right) => Date.parse(left.atUtc) - Date.parse(right.atUtc))
+    ].sort((left, right) => Date.parse(left.atUtc) - Date.parse(right.atUtc)).map((value) => ({ ...value, display: contextDisplayValue(value.value) }))
     return { id: `context-${field}`, label: CONTEXT_LABELS[field], unavailableLabel: evidence.capabilityState === 'UNSUPPORTED' ? 'Unsupported for this press' : evidence.capabilityState === 'SUPPORTED' ? 'Supported, but no value observed in this range' : 'Capability unknown or temporarily unavailable', intervals: values.map((value, index) => ({
       id: `context:${field}:${value.atUtc}:${index}`,
       startUtc: value.atUtc,
       endUtc: new Date(Math.max(Date.parse(value.atUtc) + 1_000, Math.min(end, Date.parse(values[index + 1]?.atUtc ?? context.toUtc)))).toISOString(),
-      label: String(value.value),
-      details: `${CONTEXT_LABELS[field]} context: ${String(value.value)}\nObserved from ${formatPlantDateTime(value.atUtc)} CT`,
-      className: 'context-timeline-value',
+      label: value.display.label,
+      details: `${CONTEXT_LABELS[field]} context: ${value.display.label}\nRaw source value: ${String(value.value)}\nObserved from ${formatPlantDateTime(value.atUtc)} CT`,
+      className: 'context-timeline-value', unavailable: !value.display.usable,
     })) }
   })
 }
@@ -128,6 +287,7 @@ export function actualSpeedTrack(speed: PressSpeedEvidence | undefined, capabili
   if (!speed && !capability) return undefined
   return {
     id: 'actual-speed', label: 'Actual Speed', samples: speed?.actual.samples ?? [], unit: speed?.actual.sourceUnit,
+    connectObservedGaps: true, interpolation: 'step',
     unavailableLabel: capability?.state === 'SUPPORTED' ? 'Supported, but no samples observed in this range' : capability?.state === 'UNSUPPORTED' ? 'Unsupported for this press' : 'Capability unknown or temporarily unavailable',
   }
 }

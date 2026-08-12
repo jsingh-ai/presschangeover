@@ -82,6 +82,18 @@ function App() {
     document.documentElement.style.colorScheme = theme
   }, [theme])
 
+  useEffect(() => {
+    if (range.preset === 'custom') return
+    const refreshLiveRange = () => setRange((current) => current.preset === 'custom' ? current : createPresetRange(current.preset))
+    const timer = window.setInterval(refreshLiveRange, 60_000)
+    const refreshWhenVisible = () => { if (document.visibilityState === 'visible') refreshLiveRange() }
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      window.clearInterval(timer)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+    }
+  }, [range.preset])
+
   function toggleTheme() {
     setTheme((currentTheme) => {
       const nextTheme = oppositeTheme(currentTheme)

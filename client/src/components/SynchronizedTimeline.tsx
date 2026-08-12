@@ -28,6 +28,8 @@ export interface TimelineNumericTrack {
   samples: TimedNumericSample[]
   unit?: string | null
   unavailableLabel?: string
+  connectObservedGaps?: boolean
+  interpolation?: 'linear' | 'step'
 }
 
 export interface TimelineEvent {
@@ -100,7 +102,7 @@ function timeLabel(value: string, from: number, coordinateMode: TimelineCoordina
   return `${hours ? `${hours}h ` : ''}${minutes ? `${minutes}m ` : ''}${remainder}s`
 }
 
-function numericPaths(samples: TimedNumericSample[], from: number, span: number, width: number, height: number): { paths: string[]; minimum: number; maximum: number } {
+export function numericPaths(samples: TimedNumericSample[], from: number, span: number, width: number, height: number, connectObservedGaps = false, interpolation: 'linear' | 'step' = 'linear'): { paths: string[]; minimum: number; maximum: number } {
   const visible = samples.filter(({ observedAtUtc, value }) => Number.isFinite(Date.parse(observedAtUtc)) && Number.isFinite(value) && Date.parse(observedAtUtc) >= from && Date.parse(observedAtUtc) <= from + span)
   const minimum = visible.length ? Math.min(...visible.map(({ value }) => value)) : 0
   const maximum = visible.length ? Math.max(...visible.map(({ value }) => value)) : 0
@@ -112,12 +114,16 @@ function numericPaths(samples: TimedNumericSample[], from: number, span: number,
   visible.forEach((sample, index) => {
     const timestamp = Date.parse(sample.observedAtUtc)
     const previous = visible[index - 1]
-    if (previous && timestamp - Date.parse(previous.observedAtUtc) > maximumConnectedGap) {
+    if (!connectObservedGaps && previous && timestamp - Date.parse(previous.observedAtUtc) > maximumConnectedGap) {
       if (current.length) paths.push(current.join(' '))
       current = []
     }
     const x = (timestamp - from) / span * width
     const y = height - 6 - (sample.value - minimum) / valueSpan * (height - 12)
+    if (current.length && interpolation === 'step' && previous) {
+      const previousY = height - 6 - (previous.value - minimum) / valueSpan * (height - 12)
+      current.push(`L ${x.toFixed(2)} ${previousY.toFixed(2)}`)
+    }
     current.push(`${current.length ? 'L' : 'M'} ${x.toFixed(2)} ${y.toFixed(2)}`)
   })
   if (current.length) paths.push(current.join(' '))
@@ -134,7 +140,7 @@ export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolut
   const [crosshair, setCrosshair] = useState<number>()
   const [selectedEventCluster, setSelectedEventCluster] = useState<string>()
   const canvasStyle = { '--timeline-min-width': `${minimumCanvasWidth}px` } as CSSProperties
-  const numericGeometry = useMemo(() => numericTracks.map((track) => ({ track, geometry: numericPaths(track.samples, from, span, 1000, 88) })), [numericTracks, from, span])
+  const numericGeometry = useMemo(() => numericTracks.map((track) => ({ track, geometry: numericPaths(track.samples, from, span, 1000, 88, track.connectObservedGaps, track.interpolation) })), [numericTracks, from, span])
   const eventGeometry = useMemo(() => eventTracks.map((track) => ({ track, clusters: clusterTimelineEvents(track.events, fromUtc, toUtc) })), [eventTracks, fromUtc, toUtc])
 
   const eventDescription = (event: TimelineEvent) => `${event.label}. ${formatPlantDateTime(event.atUtc)} CT${coordinateMode === 'elapsed' ? `, ${timeLabel(event.atUtc, labelOrigin, coordinateMode)} elapsed` : ''}${event.detail ? `. ${event.detail}` : ''}`

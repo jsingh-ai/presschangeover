@@ -3,14 +3,14 @@ import { formatPlantDateTime } from '../time-ranges'
 import type { RadiusPressKey } from '../types/api'
 import type { ProductionContextEvidence, SignalCapability } from '../types/evidence'
 import { SynchronizedTimeline } from './SynchronizedTimeline'
-import { actualSpeedTrack, boundedEvidenceRange, CONTEXT_LABELS, contextEventTrack, contextIntervalTracks, motionIntervalTrack, physicalEventTrack, usePressTelemetryEvidence, type PressTelemetryEvidenceState } from './TelemetryEvidenceTimeline'
+import { actualSpeedTrack, boundedEvidenceRange, CONTEXT_LABELS, contextDisplayValue, contextEventTrack, contextIntervalTracks, motionIntervalTrack, physicalEventTrack, usePressTelemetryEvidence, type PressTelemetryEvidenceState } from './TelemetryEvidenceTimeline'
 
 export { boundedEvidenceRange }
 
 function currentContext(context: ProductionContextEvidence, field: keyof typeof CONTEXT_LABELS): string | undefined {
   const evidence = context.fields[field]
   const value = evidence.changes.at(-1)?.value ?? evidence.seed?.value
-  return value === undefined ? undefined : String(value)
+  return value === undefined ? undefined : contextDisplayValue(value).label
 }
 
 function signalLabel(canonicalId: string, deckNumber: number | null): string {
