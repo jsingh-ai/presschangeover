@@ -29,8 +29,8 @@ export function OperationalAnalysisPage({ analytics, scopeLabel, overview, selec
   selectedPress?: RadiusPressKey
 }) {
   return <div className="page-stack operational-analysis-page">
-    <PageIntroduction eyebrow="One activity · magnitude, frequency, where, and when" title="Operational Analysis" description="Select one Radius state, operational group, process family, or exact status to quantify its duration, frequency, press distribution, timing, semantic meaning, and exact supporting evidence." />
-    <div className="scope-caption"><strong>{scopeLabel}</strong><span>One activity at a time. Combinations and ordered behavior belong in Patterns &amp; Episodes.</span></div>
+    <PageIntroduction eyebrow="From Radius phase to operational explanation" title="Operational Analysis" description="Choose a broad Radius phase, narrow through ProcessIntelligence Operational Groups and Process Families, then inspect exact codes only when needed. The page quantifies one clearly identified activity across time and presses." />
+    <div className="scope-caption"><strong>{scopeLabel}</strong><span>The guided path controls the activity analyzed below. Combinations and ordered behavior belong in Patterns &amp; Episodes.</span></div>
     <OperationalActivityExplorer fromUtc={overview.fromUtc} toUtc={overview.toUtc} pressKey={selectedPress} analytics={analytics} />
   </div>
 }

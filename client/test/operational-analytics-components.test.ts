@@ -54,8 +54,8 @@ const runComparison = {
 describe('operational analytics components', () => {
   it('makes Operational Analysis a one-activity investigation instead of a second Overview or sequence page', () => {
     const html = renderToStaticMarkup(createElement(OperationalAnalysisPage, { analytics, scopeLabel: 'Press 7', overview: timelineOverview, selectedPress: 'press7' }))
-    assert.match(html, /One activity · magnitude, frequency, where, and when/)
-    assert.match(html, /Select one Radius state, operational group, process family, or exact status/)
+    assert.match(html, /From Radius phase to operational explanation/)
+    assert.match(html, /Choose a broad Radius phase, narrow through ProcessIntelligence Operational Groups and Process Families/)
     assert.match(html, /Combinations and ordered behavior belong in Patterns &amp; Episodes/)
     assert.doesNotMatch(html, /State breakdown|Drivers &amp; recovery|Run breakdowns|Pattern prevalence/)
   })

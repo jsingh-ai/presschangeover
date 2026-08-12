@@ -12,6 +12,13 @@ import { UnifiedProcessTimeline } from './UnifiedProcessTimeline'
 
 const levelLabels: Record<ActivityLevel, string> = { radius_state: 'Radius State', operational_group: 'Operational Group', process_family: 'Process Family', exact_status: 'Exact Radius Status' }
 const levelOrder: ActivityLevel[] = ['radius_state', 'operational_group', 'process_family', 'exact_status']
+const guideLevelCopy: Record<Exclude<ActivityLevel, 'exact_status'>, { step: string; title: string; help: string }> = {
+  radius_state: { step: '1', title: 'Radius phase', help: 'Start with the broad phase Radius recorded.' },
+  operational_group: { step: '2', title: 'Operational Group', help: 'Narrow to the ProcessIntelligence explanation of what was happening.' },
+  process_family: { step: '3', title: 'Process Family', help: 'Choose the more specific kind of work when useful.' },
+}
+
+export type ActivityGuidePath = Partial<Record<ActivityLevel, string>>
 
 function compact(seconds: number | null) { return seconds === null ? 'Not enough evidence' : formatDuration(Math.round(seconds)) }
 function barWidth(value: number, maximum: number) { return maximum > 0 ? `${Math.max(value > 0 ? 1 : 0, value / maximum * 100)}%` : '0%' }
@@ -49,6 +56,106 @@ export function ActivityPicker({ catalog, selected, prompt = 'Search one activit
     })}<button type="button" className="activity-picker__close" onClick={() => setOpen(false)}>Close results</button></div>}
     <p>Analyze one activity here. Use Pattern Builder for activities that occur together or in sequence.</p>
   </div>
+}
+
+function catalogText(item: ActivityCatalogItem) {
+  return [item.label, item.description, item.eventType, item.statusCode, item.statusDescription, item.operationalGroupName, item.processFamilyName].filter(Boolean).join(' ').toLowerCase()
+}
+
+export function activityGuidePath(item: ActivityCatalogItem): ActivityGuidePath {
+  if (item.level === 'radius_state') return { radius_state: item.key }
+  if (item.level === 'operational_group') return { operational_group: item.key }
+  if (item.level === 'process_family') return { operational_group: item.operationalGroupKey ?? undefined, process_family: item.key }
+  return {
+    radius_state: item.eventType ?? undefined,
+    operational_group: item.operationalGroupKey ?? undefined,
+    process_family: item.processFamilyKey ?? undefined,
+    exact_status: item.key,
+  }
+}
+
+export function guidedActivityOptions(catalog: ActivityCatalogItem[], level: ActivityLevel, path: ActivityGuidePath) {
+  const exactStatuses = catalog.filter((item) => item.level === 'exact_status')
+  const supportsPath = (item: ActivityCatalogItem) => {
+    if (path.radius_state && item.eventType !== path.radius_state) return false
+    if (path.operational_group && item.operationalGroupKey !== path.operational_group) return false
+    if (path.process_family && item.processFamilyKey !== path.process_family) return false
+    return true
+  }
+  if (level === 'radius_state') return catalog.filter((item) => item.level === level)
+  if (level === 'exact_status') return exactStatuses.filter(supportsPath)
+  return catalog.filter((item) => item.level === level && exactStatuses.some((status) => supportsPath(status) && (level === 'operational_group' ? status.operationalGroupKey === item.key : status.processFamilyKey === item.key)))
+}
+
+function pathContains(path: ActivityGuidePath, selected: ActivityCatalogItem) {
+  return path[selected.level] === selected.key
+}
+
+function ActivityOption({ item, active, onClick }: { item: ActivityCatalogItem; active: boolean; onClick(): void }) {
+  return <button type="button" className={`activity-guide__option${active ? ' is-active' : ''}`} aria-pressed={active} onClick={onClick}>
+    <span><strong>{item.label}</strong>{item.description && <small>{item.description}</small>}</span>
+    {active && <em>Analyzing</em>}
+  </button>
+}
+
+export function GuidedActivityPicker({ catalog, selected, onSelect }: { catalog: ActivityCatalogItem[]; selected: ActivityCatalogItem; onSelect(item: ActivityCatalogItem): void }) {
+  const [path, setPath] = useState<ActivityGuidePath>(() => activityGuidePath(selected))
+  const [query, setQuery] = useState('')
+  const [codesOpen, setCodesOpen] = useState(selected.level === 'exact_status')
+
+  useEffect(() => {
+    if (!pathContains(path, selected)) {
+      const next = activityGuidePath(selected)
+      setPath(next)
+      if (selected.level === 'exact_status') setCodesOpen(true)
+    }
+  }, [path, selected])
+
+  const choose = (item: ActivityCatalogItem, nextPath = activityGuidePath(item)) => {
+    setPath(nextPath)
+    setQuery('')
+    if (item.level === 'exact_status') setCodesOpen(true)
+    onSelect(item)
+  }
+  const chooseLevel = (item: ActivityCatalogItem) => {
+    if (item.level === 'radius_state') choose(item, { radius_state: item.key })
+    else if (item.level === 'operational_group') choose(item, { radius_state: path.radius_state, operational_group: item.key })
+    else if (item.level === 'process_family') choose(item, { radius_state: path.radius_state, operational_group: path.operational_group, process_family: item.key })
+    else choose(item, { ...path, exact_status: item.key })
+  }
+  const normalizedQuery = query.trim().toLowerCase()
+  const searchMatches = normalizedQuery ? catalog.filter((item) => catalogText(item).includes(normalizedQuery)).slice(0, 30) : []
+  const stages = (['radius_state', 'operational_group', 'process_family'] as const).map((level) => ({ level, options: guidedActivityOptions(catalog, level, path) }))
+  const exactStatuses = guidedActivityOptions(catalog, 'exact_status', path)
+
+  return <section className="panel activity-guide" aria-labelledby="activity-guide-title">
+    <div className="activity-guide__heading">
+      <div><p className="eyebrow">Guided activity selection</p><h2 id="activity-guide-title">Choose the operational question</h2><p>Move from the broad Radius phase to ProcessIntelligence meaning. Open exact Radius codes only when you need that level of evidence.</p></div>
+      <div className="activity-guide__active" aria-live="polite"><span>Currently analyzing</span><strong>{selected.label}</strong><small>{levelLabels[selected.level]}</small></div>
+    </div>
+    <div className="activity-guide__path" aria-label="Current selection path">
+      {levelOrder.map((level) => path[level] && <span key={level}><small>{levelLabels[level]}</small><strong>{catalog.find((item) => item.level === level && item.key === path[level])?.label ?? path[level]}</strong></span>)}
+    </div>
+    <div className="activity-guide__stages">{stages.map(({ level, options }) => {
+      const copy = guideLevelCopy[level]
+      const ready = level === 'radius_state' || level === 'operational_group' || Boolean(path.operational_group)
+      return <section className={`activity-guide__stage${ready ? '' : ' is-muted'}`} key={level} aria-labelledby={`activity-guide-${level}`}>
+        <header><span>{copy.step}</span><div><h3 id={`activity-guide-${level}`}>{copy.title}</h3><p>{copy.help}</p></div></header>
+        {ready && <div className="activity-guide__options">{options.map((item) => <ActivityOption key={item.key} item={item} active={selected.level === level && selected.key === item.key} onClick={() => chooseLevel(item)} />)}</div>}
+        {!ready ? <p className="activity-guide__empty">Select an Operational Group to continue.</p> : !options.length && <p className="activity-guide__empty">No mapped choices are available under the current path.</p>}
+      </section>
+    })}</div>
+    <div className="activity-guide__codes">
+      <button type="button" className="activity-guide__codes-toggle" aria-expanded={codesOpen} aria-controls="activity-exact-codes" onClick={() => setCodesOpen((value) => !value)}><span><strong>{codesOpen ? 'Hide' : 'Show'} exact Radius codes</strong><small>Optional deepest level · {exactStatuses.length} codes match the current path</small></span><b aria-hidden="true">{codesOpen ? '−' : '+'}</b></button>
+      {codesOpen && <div id="activity-exact-codes" className="activity-guide__exact"><div className="activity-guide__options">{exactStatuses.map((item) => <ActivityOption key={item.key} item={item} active={selected.level === 'exact_status' && selected.key === item.key} onClick={() => chooseLevel(item)} />)}</div>{!exactStatuses.length && <p className="activity-guide__empty">No exact Radius codes match this path.</p>}</div>}
+    </div>
+    <div className="activity-guide__search">
+      <label htmlFor="activity-guide-search">Search all activities and codes <span>optional shortcut</span></label>
+      <div><input id="activity-guide-search" type="search" value={query} placeholder="Search a phase, explanation, family, description, or code" onChange={(event) => setQuery(event.target.value)} autoComplete="off" />{query && <button type="button" onClick={() => setQuery('')}>Clear</button>}</div>
+      {normalizedQuery && <div className="activity-guide__search-results" aria-live="polite">{searchMatches.length ? searchMatches.map((item) => <button type="button" key={`${item.level}:${item.key}`} onClick={() => choose(item)}><span><small>{levelLabels[item.level]}</small><strong>{item.label}</strong>{item.description && <em>{item.description}</em>}</span><b>Analyze</b></button>) : <p>No activity or Radius code matches “{query.trim()}”.</p>}</div>}
+    </div>
+    <p className="activity-guide__purpose">Each choice replaces the one activity being quantified below. Use Patterns &amp; Episodes when you need combinations or sequence.</p>
+  </section>
 }
 
 function Metrics({ data }: { data: ActivityAnalysis }) {
@@ -209,7 +316,7 @@ export function OperationalActivityExplorerView({ data, occurrences = data.occur
 export function OperationalActivityExplorer({ fromUtc, toUtc, pressKey, analytics: _analytics }: { fromUtc: string; toUtc: string; pressKey?: RadiusPressKey; analytics: OperationalAnalytics }) {
   const [data, setData] = useState<ActivityAnalysis>()
   const [occurrences, setOccurrences] = useState<ActivityOccurrence[]>([])
-  const [selection, setSelection] = useState<ActivitySelection>(() => activityFromUrl() ?? { level: 'operational_group', key: 'MAINTENANCE_INTERVENTION', label: 'Maintenance Intervention' })
+  const [selection, setSelection] = useState<ActivitySelection>(() => activityFromUrl() ?? { level: 'radius_state', key: 'B', label: 'Bad' })
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState(false)
@@ -254,5 +361,6 @@ export function OperationalActivityExplorer({ fromUtc, toUtc, pressKey, analytic
     setLoadingMore(true)
     void getActivityAnalysis(fromUtc, toUtc, selection, pressKey, controller.signal, occurrences.length).then((page) => { if (!controller.signal.aborted) setOccurrences((current) => [...current, ...page.occurrences.filter((item) => !current.some(({ occurrenceId }) => occurrenceId === item.occurrenceId))]) }).catch(() => { if (!controller.signal.aborted) setError(true) }).finally(() => { if (!controller.signal.aborted) setLoadingMore(false) })
   }
-  return <div className="activity-explorer">{data && <ActivityPicker catalog={data.catalog} selected={data.selection} onSelect={choose} />}{loading && <div className="scope-progress" role="status"><i />Updating activity analysis…</div>}{error && <p className="message message--warning">Activity analysis could not be loaded for this selection. Previously loaded evidence remains visible.</p>}{data && <OperationalActivityExplorerView data={data} analytics={_analytics} occurrences={occurrences} loadingMore={loadingMore} onLoadMore={loadMore} />}</div>
+  const activeChoice = data?.catalog.find((item) => item.level === selection.level && item.key === selection.key) ?? data?.selection
+  return <div className="activity-explorer">{data && activeChoice && <GuidedActivityPicker catalog={data.catalog} selected={activeChoice} onSelect={choose} />}{loading && <div className="scope-progress" role="status"><i />Updating activity analysis…</div>}{error && <p className="message message--warning">Activity analysis could not be loaded for this selection. Previously loaded evidence remains visible.</p>}{data && <OperationalActivityExplorerView data={data} analytics={_analytics} occurrences={occurrences} loadingMore={loadingMore} onLoadMore={loadMore} />}</div>
 }

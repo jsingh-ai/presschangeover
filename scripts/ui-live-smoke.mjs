@@ -217,6 +217,25 @@ report.interactions.longRange = await evaluate(`({ coverage: document.querySelec
 if (!report.interactions.longRange.coverage?.includes('complete selected range') || !report.interactions.longRange.radiusTrack || !report.interactions.longRange.radiusRawTrack || !report.interactions.longRange.groupTrack || !report.interactions.longRange.familyTrack || !report.interactions.longRange.completeTelemetry || report.interactions.longRange.focusedTelemetry) throw new Error('Long-range integrated Overview evidence was incomplete')
 
 await navigate(routeUrl('/operational-analysis', matrixRange), routes[1].ready, 'Operational occurrence evidence')
+report.interactions.activityGuide = await evaluate(`(() => {
+  const guide = document.querySelector('.activity-guide')
+  return {
+    present: Boolean(guide),
+    title: guide?.querySelector('#activity-guide-title')?.textContent,
+    active: guide?.querySelector('.activity-guide__active')?.textContent,
+    stages: [...guide?.querySelectorAll('.activity-guide__stage h3') ?? []].map((item) => item.textContent),
+    exactCodesCollapsed: guide?.querySelector('.activity-guide__codes-toggle')?.getAttribute('aria-expanded') === 'false',
+    optionalSearch: Boolean(guide?.querySelector('#activity-guide-search')),
+    legacyBlindPicker: Boolean(document.querySelector('.activity-explorer > .activity-picker')),
+  }
+})()`)
+if (!report.interactions.activityGuide.present || report.interactions.activityGuide.stages.join('|') !== 'Radius phase|Operational Group|Process Family' || !report.interactions.activityGuide.exactCodesCollapsed || !report.interactions.activityGuide.optionalSearch || report.interactions.activityGuide.legacyBlindPicker) throw new Error(`Operational guided selector is incomplete: ${JSON.stringify(report.interactions.activityGuide)}`)
+const firstRadiusChoice = await evaluate(`(() => { const button = document.querySelector('.activity-guide__stage[aria-labelledby="activity-guide-radius_state"] .activity-guide__option'); const label = button?.querySelector('strong')?.textContent; button?.click(); return label })()`)
+if (!firstRadiusChoice) throw new Error('Operational guide exposed no Radius phase choice')
+await waitFor(`new URLSearchParams(location.search).get('activityLevel') === 'radius_state' && document.querySelector('.activity-guide__active strong')?.textContent === ${JSON.stringify(firstRadiusChoice)} && !document.querySelector('.activity-explorer > .scope-progress')`, 'guided Radius phase selection')
+report.interactions.activityGuide.selectedRadiusPhase = await evaluate(`({ label: document.querySelector('.activity-guide__active strong')?.textContent, trail: document.querySelector('.activity-guide__path')?.textContent, availableGroups: document.querySelectorAll('.activity-guide__stage[aria-labelledby="activity-guide-operational_group"] .activity-guide__option').length })`)
+if (!report.interactions.activityGuide.selectedRadiusPhase.availableGroups) throw new Error('Selected Radius phase did not guide to any Operational Groups')
+await navigate(routeUrl('/operational-analysis', matrixRange), routes[1].ready, 'Operational occurrence evidence after guide check')
 const occurrence = await evaluate(`Boolean(document.querySelector('.activity-evidence tbody tr'))`)
 if (occurrence) {
   await waitFor(`Boolean(document.querySelector('.physical-signature-summary .synchronized-timeline[aria-label*="focused occurrence synchronized evidence"]'))`, 'default focused occurrence timeline')
