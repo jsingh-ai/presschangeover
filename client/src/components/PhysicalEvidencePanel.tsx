@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { formatPlantDateTime } from '../time-ranges'
 import type { RadiusPressKey } from '../types/api'
 import type { ProductionContextEvidence, SignalCapability } from '../types/evidence'
-import { SynchronizedTimeline } from './SynchronizedTimeline'
+import { SynchronizedTimeline, type TimelineIntervalTrack } from './SynchronizedTimeline'
 import { actualSpeedTrack, boundedEvidenceRange, CONTEXT_LABELS, contextDisplayValue, contextEventTrack, contextIntervalTracks, motionIntervalTrack, physicalEventTrack, usePressTelemetryEvidence, VISIBLE_CONTEXT_FIELDS, type PressTelemetryEvidenceState } from './TelemetryEvidenceTimeline'
 
 export { boundedEvidenceRange }
@@ -32,9 +32,10 @@ interface PhysicalEvidencePanelProps {
   toUtc: string
   evidence?: PressTelemetryEvidenceState
   showTimeline?: boolean
+  semanticIntervalTracks?: TimelineIntervalTrack[]
 }
 
-export function PhysicalEvidencePanel({ pressKey, fromUtc, toUtc, evidence, showTimeline = true }: PhysicalEvidencePanelProps) {
+export function PhysicalEvidencePanel({ pressKey, fromUtc, toUtc, evidence, showTimeline = true, semanticIntervalTracks = [] }: PhysicalEvidencePanelProps) {
   const loaded = usePressTelemetryEvidence(pressKey, fromUtc, toUtc, { enabled: !evidence })
   const resolved = evidence ?? loaded
   const { range, capabilities, speed, motion, context, physical, loading, error } = resolved
@@ -48,6 +49,7 @@ export function PhysicalEvidencePanel({ pressKey, fromUtc, toUtc, evidence, show
   const contextEvents = contextEventTrack(context)
   const physicalEvents = physicalEventTrack(physical)
   const changedSignals = physical?.signals.filter(({ changes }) => changes.length > 0) ?? []
+  const intervalTracks = [...semanticIntervalTracks, ...contextIntervalTracks(context), ...(motionTrack ? [motionTrack] : [])]
 
   return <section className="drawer-section physical-evidence" aria-labelledby="physical-evidence-title">
     <div className="section-heading"><div><p className="eyebrow">Independent source</p><h3 id="physical-evidence-title">Physical telemetry evidence</h3><p>Telemetry is shown as independent physical evidence. It does not correct Radius or redefine the ProcessIntelligence classification.</p></div></div>
@@ -55,9 +57,9 @@ export function PhysicalEvidencePanel({ pressKey, fromUtc, toUtc, evidence, show
     <p className="quiet-copy">Physical window: {formatPlantDateTime(range.fromUtc)} – {formatPlantDateTime(range.toUtc)} CT</p>
     {loading && <div className="drawer-loading" role="status">Loading bounded telemetry…</div>}
     {!loading && !capabilities && <p className="message message--warning">Telemetry capability metadata is temporarily unavailable. Radius and classification evidence remain available.</p>}
+    {showTimeline && !loading && (semanticIntervalTracks.length > 0 || capabilities) && <SynchronizedTimeline fromUtc={range.fromUtc} toUtc={range.toUtc} ariaLabel={`${capabilities?.displayName ?? pressKey} synchronized wall-clock evidence`} intervalTracks={intervalTracks} numericTracks={speedTrack ? [speedTrack] : []} eventTracks={[contextEvents, physicalEvents].filter((track): track is NonNullable<typeof track> => Boolean(track))} />}
     {capabilities && <>
       <dl className="compact-facts evidence-capabilities"><div><dt>Actual Speed</dt><dd>{capabilityLabel(speedCapability)}</dd></div><div><dt>Physical Motion</dt><dd>{capabilityLabel(motionCapability)}</dd></div><div><dt>Telemetry metadata</dt><dd>{capabilities.metadataStatus}</dd></div></dl>
-      {showTimeline && <SynchronizedTimeline fromUtc={range.fromUtc} toUtc={range.toUtc} ariaLabel={`${capabilities.displayName} synchronized physical evidence`} intervalTracks={[...contextIntervalTracks(context), ...(motionTrack ? [motionTrack] : [])]} numericTracks={speedTrack ? [speedTrack] : []} eventTracks={[contextEvents, physicalEvents].filter((track): track is NonNullable<typeof track> => Boolean(track))} />}
       {speed && <p className="quiet-copy">Actual Speed: {speed.actual.samples.length ? `${speed.actual.samples.length} raw samples` : 'supported but no samples in range'}{speed.actual.sourceUnit ? ` · source metadata reports ${speed.actual.sourceUnit}; values are not converted` : ' · source units are unverified'}</p>}
       {context && <section className="physical-evidence__section"><h4>Production context</h4>{contextValues.length ? <dl className="compact-facts">{contextValues.map(({ field, value }) => <div key={field}><dt>{CONTEXT_LABELS[field]}</dt><dd>{value}</dd></div>)}</dl> : <p className="empty-state">Supported context fields have no values in this range.</p>}{visibleContextChanges.length > 0 && <ol className="context-change-list">{visibleContextChanges.map((change, index) => <li key={`${change.atUtc}:${change.field}:${index}`}><time>{formatPlantDateTime(change.atUtc)} CT</time><strong>{CONTEXT_LABELS[change.field]}</strong><span>{String(change.previousValue)} → {String(change.value)}</span></li>)}</ol>}</section>}
       {physical && <section className="physical-evidence__section"><h4>Observed signal changes</h4>{changedSignals.length ? <ul className="physical-signal-list">{changedSignals.map((signal) => {

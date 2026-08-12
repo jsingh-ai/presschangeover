@@ -116,16 +116,16 @@ describe('one-activity explorer presentation', () => {
     }
   })
 
-  it('opens occurrence evidence with synchronized Radius and Operational Group tracks in the wider sidebar', () => {
+  it('adds occurrence Radius and Operational Group tracks to the shared evidence wall-clock timeline in the wider sidebar', () => {
     const occurrence = activity.occurrences[0]!
     const tracks = occurrenceEvidenceTracks(occurrence)
     assert.deepEqual(tracks.radius.intervals.map(({ label }) => label), ['B / 123 / Maintenance'])
     assert.deepEqual(tracks.group.intervals.map(({ label }) => label), ['Maintenance Intervention'])
     const html = renderToStaticMarkup(createElement(OccurrenceEvidenceDrawer, { occurrence, classificationVersion: activity.classificationVersion, onClose() {} }))
-    assert.match(html, /Synchronized occurrence timeline/)
-    assert.match(html, /Radius and the corresponding Operational Group share this exact evidence axis/)
     assert.match(html, /Radius recorded/)
     assert.match(html, /Operational Group/)
+    const source = readFileSync(new URL('../src/components/OperationalActivityExplorer.tsx', import.meta.url), 'utf8')
+    assert.match(source, /semanticIntervalTracks=\{\[tracks\.radius, tracks\.group\]\}/)
     const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
     assert.match(css, /\.investigation-side-panel \{[^}]*width: min\(68rem, 96vw\)/)
   })
