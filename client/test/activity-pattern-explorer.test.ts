@@ -53,6 +53,22 @@ describe('one-activity explorer presentation', () => {
     assert.doesNotMatch(html, /Search one activity/)
   })
 
+  it('keeps peer choices visible while highlighting every selected path level', () => {
+    const expandedCatalog = [
+      ...catalog,
+      { level: 'process_family', key: 'INK_COLOR', label: 'Ink / Color', description: 'Ink family', eventType: null, statusCode: null, statusDescription: null, operationalGroupKey: 'ROUTINE_PROCESS', operationalGroupName: 'Routine Process', processFamilyKey: 'INK_COLOR', processFamilyName: 'Ink / Color', needsClassification: false },
+      { level: 'exact_status', key: 'B\u001f77\u001fInk adjustment', label: 'B / 77 / Ink adjustment', description: null, eventType: 'B', statusCode: '77', statusDescription: 'Ink adjustment', operationalGroupKey: 'ROUTINE_PROCESS', operationalGroupName: 'Routine Process', processFamilyKey: 'INK_COLOR', processFamilyName: 'Ink / Color', needsClassification: false },
+      { level: 'exact_status', key: 'B\u001f55\u001fMechanical issue', label: 'B / 55 / Mechanical issue', description: null, eventType: 'B', statusCode: '55', statusDescription: 'Mechanical issue', operationalGroupKey: 'MAINTENANCE_INTERVENTION', operationalGroupName: 'Maintenance Intervention', processFamilyKey: 'MAINTENANCE', processFamilyName: 'Maintenance', needsClassification: false },
+    ] as ActivityAnalysis['catalog']
+    const selectedPath = { radius_state: 'B', operational_group: 'ROUTINE_PROCESS', process_family: 'CLEANING_WASH' }
+    assert.deepEqual(guidedActivityOptions(expandedCatalog, 'operational_group', selectedPath).map(({ key }) => key).sort(), ['MAINTENANCE_INTERVENTION', 'ROUTINE_PROCESS'])
+    assert.deepEqual(guidedActivityOptions(expandedCatalog, 'process_family', selectedPath).map(({ key }) => key).sort(), ['CLEANING_WASH', 'INK_COLOR'])
+    const html = renderToStaticMarkup(createElement(GuidedActivityPicker, { catalog, selected: catalog.find((item) => item.level === 'exact_status')!, onSelect() {} }))
+    assert.equal((html.match(/aria-pressed="true"/g) ?? []).length, 4)
+    assert.equal((html.match(/>Selected<\/em>/g) ?? []).length, 3)
+    assert.equal((html.match(/>Analyzing<\/em>/g) ?? []).length, 1)
+  })
+
   it('shows magnitude, frequency, press, state, trend, distribution, semantic, and exact evidence', () => {
     const html = renderToStaticMarkup(createElement(OperationalActivityExplorerView, { data: activity, analytics }))
     for (const copy of ['Total time', 'Occurrences', 'Median occurrence', 'Longest occurrence', 'Press comparison', 'Radius composition', 'Daily line trend', 'Occurrence duration', 'Process families', 'Exact occurrences', 'B / 123 / Maintenance', 'Physical signature']) assert.match(html, new RegExp(copy))

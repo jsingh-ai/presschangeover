@@ -76,25 +76,25 @@ export function activityGuidePath(item: ActivityCatalogItem): ActivityGuidePath 
 
 export function guidedActivityOptions(catalog: ActivityCatalogItem[], level: ActivityLevel, path: ActivityGuidePath) {
   const exactStatuses = catalog.filter((item) => item.level === 'exact_status')
-  const supportsPath = (item: ActivityCatalogItem) => {
-    if (path.radius_state && item.eventType !== path.radius_state) return false
-    if (path.operational_group && item.operationalGroupKey !== path.operational_group) return false
-    if (path.process_family && item.processFamilyKey !== path.process_family) return false
+  const supportsUpstreamPath = (item: ActivityCatalogItem) => {
+    if (level !== 'radius_state' && path.radius_state && item.eventType !== path.radius_state) return false
+    if ((level === 'process_family' || level === 'exact_status') && path.operational_group && item.operationalGroupKey !== path.operational_group) return false
+    if (level === 'exact_status' && path.process_family && item.processFamilyKey !== path.process_family) return false
     return true
   }
   if (level === 'radius_state') return catalog.filter((item) => item.level === level)
-  if (level === 'exact_status') return exactStatuses.filter(supportsPath)
-  return catalog.filter((item) => item.level === level && exactStatuses.some((status) => supportsPath(status) && (level === 'operational_group' ? status.operationalGroupKey === item.key : status.processFamilyKey === item.key)))
+  if (level === 'exact_status') return exactStatuses.filter(supportsUpstreamPath)
+  return catalog.filter((item) => item.level === level && exactStatuses.some((status) => supportsUpstreamPath(status) && (level === 'operational_group' ? status.operationalGroupKey === item.key : status.processFamilyKey === item.key)))
 }
 
 function pathContains(path: ActivityGuidePath, selected: ActivityCatalogItem) {
   return path[selected.level] === selected.key
 }
 
-function ActivityOption({ item, active, onClick }: { item: ActivityCatalogItem; active: boolean; onClick(): void }) {
+function ActivityOption({ item, active, analyzing, onClick }: { item: ActivityCatalogItem; active: boolean; analyzing: boolean; onClick(): void }) {
   return <button type="button" className={`activity-guide__option${active ? ' is-active' : ''}`} aria-pressed={active} onClick={onClick}>
     <span><strong>{item.label}</strong>{item.description && <small>{item.description}</small>}</span>
-    {active && <em>Analyzing</em>}
+    {active && <em>{analyzing ? 'Analyzing' : 'Selected'}</em>}
   </button>
 }
 
@@ -141,13 +141,13 @@ export function GuidedActivityPicker({ catalog, selected, onSelect }: { catalog:
       const ready = level === 'radius_state' || level === 'operational_group' || Boolean(path.operational_group)
       return <section className={`activity-guide__stage${ready ? '' : ' is-muted'}`} key={level} aria-labelledby={`activity-guide-${level}`}>
         <header><span>{copy.step}</span><div><h3 id={`activity-guide-${level}`}>{copy.title}</h3><p>{copy.help}</p></div></header>
-        {ready && <div className="activity-guide__options">{options.map((item) => <ActivityOption key={item.key} item={item} active={selected.level === level && selected.key === item.key} onClick={() => chooseLevel(item)} />)}</div>}
+        {ready && <div className="activity-guide__options">{options.map((item) => <ActivityOption key={item.key} item={item} active={path[level] === item.key} analyzing={selected.level === level && selected.key === item.key} onClick={() => chooseLevel(item)} />)}</div>}
         {!ready ? <p className="activity-guide__empty">Select an Operational Group to continue.</p> : !options.length && <p className="activity-guide__empty">No mapped choices are available under the current path.</p>}
       </section>
     })}</div>
     <div className="activity-guide__codes">
       <button type="button" className="activity-guide__codes-toggle" aria-expanded={codesOpen} aria-controls="activity-exact-codes" onClick={() => setCodesOpen((value) => !value)}><span><strong>{codesOpen ? 'Hide' : 'Show'} exact Radius codes</strong><small>Optional deepest level · {exactStatuses.length} codes match the current path</small></span><b aria-hidden="true">{codesOpen ? '−' : '+'}</b></button>
-      {codesOpen && <div id="activity-exact-codes" className="activity-guide__exact"><div className="activity-guide__options">{exactStatuses.map((item) => <ActivityOption key={item.key} item={item} active={selected.level === 'exact_status' && selected.key === item.key} onClick={() => chooseLevel(item)} />)}</div>{!exactStatuses.length && <p className="activity-guide__empty">No exact Radius codes match this path.</p>}</div>}
+      {codesOpen && <div id="activity-exact-codes" className="activity-guide__exact"><div className="activity-guide__options">{exactStatuses.map((item) => <ActivityOption key={item.key} item={item} active={path.exact_status === item.key} analyzing={selected.level === 'exact_status' && selected.key === item.key} onClick={() => chooseLevel(item)} />)}</div>{!exactStatuses.length && <p className="activity-guide__empty">No exact Radius codes match this path.</p>}</div>}
     </div>
     <div className="activity-guide__search">
       <label htmlFor="activity-guide-search">Search all activities and codes <span>optional shortcut</span></label>
