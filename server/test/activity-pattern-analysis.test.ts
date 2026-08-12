@@ -67,6 +67,12 @@ describe('canonical one-activity analysis', () => {
     assert.equal(result.occurrences[0]?.exactIdentities[0]?.identity, exactRadiusIdentity({ eventType: 'B', statusCode: '99', statusDescription: 'Plates: Wash' }))
     assert.equal(result.occurrences[0]?.segments[0]?.processFamilyName, 'Cleaning / Wash')
     assert.equal(result.occurrences[0]?.segments[0]?.startUtc, result.occurrences[0]?.startUtc)
+    assert.equal(result.selection.durationSeconds, result.summary.totalDurationSeconds)
+    assert.equal(result.selection.percentageOfObservedTime, result.summary.shareOfObservedPercent)
+    const observedSeconds = fixture.presses.reduce((sum, item) => sum + item.observedSeconds, 0)
+    for (const level of ['radius_state', 'operational_group', 'process_family'] as const) {
+      assert.equal(result.catalog.filter((item) => item.level === level).reduce((sum, item) => sum + (item.durationSeconds ?? 0), 0), observedSeconds)
+    }
   })
 
   it('buckets trends, duration distribution, coverage, and excludes unavailable time', () => {

@@ -227,9 +227,14 @@ report.interactions.activityGuide = await evaluate(`(() => {
     exactCodesCollapsed: guide?.querySelector('.activity-guide__codes-toggle')?.getAttribute('aria-expanded') === 'false',
     optionalSearch: Boolean(guide?.querySelector('#activity-guide-search')),
     legacyBlindPicker: Boolean(document.querySelector('.activity-explorer > .activity-picker')),
+    timedChoices: guide?.querySelectorAll('.activity-guide__stage .activity-guide__option-meta b').length,
+    totalChoices: guide?.querySelectorAll('.activity-guide__stage .activity-guide__option').length,
+    percentageChoices: [...guide?.querySelectorAll('.activity-guide__stage .activity-guide__option-meta small') ?? []].every((item) => item.textContent.includes('% observed')),
+    exactEvidenceBelowTimeline: document.querySelector('.physical-signature-summary')?.nextElementSibling?.classList.contains('activity-evidence') ?? false,
+    comparisonBelowExactEvidence: document.querySelector('.activity-evidence')?.nextElementSibling?.classList.contains('activity-two-column') ?? false,
   }
 })()`)
-if (!report.interactions.activityGuide.present || report.interactions.activityGuide.stages.join('|') !== 'Radius phase|Operational Group|Process Family' || !report.interactions.activityGuide.exactCodesCollapsed || !report.interactions.activityGuide.optionalSearch || report.interactions.activityGuide.legacyBlindPicker) throw new Error(`Operational guided selector is incomplete: ${JSON.stringify(report.interactions.activityGuide)}`)
+if (!report.interactions.activityGuide.present || report.interactions.activityGuide.stages.join('|') !== 'Radius phase|Operational Group|Process Family' || !report.interactions.activityGuide.exactCodesCollapsed || !report.interactions.activityGuide.optionalSearch || report.interactions.activityGuide.legacyBlindPicker || report.interactions.activityGuide.timedChoices !== report.interactions.activityGuide.totalChoices || !report.interactions.activityGuide.percentageChoices || !report.interactions.activityGuide.exactEvidenceBelowTimeline || !report.interactions.activityGuide.comparisonBelowExactEvidence) throw new Error(`Operational guided selector or evidence placement is incomplete: ${JSON.stringify(report.interactions.activityGuide)}`)
 const firstRadiusChoice = await evaluate(`(() => { const button = document.querySelector('.activity-guide__stage[aria-labelledby="activity-guide-radius_state"] .activity-guide__option'); const label = button?.querySelector('strong')?.textContent; button?.click(); return label })()`)
 if (!firstRadiusChoice) throw new Error('Operational guide exposed no Radius phase choice')
 await waitFor(`new URLSearchParams(location.search).get('activityLevel') === 'radius_state' && document.querySelector('.activity-guide__active strong')?.textContent === ${JSON.stringify(firstRadiusChoice)} && !document.querySelector('.activity-explorer > .scope-progress')`, 'guided Radius phase selection')

@@ -573,6 +573,8 @@ export interface ActivityCatalogItem extends ActivitySelection {
   processFamilyKey: string | null
   processFamilyName: string | null
   needsClassification: boolean
+  durationSeconds?: number
+  percentageOfObservedTime?: number
 }
 
 export interface ActivityOccurrence {

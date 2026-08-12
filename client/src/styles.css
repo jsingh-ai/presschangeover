@@ -1353,6 +1353,9 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .activity-guide__option strong { overflow-wrap: anywhere; font-size: .64rem; }
 .activity-guide__option small { display: -webkit-box; overflow: hidden; color: var(--muted); font-size: .52rem; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .activity-guide__option em { flex: 0 0 auto; color: var(--primary); font-size: .48rem; font-style: normal; font-weight: 900; text-transform: uppercase; }
+.activity-guide__option > .activity-guide__option-meta { display: grid; flex: 0 0 auto; justify-items: end; gap: .04rem; min-width: 4.7rem; text-align: right; }
+.activity-guide__option-meta b { color: var(--text-strong); font-size: .58rem; white-space: nowrap; }
+.activity-guide__option-meta small { display: block; color: var(--muted); font-size: .46rem; white-space: nowrap; }
 .activity-guide__empty { margin: .4rem 0; color: var(--muted); font-size: .58rem; }
 .activity-guide__codes { margin-top: .6rem; border: 1px solid var(--border); border-radius: .45rem; }
 .activity-guide__codes-toggle { display: flex; align-items: center; justify-content: space-between; gap: 1rem; width: 100%; padding: .65rem .75rem; color: var(--text); background: var(--surface-subtle); border: 0; border-radius: inherit; cursor: pointer; text-align: left; }

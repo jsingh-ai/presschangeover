@@ -95,7 +95,22 @@ export function buildActivityCatalog(overview: RadiusOverview, snapshot: Classif
       processFamilyName: family?.displayName ?? null, needsClassification: false,
     })
   }
-  return [...items.values()].sort((a, b) => a.level.localeCompare(b.level) || a.label.localeCompare(b.label, undefined, { numeric: true }))
+  const totals = new Map<string, number>()
+  let observedSeconds = 0
+  const add = (key: string, seconds: number) => totals.set(key, (totals.get(key) ?? 0) + seconds)
+  for (const press of overview.presses) for (const segment of press.timelineSegments) {
+    if (segment.kind !== 'radius') continue
+    observedSeconds += segment.durationSeconds
+    const semantic = classified(segment)
+    add(`radius_state:${segment.eventType}`, segment.durationSeconds)
+    add(`operational_group:${semantic.groupKey}`, segment.durationSeconds)
+    add(`process_family:${semantic.groupKey}:${semantic.familyKey}`, segment.durationSeconds)
+    add(`exact_status:${exactRadiusIdentity(segment)}`, segment.durationSeconds)
+  }
+  return [...items.entries()].map(([catalogKey, item]) => {
+    const durationSeconds = totals.get(catalogKey) ?? 0
+    return { ...item, durationSeconds, percentageOfObservedTime: percentage(durationSeconds, observedSeconds) }
+  }).sort((a, b) => a.level.localeCompare(b.level) || (b.durationSeconds ?? 0) - (a.durationSeconds ?? 0) || a.label.localeCompare(b.label, undefined, { numeric: true }))
 }
 
 function matches(segment: RadiusStateSegment, selection: ActivitySelection): boolean {

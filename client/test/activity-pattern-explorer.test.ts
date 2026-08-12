@@ -10,10 +10,10 @@ import type { ActivityAnalysis, OperationalAnalytics, PatternAnalysis } from '..
 Object.assign(globalThis, { React })
 
 const catalog = [
-  { level: 'radius_state', key: 'B', label: 'Bad', description: 'Bad state', eventType: 'B', statusCode: null, statusDescription: null, operationalGroupKey: null, operationalGroupName: null, processFamilyKey: null, processFamilyName: null, needsClassification: false },
-  { level: 'operational_group', key: 'MAINTENANCE_INTERVENTION', label: 'Maintenance Intervention', description: 'Maintenance activity', eventType: null, statusCode: null, statusDescription: null, operationalGroupKey: 'MAINTENANCE_INTERVENTION', operationalGroupName: 'Maintenance Intervention', processFamilyKey: null, processFamilyName: null, needsClassification: false },
-  { level: 'operational_group', key: 'ROUTINE_PROCESS', label: 'Routine Process', description: 'Normal recurring process work', eventType: null, statusCode: null, statusDescription: null, operationalGroupKey: 'ROUTINE_PROCESS', operationalGroupName: 'Routine Process', processFamilyKey: null, processFamilyName: null, needsClassification: false },
-  { level: 'process_family', key: 'CLEANING_WASH', label: 'Cleaning / Wash', description: 'Cleaning family', eventType: null, statusCode: null, statusDescription: null, operationalGroupKey: 'ROUTINE_PROCESS', operationalGroupName: 'Routine Process', processFamilyKey: 'CLEANING_WASH', processFamilyName: 'Cleaning / Wash', needsClassification: false },
+  { level: 'radius_state', key: 'B', label: 'Bad', description: 'Bad state', eventType: 'B', statusCode: null, statusDescription: null, operationalGroupKey: null, operationalGroupName: null, processFamilyKey: null, processFamilyName: null, needsClassification: false, durationSeconds: 49_200, percentageOfObservedTime: 73 },
+  { level: 'operational_group', key: 'MAINTENANCE_INTERVENTION', label: 'Maintenance Intervention', description: 'Maintenance activity', eventType: null, statusCode: null, statusDescription: null, operationalGroupKey: 'MAINTENANCE_INTERVENTION', operationalGroupName: 'Maintenance Intervention', processFamilyKey: null, processFamilyName: null, needsClassification: false, durationSeconds: 16_260, percentageOfObservedTime: 24.1 },
+  { level: 'operational_group', key: 'ROUTINE_PROCESS', label: 'Routine Process', description: 'Normal recurring process work', eventType: null, statusCode: null, statusDescription: null, operationalGroupKey: 'ROUTINE_PROCESS', operationalGroupName: 'Routine Process', processFamilyKey: null, processFamilyName: null, needsClassification: false, durationSeconds: 49_200, percentageOfObservedTime: 73 },
+  { level: 'process_family', key: 'CLEANING_WASH', label: 'Cleaning / Wash', description: 'Cleaning family', eventType: null, statusCode: null, statusDescription: null, operationalGroupKey: 'ROUTINE_PROCESS', operationalGroupName: 'Routine Process', processFamilyKey: 'CLEANING_WASH', processFamilyName: 'Cleaning / Wash', needsClassification: false, durationSeconds: 15_300, percentageOfObservedTime: 22.7 },
   { level: 'exact_status', key: 'B\u001f99\u001fPlates: Wash', label: 'B / 99 / Plates: Wash', description: null, eventType: 'B', statusCode: '99', statusDescription: 'Plates: Wash', operationalGroupKey: 'ROUTINE_PROCESS', operationalGroupName: 'Routine Process', processFamilyKey: 'CLEANING_WASH', processFamilyName: 'Cleaning / Wash', needsClassification: false },
 ] as ActivityAnalysis['catalog']
 
@@ -50,6 +50,8 @@ describe('one-activity explorer presentation', () => {
     const html = renderToStaticMarkup(createElement(GuidedActivityPicker, { catalog, selected: exact, onSelect() {} }))
     for (const copy of ['Guided activity selection', 'Currently analyzing', 'Radius phase', 'Operational Group', 'Process Family', 'Hide exact Radius codes', 'optional shortcut', 'Each choice replaces the one activity']) assert.match(html, new RegExp(copy))
     assert.match(html, /B \/ 99 \/ Plates: Wash/)
+    assert.match(html, /73\.0% observed/)
+    assert.match(html, /22\.7% observed/)
     assert.doesNotMatch(html, /Search one activity/)
   })
 
@@ -92,6 +94,8 @@ describe('one-activity explorer presentation', () => {
     assert.match(html, /Process Family/)
     assert.match(html, /Open evidence/)
     assert.doesNotMatch(html, /Stops &amp; Recovery/)
+    assert.ok(html.indexOf('Physical signature across the full time range') < html.indexOf('Exact occurrences'))
+    assert.ok(html.indexOf('Exact occurrences') < html.indexOf('Press comparison'))
   })
 
   it('plots complete-range Radius and semantic context while highlighting only the selected activity', () => {
