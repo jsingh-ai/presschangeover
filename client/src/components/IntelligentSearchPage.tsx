@@ -130,11 +130,18 @@ function SearchGuide({ onExample, pressKey }: { onExample(value: string): void; 
   </section>
 }
 
+export function AppliedSearchChips({ query, pressKey, onClearQuery, onClearPress, onClearAll }: { query?: string; pressKey?: RadiusPressKey; onClearQuery(): void; onClearPress(): void; onClearAll(): void }) {
+  if (!query && !pressKey) return null
+  return <section className="search-applied" aria-label="Applied search choices"><div><span>Applied</span>{query && <button type="button" className="search-applied-chip" data-clear="query" onClick={onClearQuery} aria-label={`Clear search ${query}`}><small>Search</small><strong>{query}</strong><b aria-hidden="true">×</b></button>}{pressKey && <button type="button" className="search-applied-chip" data-clear="press" onClick={onClearPress} aria-label={`Clear ${pressLabel(pressKey)} focus`}><small>Press</small><strong>{pressLabel(pressKey)}</strong><b aria-hidden="true">×</b></button>}</div><button type="button" className="search-clear-all" onClick={onClearAll}>Clear everything</button></section>
+}
+
 export function IntelligentSearchPage() {
   const initialLocation = typeof window === 'undefined' ? undefined : window.location
   const initialQuery = initialLocation ? new URLSearchParams(initialLocation.search).get('q') ?? '' : ''
   const [query, setQuery] = useState(initialQuery)
+  const [activeQuery, setActiveQuery] = useState(initialQuery)
   const [pressKey, setPressKey] = useState<RadiusPressKey | undefined>(() => initialLocation ? pressFromLocation(initialLocation.pathname, initialLocation.search) : undefined)
+  const [guideVersion, setGuideVersion] = useState(0)
   const [response, setResponse] = useState<ClassificationSearchResponse>()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
@@ -146,6 +153,7 @@ export function IntelligentSearchPage() {
     activeRequest.current?.abort()
     const controller = new AbortController()
     activeRequest.current = controller
+    setActiveQuery(normalized)
     setLoading(true)
     setError(undefined)
     if (updateUrl) {
@@ -163,6 +171,7 @@ export function IntelligentSearchPage() {
     const restore = () => {
       const restored = new URLSearchParams(window.location.search).get('q') ?? ''
       setQuery(restored)
+      setActiveQuery(restored)
       setPressKey(pressFromLocation(window.location.pathname, window.location.search))
       if (restored) void runSearch(restored, false)
       else { activeRequest.current?.abort(); setResponse(undefined); setError(undefined); setLoading(false) }
@@ -183,9 +192,37 @@ export function IntelligentSearchPage() {
 
   function searchExample(value: string) { setQuery(value); void runSearch(value, true) }
 
+  function clearSearch() {
+    activeRequest.current?.abort()
+    const url = new URL(window.location.href)
+    url.searchParams.delete('q')
+    window.history.pushState({}, '', `${url.pathname}?${url.searchParams}`)
+    setQuery('')
+    setActiveQuery('')
+    setResponse(undefined)
+    setError(undefined)
+    setLoading(false)
+  }
+
+  function clearEverything() {
+    activeRequest.current?.abort()
+    const url = new URL(window.location.href)
+    url.searchParams.delete('q')
+    url.searchParams.delete('press')
+    window.history.pushState({}, '', `${url.pathname}?${url.searchParams}`)
+    setQuery('')
+    setActiveQuery('')
+    setPressKey(undefined)
+    setResponse(undefined)
+    setError(undefined)
+    setLoading(false)
+    setGuideVersion((value) => value + 1)
+  }
+
   return <div className="intelligent-search-page">
     <section className="intelligent-search-hero"><div><span className="eyebrow">Find a term, then investigate it</span><h1>Intelligent Search</h1><p>Use the words you already know. Search will connect a work type, Process Family, or exact Radius status to the page where you can understand its time, patterns, and classification.</p></div><form className="intelligent-search-form" role="search" onSubmit={submit}><label htmlFor="classification-search">What work, Radius wording, or code are you looking for?</label><div><input id="classification-search" type="search" value={query} maxLength={128} autoComplete="off" onChange={(event) => setQuery(event.target.value)} placeholder="Try Make Ready, Cleaning, Register, or 150…" /><button type="submit" disabled={loading || !query.trim()}>Search</button></div></form></section>
-    <SearchGuide onExample={searchExample} pressKey={pressKey} />
+    <AppliedSearchChips query={activeQuery} pressKey={pressKey} onClearQuery={clearSearch} onClearPress={() => selectPress(undefined)} onClearAll={clearEverything} />
+    <SearchGuide key={guideVersion} onExample={searchExample} pressKey={pressKey} />
     <section className="search-press-scope" aria-labelledby="search-press-title"><div><span className="eyebrow">Optional press focus</span><h2 id="search-press-title">Where do you want to investigate the result?</h2><p>The operating names are shared across presses. This choice keeps one press selected when you open Operational Analysis or start a pattern.</p></div><div role="group" aria-label="Press focus"><button type="button" className={!pressKey ? 'active' : ''} aria-pressed={!pressKey} onClick={() => selectPress(undefined)}>All Presses</button>{SEARCH_PRESSES.map((press) => <button type="button" key={press.key} className={pressKey === press.key ? 'active' : ''} aria-pressed={pressKey === press.key} onClick={() => selectPress(press.key)}>{press.label}</button>)}</div></section>
     <IntelligentSearchResults response={response} loading={loading} error={error} pressKey={pressKey} />
   </div>

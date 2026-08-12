@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 import React, { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { getClassificationFamilies, getClassificationGroups, getClassificationIdentities, searchClassifications } from '../src/api/process-intelligence-api'
-import { IntelligentSearchIndex, IntelligentSearchPage, IntelligentSearchResults } from '../src/components/IntelligentSearchPage'
+import { AppliedSearchChips, IntelligentSearchIndex, IntelligentSearchPage, IntelligentSearchResults } from '../src/components/IntelligentSearchPage'
 import type { ClassificationSearchResponse, ClassificationSearchResult, ClassificationWorkspace, OperationalGroup, ProcessFamily } from '../src/types/api'
 
 Object.assign(globalThis, { React })
@@ -92,6 +92,17 @@ describe('Intelligent Search presentation', () => {
     assert.match(identityHtml, /M \/ 16 · observed 42 times/)
     assert.match(identityHtml, /1 available/)
     assert.doesNotMatch(identityHtml, /H \/ No code/)
+  })
+
+  it('shows applied search and press choices as removable chips with one full reset', () => {
+    const html = renderToStaticMarkup(createElement(AppliedSearchChips, { query: 'Anilox: Change', pressKey: 'press10', onClearQuery() {}, onClearPress() {}, onClearAll() {} }))
+    assert.match(html, /Applied search choices/)
+    assert.match(html, /data-clear="query"/)
+    assert.match(html, /Clear search Anilox: Change/)
+    assert.match(html, /data-clear="press"/)
+    assert.match(html, /Clear Press 10 focus/)
+    assert.match(html, /Clear everything/)
+    assert.equal(renderToStaticMarkup(createElement(AppliedSearchChips, { onClearQuery() {}, onClearPress() {}, onClearAll() {} })), '')
   })
 
   it('renders exact-status hierarchy and preserved Radius identity metadata', () => {
