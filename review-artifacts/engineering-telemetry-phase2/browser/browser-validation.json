@@ -1,0 +1,222 @@
+{
+  "matrix": {
+    "390": {
+      "light": {
+        "theme": "light",
+        "pageOverflow": false,
+        "panelContained": true,
+        "scopeContained": true,
+        "scopeButtons": 11,
+        "selectedScopes": 1,
+        "categories": 5,
+        "signals": 2
+      },
+      "dark": {
+        "theme": "dark",
+        "pageOverflow": false,
+        "panelContained": true,
+        "scopeContained": true,
+        "scopeButtons": 11,
+        "selectedScopes": 1,
+        "categories": 5,
+        "signals": 2
+      }
+    },
+    "768": {
+      "light": {
+        "theme": "light",
+        "pageOverflow": false,
+        "panelContained": true,
+        "scopeContained": true,
+        "scopeButtons": 11,
+        "selectedScopes": 1,
+        "categories": 5,
+        "signals": 2
+      },
+      "dark": {
+        "theme": "dark",
+        "pageOverflow": false,
+        "panelContained": true,
+        "scopeContained": true,
+        "scopeButtons": 11,
+        "selectedScopes": 1,
+        "categories": 5,
+        "signals": 2
+      }
+    },
+    "1200": {
+      "light": {
+        "theme": "light",
+        "pageOverflow": false,
+        "panelContained": true,
+        "scopeContained": true,
+        "scopeButtons": 11,
+        "selectedScopes": 1,
+        "categories": 5,
+        "signals": 2
+      },
+      "dark": {
+        "theme": "dark",
+        "pageOverflow": false,
+        "panelContained": true,
+        "scopeContained": true,
+        "scopeButtons": 11,
+        "selectedScopes": 1,
+        "categories": 5,
+        "signals": 2
+      }
+    },
+    "1440": {
+      "light": {
+        "theme": "light",
+        "pageOverflow": false,
+        "panelContained": true,
+        "scopeContained": true,
+        "scopeButtons": 11,
+        "selectedScopes": 1,
+        "categories": 5,
+        "signals": 2
+      },
+      "dark": {
+        "theme": "dark",
+        "pageOverflow": false,
+        "panelContained": true,
+        "scopeContained": true,
+        "scopeButtons": 11,
+        "selectedScopes": 1,
+        "categories": 5,
+        "signals": 2
+      }
+    },
+    "1600": {
+      "light": {
+        "theme": "light",
+        "pageOverflow": false,
+        "panelContained": true,
+        "scopeContained": true,
+        "scopeButtons": 11,
+        "selectedScopes": 1,
+        "categories": 5,
+        "signals": 2
+      },
+      "dark": {
+        "theme": "dark",
+        "pageOverflow": false,
+        "panelContained": true,
+        "scopeContained": true,
+        "scopeButtons": 11,
+        "selectedScopes": 1,
+        "categories": 5,
+        "signals": 2
+      }
+    }
+  },
+  "integration": {
+    "clueToInspector": {
+      "clue": "Anilox Drive Temperature",
+      "selectedScope": "Deck 7",
+      "selectedCategory": "Anilox Drive",
+      "highlighted": "anilox.drive.temperature.actual",
+      "detailedTrace": true
+    },
+    "cluePin": "Deck 7 · Anilox Drive TemperatureSupported×",
+    "keyboardCrosshair": {
+      "before": "Inspection time · Aug 12, 6:55:16 PM CT",
+      "after": "Inspection time · Aug 12, 6:59:40 PM CT",
+      "values": 12
+    },
+    "nextOccurrence": {
+      "pinsBefore": [
+        "Machine ·",
+        "Deck 1 ·",
+        "Deck 3 ·",
+        "Deck 10 ·",
+        "Machine ·",
+        "Deck 5 ·",
+        "Deck 1 ·",
+        "Machine ·",
+        "Deck 4 ·",
+        "Deck 3 ·",
+        "Deck 3 ·",
+        "Machine ·"
+      ],
+      "pinsAfter": [
+        "Machine ·",
+        "Deck 1 ·",
+        "Deck 3 ·",
+        "Deck 10 ·",
+        "Machine ·",
+        "Deck 5 ·",
+        "Deck 1 ·",
+        "Machine ·",
+        "Deck 4 ·",
+        "Deck 3 ·",
+        "Deck 3 ·",
+        "Machine ·"
+      ],
+      "focusedOccurrence": "press5:2026-08-13T00:45:36.424Z:1",
+      "unavailablePins": 0
+    }
+  },
+  "performance": {
+    "firstUsableInspectorMs": 1904.8,
+    "fivePins": {
+      "pins": 5,
+      "numericRows": 5,
+      "intervalRows": 0,
+      "eventRows": 1,
+      "crosshairValues": 5,
+      "requests": [
+        {
+          "url": "/api/telemetry/presses/press5/semantic-history",
+          "selectors": 6,
+          "started": 1334.1000000238419,
+          "state": "complete",
+          "status": 200,
+          "latencyMs": 72.59999996423721,
+          "bytes": 130866
+        }
+      ],
+      "renderedMs": 1892.3
+    },
+    "twelvePins": {
+      "pins": 12,
+      "numericRows": 10,
+      "intervalRows": 2,
+      "eventRows": 1,
+      "crosshairValues": 12,
+      "requests": [
+        {
+          "url": "/api/telemetry/presses/press5/semantic-history",
+          "selectors": 12,
+          "started": 1170.9000000357628,
+          "state": "complete",
+          "status": 200,
+          "latencyMs": 170.0999999642372,
+          "bytes": 308362
+        }
+      ],
+      "renderedMs": 1804.7
+    },
+    "browserMetrics": {
+      "Documents": 3,
+      "Nodes": 3891,
+      "JSHeapUsedSize": 16450808,
+      "JSHeapTotalSize": 90968064
+    }
+  },
+  "noClue": {
+    "message": "No strong telemetry clue was identified for this occurrence. You can still inspect available engineering signals below.",
+    "scopeButtons": 11,
+    "categories": 2,
+    "signals": 2,
+    "inspectEnabled": true
+  },
+  "degraded": {
+    "signalErrors": 2,
+    "signature": true,
+    "occurrences": true,
+    "fatal": false
+  },
+  "consoleErrors": []
+}

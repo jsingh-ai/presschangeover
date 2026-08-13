@@ -51,7 +51,7 @@ describe('primary telemetry visual integration', () => {
     assert.match(html, />2<\/b>/)
     const source = readFileSync(new URL('../src/components/SynchronizedTimeline.tsx', import.meta.url), 'utf8')
     assert.match(source, /setHoveredEventUtc/)
-    assert.match(source, /setCrosshair\(cluster\.positionPercent\)/)
+    assert.match(source, /updateCrosshair\(cluster\.positionPercent\)/)
     assert.match(source, /groupTimelineEvents\(cluster\.events\)/)
     assert.match(source, /group\.events\.slice\(0, 6\)/)
     assert.match(source, /Show all/)

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 
 const panelSource = readFileSync(new URL('../src/components/TelemetryCluesPanel.tsx', import.meta.url), 'utf8')
+const inspectorSource = readFileSync(new URL('../src/components/EngineeringTelemetryInspector.tsx', import.meta.url), 'utf8')
 const operationalSource = readFileSync(new URL('../src/components/OperationalActivityExplorer.tsx', import.meta.url), 'utf8')
 const apiSource = readFileSync(new URL('../src/api/process-intelligence-api.ts', import.meta.url), 'utf8')
 const serverClueSource = readFileSync(new URL('../../server/src/telemetry/engineering-clue-analysis.ts', import.meta.url), 'utf8')
@@ -17,27 +18,25 @@ describe('Engineering Telemetry Clues client integration', () => {
     assert.match(operationalSource, /next=\{focusedOccurrenceIndex >= 0/)
   })
 
-  it('cancels stale clue and trace requests and clears the previous occurrence response', () => {
-    assert.ok((panelSource.match(/new AbortController\(\)/g) ?? []).length >= 2)
-    assert.ok((panelSource.match(/controller\.abort\(\)/g) ?? []).length >= 2)
+  it('cancels stale clue and inspector requests and clears the previous occurrence response', () => {
+    assert.ok(((panelSource + inspectorSource).match(/new AbortController\(\)/g) ?? []).length >= 3)
+    assert.ok(((panelSource + inspectorSource).match(/controller\.abort\(\)/g) ?? []).length >= 3)
     assert.match(panelSource, /value\.occurrence\.occurrenceId === identity/)
     assert.match(panelSource, /setData\(undefined\); setLoading\(true\)/)
   })
 
-  it('uses the existing generic semantic-history route for a single selected View Trace signal', () => {
+  it('uses the existing generic semantic-history route for selected and pinned traces', () => {
     assert.match(apiSource, /getPressSemanticHistory/)
     assert.match(apiSource, /semantic-history/)
-    assert.match(panelSource, /signals: \[\{ canonicalId: clue\.canonicalId/)
-    assert.match(panelSource, /SynchronizedTimeline/)
-    assert.match(panelSource, /Radius entry/)
-    assert.match(panelSource, /Occurrence end/)
-    assert.match(panelSource, /Evidence window starts/)
-    assert.match(panelSource, /Evidence window ends/)
-    assert.match(panelSource, /clue\.canonicalId === 'physical\.motion_state'/)
-    assert.match(panelSource, /getPressMotion\(occurrence\.pressKey, window\.fromUtc, window\.toUtc/)
-    assert.match(panelSource, /clue\.signalType === 'continuous' \? 'samples' : 'changes'/)
-    assert.match(panelSource, /selected-step-signal/)
-    assert.match(panelSource, /raw transitions/)
+    assert.match(inspectorSource, /getPressSemanticHistory/)
+    assert.match(inspectorSource, /SynchronizedTimeline/)
+    assert.match(inspectorSource, /Occurrence starts/)
+    assert.match(inspectorSource, /Occurrence ends/)
+    assert.match(inspectorSource, /canonicalId !== 'physical\.motion_state'/)
+    assert.match(inspectorSource, /getPressMotion\(pressKey, window\.fromUtc, window\.toUtc/)
+    assert.match(inspectorSource, /signalType === 'continuous' \? 'samples' : 'changes'/)
+    assert.match(inspectorSource, /interpolation: definition\.signalType === 'step_reference' \? 'step'/)
+    assert.match(inspectorSource, /Raw value/)
   })
 
   it('keeps the Operational page usable when clue telemetry is unavailable', () => {

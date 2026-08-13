@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties, type PointerEvent } from 'react'
+import { useMemo, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react'
 import { formatPlantDateTime } from '../time-ranges'
 import type { TimedNumericSample } from '../types/evidence'
 
@@ -91,6 +91,8 @@ export interface SynchronizedTimelineProps {
   onSelect?(item: TimelineIntervalItem, track: TimelineIntervalTrack): void
   ariaLabel: string
   minimumCanvasWidth?: number
+  highlightedRange?: { fromUtc: string; toUtc: string; label: string }
+  onInspectionTimeChange?(atUtc: string): void
 }
 
 export function clusterTimelineEvents(events: TimelineEvent[], fromUtc: string, toUtc: string, thresholdPercent = .8): TimelineEventCluster[] {
@@ -154,7 +156,7 @@ export function numericPaths(samples: TimedNumericSample[], from: number, span: 
   return { paths, minimum, maximum }
 }
 
-export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolute', elapsedOriginUtc, intervalTracks, numericTracks = [], eventTracks = [], trackOrder, selectedId, onSelect, ariaLabel, minimumCanvasWidth = 760 }: SynchronizedTimelineProps) {
+export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolute', elapsedOriginUtc, intervalTracks, numericTracks = [], eventTracks = [], trackOrder, selectedId, onSelect, ariaLabel, minimumCanvasWidth = 760, highlightedRange, onInspectionTimeChange }: SynchronizedTimelineProps) {
   const from = Date.parse(fromUtc)
   const to = Date.parse(toUtc)
   const span = Math.max(1, to - from)
@@ -167,12 +169,16 @@ export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolut
   const canvasStyle = { '--timeline-min-width': `${minimumCanvasWidth}px` } as CSSProperties
   const numericGeometry = useMemo(() => numericTracks.map((track) => ({ track, geometry: numericPaths(track.samples, from, span, 1000, 88, track.connectObservedGaps, track.interpolation) })), [numericTracks, from, span])
   const eventGeometry = useMemo(() => eventTracks.map((track) => ({ track, clusters: clusterTimelineEvents(track.events, fromUtc, toUtc) })), [eventTracks, fromUtc, toUtc])
+  const highlightedGeometry = highlightedRange ? {
+    start: Math.min(1, Math.max(0, (Date.parse(highlightedRange.fromUtc) - from) / span)),
+    width: Math.min(1 - Math.min(1, Math.max(0, (Date.parse(highlightedRange.fromUtc) - from) / span)), Math.max(0, (Math.min(to, Date.parse(highlightedRange.toUtc)) - Math.max(from, Date.parse(highlightedRange.fromUtc))) / span)),
+  } : undefined
 
   const eventDescription = (event: TimelineEvent) => `${event.label}. ${formatPlantDateTime(event.atUtc)} CT${coordinateMode === 'elapsed' ? `, ${timeLabel(event.atUtc, labelOrigin, coordinateMode)} elapsed` : ''}${event.detail ? `. ${event.detail}` : ''}`
   const focusInterval = (item: TimelineIntervalItem) => {
     setHovered(item)
     const midpoint = (Date.parse(item.startUtc) + Date.parse(item.endUtc)) / 2
-    setCrosshair(Math.min(100, Math.max(0, (midpoint - from) / span * 100)))
+    updateCrosshair(Math.min(100, Math.max(0, (midpoint - from) / span * 100)))
   }
   const rowOrder = (kind: 'interval' | 'numeric' | 'event', id: string): CSSProperties | undefined => {
     if (!trackOrder) return undefined
@@ -195,14 +201,30 @@ export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolut
   }
 
   function moveCrosshair(event: PointerEvent<HTMLDivElement>) {
-    const bounds = event.currentTarget.getBoundingClientRect()
-    setCrosshair(Math.min(100, Math.max(0, (event.clientX - bounds.left) / Math.max(1, bounds.width) * 100)))
+    const plot = event.currentTarget.querySelector<HTMLElement>('.synchronized-timeline__track, .synchronized-timeline__numeric, .synchronized-timeline__events')
+    const bounds = plot?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect()
+    updateCrosshair(Math.min(100, Math.max(0, (event.clientX - bounds.left) / Math.max(1, bounds.width) * 100)))
+  }
+
+  function updateCrosshair(percent: number) {
+    const resolved = Math.min(100, Math.max(0, percent))
+    setCrosshair(resolved)
+    onInspectionTimeChange?.(new Date(from + span * resolved / 100).toISOString())
+  }
+
+  function moveCrosshairWithKeyboard(event: KeyboardEvent<HTMLDivElement>) {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+    event.preventDefault()
+    if (event.key === 'Home') updateCrosshair(0)
+    else if (event.key === 'End') updateCrosshair(100)
+    else updateCrosshair((crosshair ?? 50) + (event.key === 'ArrowLeft' ? -1 : 1) * (event.shiftKey ? 5 : 1))
   }
 
   return <div className="synchronized-timeline" aria-label={ariaLabel}>
-    <div className="synchronized-timeline__scroll" tabIndex={0} aria-label={`Scrollable ${coordinateMode === 'absolute' ? 'wall-clock' : 'elapsed-time'} timeline`}>
+    <div className="synchronized-timeline__scroll" tabIndex={0} aria-label={`Scrollable ${coordinateMode === 'absolute' ? 'wall-clock' : 'elapsed-time'} timeline. Use Left and Right Arrow keys to move the inspection time; Shift moves farther.`} onKeyDown={moveCrosshairWithKeyboard}>
       <div className="synchronized-timeline__canvas" style={canvasStyle} onPointerMove={moveCrosshair} onPointerLeave={() => { setCrosshair(undefined); setHovered(undefined); setHoveredEventUtc(undefined) }}>
         <div className="synchronized-timeline__axis"><time>{timeLabel(fromUtc, labelOrigin, coordinateMode)}</time><span>{coordinateMode === 'absolute' ? 'Wall clock' : 'Elapsed Run time'}</span><time>{timeLabel(toUtc, labelOrigin, coordinateMode)}</time></div>
+        {highlightedGeometry && <div className="synchronized-timeline__highlight" style={{ '--timeline-highlight-start': highlightedGeometry.start, '--timeline-highlight-width': highlightedGeometry.width } as CSSProperties} title={highlightedRange?.label} aria-hidden="true" />}
         {intervalTracks.map((track) => <div className="synchronized-timeline__row" key={track.id} style={rowOrder('interval', track.id)}>
           <strong>{track.label}</strong>
           <div className="synchronized-timeline__track" role="group" aria-label={`${track.label} intervals`}>
@@ -227,13 +249,13 @@ export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolut
               {clusters.length ? clusters.map((cluster) => {
                 const description = cluster.events.map(eventDescription).join(' ')
                 const category = cluster.events.length === 1 ? cluster.events[0]!.category.replace(/[^a-z0-9_-]/gi, '-').toLowerCase() : 'cluster'
-                return <button type="button" key={cluster.id} className={`synchronized-timeline__event synchronized-timeline__event--${category} ${selectedEventCluster === cluster.id ? 'is-selected' : ''}`} style={{ left: `${cluster.positionPercent}%` }} title={description} aria-label={description} onMouseEnter={() => { setCrosshair(cluster.positionPercent); setHoveredEventUtc(cluster.events[0]?.atUtc) }} onFocus={() => { setCrosshair(cluster.positionPercent); setHoveredEventUtc(cluster.events[0]?.atUtc) }} onMouseLeave={() => { setCrosshair(undefined); setHoveredEventUtc(undefined) }} onBlur={() => { setCrosshair(undefined); setHoveredEventUtc(undefined) }} onClick={() => selectEventCluster(cluster.id)}><i aria-hidden="true" />{cluster.events.length > 1 && <b>{cluster.events.length}</b>}</button>
+                return <button type="button" key={cluster.id} className={`synchronized-timeline__event synchronized-timeline__event--${category} ${selectedEventCluster === cluster.id ? 'is-selected' : ''}`} style={{ left: `${cluster.positionPercent}%` }} title={description} aria-label={description} onMouseEnter={() => { updateCrosshair(cluster.positionPercent); setHoveredEventUtc(cluster.events[0]?.atUtc) }} onFocus={() => { updateCrosshair(cluster.positionPercent); setHoveredEventUtc(cluster.events[0]?.atUtc) }} onMouseLeave={() => { setCrosshair(undefined); setHoveredEventUtc(undefined) }} onBlur={() => { setCrosshair(undefined); setHoveredEventUtc(undefined) }} onClick={() => selectEventCluster(cluster.id)}><i aria-hidden="true" />{cluster.events.length > 1 && <b>{cluster.events.length}</b>}</button>
               }) : <span>{track.unavailableLabel ?? 'No observed changes in this range'}</span>}
             </div>
             {clusters.map((cluster) => selectedEventCluster === cluster.id && <div className="synchronized-timeline__event-detail" role="region" aria-label="Selected event details" key={`detail:${cluster.id}`}><header><strong>{cluster.events.length === 1 ? 'Observed event' : `${cluster.events.length} events`}</strong><span>{groupTimelineEvents(cluster.events).length} {groupTimelineEvents(cluster.events).length === 1 ? 'change group' : 'change groups'}</span></header><div className="synchronized-timeline__event-groups">{groupTimelineEvents(cluster.events).map((group) => { const groupId = `${cluster.id}:${group.key}`; const expanded = expandedEventGroups.has(groupId); const visible = expanded ? group.events : group.events.slice(0, 6); return <section key={group.key} className="synchronized-timeline__event-group"><div><strong>{group.label}</strong><b>{group.events.length}</b></div><ol>{visible.map((event) => <li key={event.id}><time>{formatPlantDateTime(event.atUtc)} CT</time><span>{event.label}</span></li>)}</ol>{group.events.length > 6 && <button type="button" className="secondary-action" onClick={() => toggleEventGroup(groupId)}>{expanded ? 'Show first 6' : `Show all ${group.events.length}`}</button>}</section> })}</div></div>)}
           </div>
         </div>)}
-        {crosshair !== undefined && <div className="synchronized-timeline__crosshair" style={{ left: `${crosshair}%` }} aria-hidden="true" />}
+        {crosshair !== undefined && <div className="synchronized-timeline__crosshair" style={{ '--timeline-position': crosshair / 100 } as CSSProperties} aria-hidden="true" />}
       </div>
     </div>
   </div>
