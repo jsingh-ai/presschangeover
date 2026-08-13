@@ -69,6 +69,24 @@ test('ProcessIntelligence semantic route validates bounded explicit representati
   assert.deepEqual(JSON.parse(invalid.body), { error: 'invalid_telemetry_representation' })
 })
 
+test('ProcessIntelligence clue route validates occurrence identity and returns a sanitized bounded analysis', async () => {
+  const fake = client()
+  fake.querySemanticHistory = async (_sourceId, query) => ({
+    sourceId: 41, sourceKey: 'press5', displayName: 'Press 5', fromUtc: query.fromUtc, toUtc: query.toUtc, includeSeed: query.includeSeed,
+    signals: query.signals.map(({ canonicalId, deckNumber, representation }, index) => ({ canonicalId, deckNumber: deckNumber ?? null, supported: true, mappingStatus: 'MAPPED' as const, historianSignalId: index + 1, rawSignalId: `sanitized.${index}`, sourceUnit: null, canonicalUnitStatus: 'unverified', valueKind: representation === 'samples' ? 'numeric' as const : 'integer' as const, sourceSelector: deckNumber === undefined ? null : `[${deckNumber}]`, selectedVariant: 'primary', representation, seedSample: null, samples: [], changes: [] })),
+  })
+  const app = createApp({ telemetryClient: fake, logger: false })
+  const body = { occurrenceId: 'press5:2026-08-12T03:31:00.000Z:1', displayName: 'Press 5', startUtc: '2026-08-12T03:31:00.000Z', endUtc: '2026-08-12T03:32:00.000Z', exactIdentities: [{ eventType: 'B', statusCode: '41-2', statusDescription: 'Maintenance - Electrical' }] }
+  const valid = await request(app, '/api/telemetry/presses/press5/clues', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  assert.equal(valid.status, 200)
+  assert.match(valid.body, /"evidenceWindow"|"whereToLook"/)
+  assert.doesNotMatch(valid.body, /historianSignalId|rawSignalId|sourceId/)
+
+  const invalid = await request(app, '/api/telemetry/presses/press5/clues', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, endUtc: body.startUtc }) })
+  assert.equal(invalid.status, 400)
+  assert.deepEqual(JSON.parse(invalid.body), { error: 'invalid_clue_occurrence' })
+})
+
 test('unknown press fails before any hard-coded source lookup', async () => {
   let sourceCalls = 0
   const fake = client()

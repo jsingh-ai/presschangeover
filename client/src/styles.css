@@ -1057,6 +1057,71 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 @keyframes scope-progress-spin { to { transform: rotate(360deg); } }
 .background-refresh-status { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
+.telemetry-clues { display: grid; gap: 1rem; }
+.telemetry-clues__heading { align-items: start; }
+.occurrence-navigation { display: flex; flex-wrap: wrap; gap: .4rem; }
+.occurrence-navigation button { min-height: 2.1rem; padding: .38rem .62rem; color: var(--text); background: var(--surface-subtle); border: 1px solid var(--border); border-radius: .38rem; cursor: pointer; font-size: .68rem; font-weight: 800; }
+.occurrence-navigation button:disabled { cursor: not-allowed; opacity: .42; }
+.focused-occurrence-facts { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .5rem; margin: 0; }
+.focused-occurrence-facts > div { min-width: 0; padding: .6rem .7rem; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: .42rem; }
+.focused-occurrence-facts dt, .clue-window-summaries dt { color: var(--muted); font-size: .58rem; font-weight: 850; letter-spacing: .05em; text-transform: uppercase; }
+.focused-occurrence-facts dd, .clue-window-summaries dd { margin: .18rem 0 0; overflow-wrap: anywhere; color: var(--text-strong); font-size: .7rem; font-weight: 750; }
+.telemetry-clue-window { margin: 0; padding: .65rem .75rem; color: var(--muted-strong); background: var(--primary-soft); border-left: 3px solid var(--primary); border-radius: .35rem; font-size: .72rem; }
+.telemetry-clue-coverage { display: flex; flex-wrap: wrap; gap: .45rem; }
+.telemetry-clue-coverage span { padding: .35rem .5rem; color: var(--muted); background: var(--surface-subtle); border: 1px solid var(--border); border-radius: 999px; font-size: .64rem; }
+.telemetry-clue-section { display: grid; gap: .65rem; padding-top: .85rem; border-top: 1px solid var(--border); }
+.telemetry-clue-section > h3 { margin: 0; font-size: .94rem; }
+.where-to-look-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .55rem; }
+.where-to-look-grid article { padding: .7rem .75rem; background: color-mix(in srgb, var(--primary-soft) 42%, var(--surface)); border: 1px solid var(--border); border-top: 3px solid var(--primary); border-radius: .45rem; }
+.where-to-look-grid span { display: block; color: var(--muted); font-size: .6rem; font-weight: 850; text-transform: uppercase; }
+.where-to-look-grid strong { display: block; margin-top: .15rem; color: var(--text-strong); font-size: .84rem; }
+.where-to-look-grid p { margin: .3rem 0 0; color: var(--muted-strong); font-size: .67rem; line-height: 1.45; }
+.telemetry-map-scroll { max-width: 100%; overflow-x: auto; }
+.telemetry-change-map { width: 100%; min-width: 64rem; border-collapse: separate; border-spacing: .25rem; }
+.telemetry-change-map th { padding: .32rem; color: var(--muted); font-size: .56rem; text-align: center; }
+.telemetry-change-map tbody th { position: sticky; left: 0; z-index: 2; min-width: 5rem; color: var(--text-strong); background: var(--surface); text-align: left; }
+.telemetry-change-map td { padding: 0; text-align: center; }
+.telemetry-map-cell { display: grid; width: 100%; min-width: 3.8rem; min-height: 2.25rem; padding: .25rem; place-content: center; color: var(--text); background: var(--surface-subtle); border: 1px solid var(--border); border-radius: .3rem; font: inherit; font-size: .56rem; font-weight: 800; cursor: default; }
+.telemetry-map-cell:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; }
+.telemetry-map-cell--multiple_clues { background: color-mix(in srgb, #7255a5 22%, var(--surface)); border-color: #7255a5; }
+.telemetry-map-cell--one_clue { background: color-mix(in srgb, #c58a2e 20%, var(--surface)); border-color: #a67124; }
+.telemetry-map-cell--observed_no_shift { background: color-mix(in srgb, #4e7f94 13%, var(--surface)); border-color: #66899a; }
+.telemetry-map-cell--insufficient { background: repeating-linear-gradient(135deg, var(--surface-subtle), var(--surface-subtle) 5px, var(--surface-strong) 5px, var(--surface-strong) 10px); }
+.telemetry-map-cell--temporarily_unavailable { color: var(--muted-strong); background: repeating-linear-gradient(45deg, var(--surface-subtle), var(--surface-subtle) 4px, color-mix(in srgb, #7255a5 12%, var(--surface)) 4px, color-mix(in srgb, #7255a5 12%, var(--surface)) 8px); border-style: dashed; }
+.telemetry-map-cell--unknown { color: var(--muted-strong); background: color-mix(in srgb, #8b779a 10%, var(--surface)); border-style: dotted; }
+.telemetry-map-cell--unsupported { color: var(--muted); opacity: .5; }
+.first-change-groups { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .6rem; }
+.first-change-groups article { min-width: 0; padding: .65rem; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: .42rem; }
+.first-change-groups h4 { margin: 0 0 .45rem; font-size: .72rem; }
+.first-change-groups ol { display: grid; gap: .35rem; margin: 0; padding: 0; list-style: none; }
+.first-change-groups li { display: grid; grid-template-columns: 4.4rem 1fr; gap: .45rem; padding-top: .35rem; border-top: 1px solid var(--border); }
+.first-change-groups time { color: var(--primary); font-size: .62rem; font-weight: 850; }
+.first-change-groups span { display: grid; min-width: 0; }
+.first-change-groups strong { color: var(--text-strong); font-size: .64rem; }
+.first-change-groups small { color: var(--muted); font-size: .58rem; }
+.signal-clue-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; }
+.signal-clue-grid > article { display: grid; gap: .55rem; min-width: 0; padding: .75rem; background: var(--surface-subtle); border: 1px solid var(--border); border-left: 3px solid var(--primary); border-radius: .45rem; }
+.signal-clue-grid header span { color: var(--muted); font-size: .57rem; font-weight: 850; text-transform: uppercase; }
+.signal-clue-grid h4 { margin: .15rem 0; font-size: .82rem; }
+.signal-clue-grid code { color: var(--muted); font-size: .57rem; overflow-wrap: anywhere; }
+.signal-clue-grid > article > p { margin: 0; color: var(--muted-strong); font-size: .69rem; line-height: 1.5; }
+.clue-window-summaries { display: grid; gap: .28rem; margin: 0; }
+.clue-window-summaries > div { display: grid; grid-template-columns: 3.8rem 1fr; gap: .45rem; }
+.signal-clue-grid footer { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: .45rem; padding-top: .4rem; border-top: 1px solid var(--border); }
+.signal-clue-grid footer span { color: var(--muted); font-size: .57rem; }
+.telemetry-trace-viewer { display: grid; gap: .7rem; padding: .8rem; background: var(--surface-subtle); border: 1px solid var(--primary); border-radius: .5rem; }
+
+@media (max-width: 1000px) {
+  .focused-occurrence-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .where-to-look-grid, .first-change-groups { grid-template-columns: 1fr; }
+}
+@media (max-width: 700px) {
+  .signal-clue-grid { grid-template-columns: 1fr; }
+  .focused-occurrence-facts { grid-template-columns: 1fr; }
+  .signal-clue-grid footer { grid-template-columns: 1fr auto; }
+  .signal-clue-grid footer span:first-child { grid-column: 1 / -1; }
+}
+
 @media (min-width: 761px) {
   .timeline-row .timeline-label-button { position: sticky; left: .75rem; z-index: 4; padding: .25rem; background: inherit; }
   .timeline-row .timeline-metric { position: sticky; right: .75rem; z-index: 4; padding: .25rem; background: inherit; }

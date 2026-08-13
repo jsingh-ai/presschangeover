@@ -9,6 +9,7 @@ import { SynchronizedTimeline, type TimelineIntervalItem, type TimelineIntervalT
 import { boundedEvidenceRange, MAX_FULL_TELEMETRY_RANGE_MS, telemetrySummary, usePressTelemetryEvidence, type PressTelemetryEvidenceState } from './TelemetryEvidenceTimeline'
 import { UnifiedProcessTimeline } from './UnifiedProcessTimeline'
 import { timelineFamilyLabel } from './RadiusOverview'
+import { TelemetryCluesPanel } from './TelemetryCluesPanel'
 
 const levelLabels: Record<ActivityLevel, string> = { radius_state: 'Radius State', operational_group: 'Operational Group', process_family: 'Process Family', exact_status: 'Exact Radius Status' }
 const levelOrder: ActivityLevel[] = ['radius_state', 'operational_group', 'process_family', 'exact_status']
@@ -302,6 +303,9 @@ export function OperationalActivityExplorerView({ data, occurrences = data.occur
   const evidence = occurrences.filter((item) => !pressFocus || item.pressKey === pressFocus)
   const focusedOccurrence = evidence.find(({ occurrenceId }) => occurrenceId === focusedOccurrenceId)
     ?? [...evidence].sort((left, right) => Date.parse(left.startUtc) - Date.parse(right.startUtc) || left.occurrenceId.localeCompare(right.occurrenceId))[0]
+  const chronologicalOccurrences = [...occurrences].sort((left, right) => Date.parse(left.startUtc) - Date.parse(right.startUtc) || left.occurrenceId.localeCompare(right.occurrenceId))
+  const focusedOccurrenceIndex = focusedOccurrence ? chronologicalOccurrences.findIndex(({ occurrenceId }) => occurrenceId === focusedOccurrence.occurrenceId) : -1
+  const focusOccurrence = (occurrence: ActivityOccurrence) => { setFocusedOccurrenceId(occurrence.occurrenceId); setPressFocus(occurrence.pressKey) }
   const signaturePressKey = pressFocus ?? focusedOccurrence?.pressKey ?? data.pressBreakdown.find(({ occurrenceCount }) => occurrenceCount > 0)?.pressKey
   const signaturePress = data.pressBreakdown.find(({ pressKey }) => pressKey === signaturePressKey)
   const classifiedTimeline = data.pressTimelines?.find(({ pressKey }) => pressKey === signaturePressKey)
@@ -353,6 +357,7 @@ export function OperationalActivityExplorerView({ data, occurrences = data.occur
       <section className="panel"><div className="section-heading"><div><p className="eyebrow">Duration distribution</p><h2>Occurrence duration</h2></div></div>{data.summary.occurrenceCount >= 5 ? <div className="distribution-bars">{data.durationDistribution.map((item) => <div key={item.key}><span>{item.label}</span><i><b style={{ width: barWidth(item.occurrenceCount, maxBucket) }} /></i><strong>{item.occurrenceCount}</strong></div>)}</div> : <p className="empty-state">At least five occurrences are required for a useful duration distribution.</p>}{data.summary.p95OccurrenceSeconds !== null && <p className="quiet-copy">P95 occurrence duration: {compact(data.summary.p95OccurrenceSeconds)} · shown because at least 20 occurrences are available.</p>}</section>
       <section className="panel"><div className="section-heading"><div><p className="eyebrow">Semantic composition</p><h2>{data.selection.level === 'radius_state' ? 'Operational groups' : data.selection.level === 'operational_group' ? 'Process families' : 'Exact supporting Radius evidence'}</h2></div></div><div className="semantic-bars">{data.semanticBreakdown.map((item) => <div key={`${item.level}:${item.key}`}><span>{item.label}</span><i><b style={{ width: barWidth(item.durationSeconds, maxSemantic) }} /></i><strong>{compact(item.durationSeconds)} · {item.percentage.toFixed(1)}%</strong></div>)}</div></section></div>
     <FullRangePhysicalSignature data={data} pressKey={signaturePressKey} displayName={signaturePress?.displayName ?? focusedOccurrence?.displayName} intervals={signatureIntervals} evidence={rangeTelemetry} telemetryAvailable={telemetryAvailable} onPress={setPressFocus} />
+    <TelemetryCluesPanel occurrence={focusedOccurrence} previous={focusedOccurrenceIndex > 0 ? chronologicalOccurrences[focusedOccurrenceIndex - 1] : undefined} next={focusedOccurrenceIndex >= 0 ? chronologicalOccurrences[focusedOccurrenceIndex + 1] : undefined} onFocus={focusOccurrence} />
     {exactOccurrences}
     {selectedOccurrence && <OccurrenceEvidenceDrawer occurrence={selectedOccurrence} classificationVersion={data.classificationVersion} evidence={drawerTelemetry} onClose={closeOccurrence} />}
   </>

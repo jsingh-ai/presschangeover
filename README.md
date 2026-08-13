@@ -79,6 +79,7 @@ Production deployment uses the dedicated `ProcessIntelligence.Node` service and 
 - GET /api/telemetry/health — sanitized TelemetryQueryApi and historian status
 - GET /api/telemetry/sources — projected telemetry source list
 - GET /api/telemetry/sources/:sourceId/physical-state?fromUtc=...&toUtc=... — validated physical-state request with a maximum two-hour range
+- POST /api/telemetry/presses/:pressKey/clues — read-only, capability-filtered Engineering Telemetry Clues for one exact Radius occurrence
 - GET /api/radius/health — sanitized Radius configuration/connectivity state
 - GET /api/radius/overview?fromUtc=...&toUtc=... — compressed per-press Radius timelines and fleet summary, maximum 31 days
 - GET /api/radius/presses/:pressKey/episodes?fromUtc=...&toUtc=... — derived operational episodes for one mapped press

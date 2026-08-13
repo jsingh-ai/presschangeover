@@ -164,6 +164,58 @@ export interface CuratedPhysicalEvidence extends PressRef, TimeRange {
   signals: SemanticSignalEvidence[]
 }
 
+export type EngineeringSignalType = 'continuous' | 'step_reference' | 'state_event'
+export type EngineeringObservationConfidence = 'OBSERVED' | 'LIMITED_OBSERVATION' | 'NO_USABLE_OBSERVATION' | 'TEMPORARILY_UNAVAILABLE' | 'UNSUPPORTED'
+export type EngineeringCategory = 'speed' | 'web_tension' | 'dryer' | 'ink' | 'viscosity' | 'temperature' | 'pump' | 'wash' | 'register' | 'impression' | 'torque' | 'drive_temperature' | 'doctor_blade' | 'repeat_other' | 'motion'
+
+export interface PressSemanticHistoryEvidence extends PressRef, TimeRange {
+  sourceKey: string
+  includeSeed: boolean
+  signals: SemanticSignalEvidence[]
+}
+
+export interface NumericWindowSummary { count: number; median: number | null; minimum: number | null; maximum: number | null; iqr: number | null }
+
+export interface EngineeringSignalClue {
+  canonicalId: string
+  deckNumber: number | null
+  friendlyName: string
+  signalType: EngineeringSignalType
+  category: EngineeringCategory
+  capabilityState: CapabilityState
+  observationState: EvidenceObservationState
+  observationConfidence: EngineeringObservationConfidence
+  mappingStatus: SemanticSignalEvidence['mappingStatus']
+  sourceUnit: string | null
+  unitLabel: string
+  canonicalUnitStatus: string | null
+  before: NumericWindowSummary | null
+  during: NumericWindowSummary | null
+  after: NumericWindowSummary | null
+  enteringValue: TelemetryScalarValue | null
+  transitionCount: number
+  largestRawStep: number | null
+  description: string
+  isClue: boolean
+  clueQuality: number
+  firstRelevantAtUtc: string | null
+  firstRelevantOffsetMs: number | null
+  firstRelevantPreviousValue: TelemetryScalarValue | null
+  firstRelevantValue: TelemetryScalarValue | null
+}
+
+export interface EngineeringClueResponse {
+  occurrence: { occurrenceId: string; pressKey: RadiusPressKey; displayName: string; startUtc: string; endUtc: string; durationSeconds: number; exactIdentities: Array<{ eventType: string; statusCode: string | null; statusDescription: string }> }
+  evidenceWindow: { fromUtc: string; toUtc: string; beforeEndUtc: string; duringStartUtc: string; duringEndUtc: string; afterStartUtc: string; boundedAroundStart: boolean; message: string | null }
+  coverage: { supportedSelectors: number; observedSelectors: number; limitedObservationSelectors: number; noObservationSelectors: number; unavailableSelectors: number }
+  whereToLook: Array<{ scopeKey: string; scopeLabel: string; category: EngineeringCategory; supportedSignals: number; clueSignals: number; clueShare: number; strongestClueQuality: number; averageClueQuality: number; qualityScore: number; summary: string }>
+  categoryColumns: EngineeringCategory[]
+  categoryCells: Array<{ scopeKey: string; scopeLabel: string; category: EngineeringCategory; supportedSignals: number; observedSignals: number; clueSignals: number; status: 'multiple_clues' | 'one_clue' | 'observed_no_shift' | 'insufficient' | 'temporarily_unavailable' | 'unknown' | 'unsupported'; details: string[] }>
+  firstChanges: Array<Pick<EngineeringSignalClue, 'canonicalId' | 'deckNumber' | 'friendlyName' | 'signalType' | 'category' | 'firstRelevantAtUtc' | 'firstRelevantOffsetMs' | 'firstRelevantPreviousValue' | 'firstRelevantValue'>>
+  signalClues: EngineeringSignalClue[]
+  performance: { upstreamCalls: number; semanticCalls: number; totalSelectors: number; upstreamMs: number; calculationMs: number; totalMs: number; responsePayloadBytes: number }
+}
+
 export interface EvidenceQuality {
   radius: 'available' | 'unavailable'
   classification: ClassificationStatus

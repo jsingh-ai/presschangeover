@@ -24,11 +24,14 @@ import type {
 } from '../types/api'
 import type {
   CuratedPhysicalEvidence,
+  EngineeringClueResponse,
+  EngineeringSignalType,
   PhysicalEvidenceCategory,
   PressMotionEvidence,
   PressSpeedEvidence,
   PressTelemetryCapabilities,
   PressTelemetrySource,
+  PressSemanticHistoryEvidence,
   ProductionContextEvidence,
   TelemetryRepresentation,
 } from '../types/evidence'
@@ -93,6 +96,15 @@ export function getProductionContext(pressKey: RadiusPressKey, fromUtc: string, 
 
 export function getCuratedPhysicalEvidence(pressKey: RadiusPressKey, input: { fromUtc: string; toUtc: string; includeSeed?: boolean; categories: PhysicalEvidenceCategory[]; deckNumbers?: number[]; representation?: TelemetryRepresentation }, signal?: AbortSignal) {
   return sendJson<CuratedPhysicalEvidence>(`/api/telemetry/presses/${pressKey}/evidence`, 'POST', { ...input, includeSeed: input.includeSeed ?? true, representation: input.representation ?? 'changes' }, signal)
+}
+
+export function getEngineeringClues(pressKey: RadiusPressKey, occurrence: { occurrenceId: string; displayName: string; startUtc: string; endUtc: string; exactIdentities: Array<{ eventType: string; statusCode: string | null; statusDescription: string }> }, signal?: AbortSignal) {
+  return sendJson<EngineeringClueResponse>(`/api/telemetry/presses/${pressKey}/clues`, 'POST', occurrence, signal)
+}
+
+export function getPressSemanticHistory(pressKey: RadiusPressKey, input: { fromUtc: string; toUtc: string; includeSeed: boolean; signals: Array<{ canonicalId: string; deckNumber?: number; representation: TelemetryRepresentation; signalType?: EngineeringSignalType }> }, signal?: AbortSignal) {
+  const signals = input.signals.map(({ canonicalId, deckNumber, representation }) => ({ canonicalId, ...(deckNumber === undefined ? {} : { deckNumber }), representation }))
+  return sendJson<PressSemanticHistoryEvidence>(`/api/telemetry/presses/${pressKey}/semantic-history`, 'POST', { ...input, signals }, signal)
 }
 
 export function getRecentPhysicalState(sourceId: number) {

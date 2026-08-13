@@ -1,0 +1,197 @@
+{
+  "matrix": {
+    "390": {
+      "light": {
+        "theme": "light",
+        "pageOverflow": false,
+        "panelContained": true,
+        "mapContained": true,
+        "rows": 11,
+        "columns": 15,
+        "clues": 1,
+        "focusableCells": 1,
+        "totalCells": 154,
+        "labelledCells": 154
+      },
+      "dark": {
+        "theme": "dark",
+        "pageOverflow": false,
+        "panelContained": true,
+        "mapContained": true,
+        "rows": 11,
+        "columns": 15,
+        "clues": 1,
+        "focusableCells": 1,
+        "totalCells": 154,
+        "labelledCells": 154
+      }
+    },
+    "768": {
+      "light": {
+        "theme": "light",
+        "pageOverflow": false,
+        "panelContained": true,
+        "mapContained": true,
+        "rows": 11,
+        "columns": 15,
+        "clues": 1,
+        "focusableCells": 1,
+        "totalCells": 154,
+        "labelledCells": 154
+      },
+      "dark": {
+        "theme": "dark",
+        "pageOverflow": false,
+        "panelContained": true,
+        "mapContained": true,
+        "rows": 11,
+        "columns": 15,
+        "clues": 1,
+        "focusableCells": 1,
+        "totalCells": 154,
+        "labelledCells": 154
+      }
+    },
+    "1200": {
+      "light": {
+        "theme": "light",
+        "pageOverflow": false,
+        "panelContained": true,
+        "mapContained": true,
+        "rows": 11,
+        "columns": 15,
+        "clues": 1,
+        "focusableCells": 1,
+        "totalCells": 154,
+        "labelledCells": 154
+      },
+      "dark": {
+        "theme": "dark",
+        "pageOverflow": false,
+        "panelContained": true,
+        "mapContained": true,
+        "rows": 11,
+        "columns": 15,
+        "clues": 1,
+        "focusableCells": 1,
+        "totalCells": 154,
+        "labelledCells": 154
+      }
+    },
+    "1440": {
+      "light": {
+        "theme": "light",
+        "pageOverflow": false,
+        "panelContained": true,
+        "mapContained": true,
+        "rows": 11,
+        "columns": 15,
+        "clues": 1,
+        "focusableCells": 1,
+        "totalCells": 154,
+        "labelledCells": 154
+      },
+      "dark": {
+        "theme": "dark",
+        "pageOverflow": false,
+        "panelContained": true,
+        "mapContained": true,
+        "rows": 11,
+        "columns": 15,
+        "clues": 1,
+        "focusableCells": 1,
+        "totalCells": 154,
+        "labelledCells": 154
+      }
+    },
+    "1600": {
+      "light": {
+        "theme": "light",
+        "pageOverflow": false,
+        "panelContained": true,
+        "mapContained": true,
+        "rows": 11,
+        "columns": 15,
+        "clues": 1,
+        "focusableCells": 1,
+        "totalCells": 154,
+        "labelledCells": 154
+      },
+      "dark": {
+        "theme": "dark",
+        "pageOverflow": false,
+        "panelContained": true,
+        "mapContained": true,
+        "rows": 11,
+        "columns": 15,
+        "clues": 1,
+        "focusableCells": 1,
+        "totalCells": 154,
+        "labelledCells": 154
+      }
+    }
+  },
+  "interaction": {
+    "matrixKeyboard": {
+      "beforeLabel": "Machine, Speed: 2 supported; 1 observed; 1 clues. Actual Speed: observed downward level shift during the occurrence relative to the preceding period; after-period median moved toward the preceding median. Speed Setpoint: no usable observation or raw transition was observed in the evidence window",
+      "afterLabel": "Machine, Web / Tension: 4 supported; 0 observed; 0 clues. Chill Draw Tension: limited observation; insufficient temporal evidence for a before/during comparison. Chill Draw Tension Setpoint: no usable observation or raw transition was observed in the evidence window. Unwind Tension: limited observation; insufficient temporal evidence for a before/during comparison. Rewind Tension: limited observation; insufficient temporal evidence for a before/during comparison",
+      "moved": true,
+      "tabStops": 1,
+      "visibleFocusTarget": true
+    },
+    "rapidSwitching": {
+      "occurrences": [
+        "Aug 6, 1:26:20 PM CT",
+        "Aug 7, 9:13:01 PM CT",
+        "Aug 8, 4:10:01 AM CT",
+        "Aug 8, 4:49:11 AM CT"
+      ],
+      "finalOccurrence": "Aug 8, 4:49:11 AM CT",
+      "finalOccurrenceStillShown": true,
+      "finalIdentity": {
+        "focusedId": "press5:2026-08-08T09:49:11.366Z:3",
+        "clueId": "press5:2026-08-08T09:49:11.366Z:3"
+      },
+      "staleClueFlash": false,
+      "metrics": {
+        "clueStarted": 4,
+        "clueCompleted": 2,
+        "clueAborted": 2,
+        "activeClues": 0,
+        "maxActiveClues": 2,
+        "semanticStarted": 18,
+        "activeSemantic": 0,
+        "maxActiveSemantic": 6
+      }
+    },
+    "navigation": {
+      "nextEnabled": true,
+      "changed": true,
+      "previousEnabledAfterNext": true
+    },
+    "viewTrace": {
+      "clue": "Anilox Drive Temperature",
+      "error": false,
+      "timeline": true,
+      "occurrenceMarkers": true,
+      "motion": false,
+      "numeric": true,
+      "rawEvents": true
+    },
+    "summary": {
+      "whereToLook": 6,
+      "firstChangeGroups": 3,
+      "clueCards": 12,
+      "unsupported": 49,
+      "windowCopy": "Evidence window: Aug 8, 4:34:11 AM – Aug 8, 5:16:14 AM CT. ",
+      "coverage": "Supported selectors 290Observed comparisons 111Limited observation 179No usable observations 0Unavailable/unknown 0"
+    }
+  },
+  "degraded": {
+    "warning": "Telemetry clues are temporarily unavailable. Existing activity summaries, full-range signature, and exact evidence remain usable.",
+    "signature": true,
+    "occurrences": true,
+    "fatal": false
+  },
+  "consoleErrors": []
+}

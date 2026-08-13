@@ -23,6 +23,7 @@ import { ObservedIdentityCache, type ObservedIdentitySnapshot } from './classifi
 import { exactRadiusIdentity } from './radius/radius-identity.js'
 import { TelemetryFoundationService } from './telemetry/telemetry-foundation-service.js'
 import { PHYSICAL_EVIDENCE_CATEGORIES, TELEMETRY_REPRESENTATIONS, type CuratedPhysicalEvidenceRequest, type TelemetryRepresentation, type TelemetrySemanticHistoryQuery } from './telemetry/telemetry-contracts.js'
+import { EngineeringClueAnalysisService, type ClueOccurrenceInput } from './telemetry/engineering-clue-analysis.js'
 
 const MAX_PHYSICAL_STATE_RANGE_MS = 2 * 60 * 60 * 1_000
 const MAX_RADIUS_RANGE_MS = 31 * 24 * 60 * 60 * 1_000
@@ -199,6 +200,24 @@ function parseEvidenceRequest(body: unknown): CuratedPhysicalEvidenceRequest {
   return { fromUtc, toUtc, includeSeed: raw.includeSeed, categories: [...new Set(raw.categories)] as CuratedPhysicalEvidenceRequest['categories'], ...(raw.deckNumbers === undefined ? {} : { deckNumbers: [...new Set(raw.deckNumbers as number[])] }), representation: parseRepresentation(raw.representation) }
 }
 
+function parseClueOccurrence(body: unknown, pressKey: RadiusPressKey): ClueOccurrenceInput {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new RequestValidationError('invalid_clue_occurrence')
+  const raw = body as Record<string, unknown>
+  const startUtc = parseUtcTimestamp(raw.startUtc, 'invalid_clue_occurrence')
+  const endUtc = parseUtcTimestamp(raw.endUtc, 'invalid_clue_occurrence')
+  if (Date.parse(endUtc) <= Date.parse(startUtc) || Date.parse(endUtc) - Date.parse(startUtc) > MAX_RADIUS_RANGE_MS) throw new RequestValidationError('invalid_clue_occurrence')
+  if (typeof raw.occurrenceId !== 'string' || !/^[A-Za-z0-9:._-]{1,300}$/.test(raw.occurrenceId)) throw new RequestValidationError('invalid_clue_occurrence')
+  if (typeof raw.displayName !== 'string' || !raw.displayName.trim() || raw.displayName.length > 100) throw new RequestValidationError('invalid_clue_occurrence')
+  if (!Array.isArray(raw.exactIdentities) || raw.exactIdentities.length < 1 || raw.exactIdentities.length > 100) throw new RequestValidationError('invalid_clue_occurrence')
+  const exactIdentities = raw.exactIdentities.map((candidate) => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) throw new RequestValidationError('invalid_clue_occurrence')
+    const identity = candidate as Record<string, unknown>
+    if (typeof identity.eventType !== 'string' || identity.eventType.length > 64 || (identity.statusCode !== null && typeof identity.statusCode !== 'string') || typeof identity.statusDescription !== 'string' || identity.statusDescription.length > 512) throw new RequestValidationError('invalid_clue_occurrence')
+    return { eventType: identity.eventType, statusCode: identity.statusCode as string | null, statusDescription: identity.statusDescription }
+  })
+  return { occurrenceId: raw.occurrenceId, pressKey, displayName: raw.displayName, startUtc, endUtc, durationSeconds: (Date.parse(endUtc) - Date.parse(startUtc)) / 1_000, exactIdentities }
+}
+
 function cancellationSignal(request: Request, response: Response): AbortSignal {
   const controller = new AbortController()
   request.once('aborted', () => controller.abort())
@@ -254,6 +273,7 @@ export function createApp({
 }: CreateAppOptions) {
   const app = express()
   const telemetry = new TelemetryFoundationService(telemetryClient)
+  const engineeringClues = new EngineeringClueAnalysisService(telemetry)
   const observedIdentityCache = new ObservedIdentityCache(
     () => radiusService.getObservedIdentities?.() ?? Promise.resolve([]),
     { onRefreshError: () => { if (logger) logger.error('classification_observed_identity_refresh_unavailable') } },
@@ -336,6 +356,11 @@ export function createApp({
 
   app.post('/api/telemetry/presses/:pressKey/evidence', asyncRoute(async (request, response) => {
     response.status(200).json(await telemetry.evidence(parsePressKey(request.params.pressKey), parseEvidenceRequest(request.body), String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.post('/api/telemetry/presses/:pressKey/clues', asyncRoute(async (request, response) => {
+    const pressKey = parsePressKey(request.params.pressKey)
+    response.status(200).json(await engineeringClues.analyze(parseClueOccurrence(request.body, pressKey), String(response.locals.requestId), cancellationSignal(request, response)))
   }))
 
   app.get(
