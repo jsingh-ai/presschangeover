@@ -301,7 +301,7 @@ function App() {
     ...(drawerResult?.episodes.flatMap(({ statusSegments }) => statusSegments) ?? []),
   ], investigation?.mode === 'segment' && drawerResultPress ? { pressKey: drawerResultPress, startUtc: investigation.startUtc, endUtc: investigation.endUtc } : undefined)
   const selectedFinding = investigation?.mode === 'attention' ? drawerResult?.analysis.attentionItems.find(({ episodeId }) => episodeId === investigation.findingId) : undefined
-  const pressAnalyticsReady = Boolean(selectedPress && pressDetail?.press.pressKey === selectedPress && !pressLoading)
+  const pressAnalyticsReady = Boolean(selectedPress && pressDetail?.press.pressKey === selectedPress)
   const activeAnalytics = pressAnalyticsReady ? pressDetail?.operationalAnalytics : overview?.operationalAnalytics
   const selectedScopeLabel = selectedPress ? pressDetail?.press.displayName ?? selectedPress.replace('press', 'Press ') : `All ${overview?.operationalAnalytics?.scopePressCount ?? overview?.presses.length ?? 0} presses`
   const analyticsScopeLabel = pressAnalyticsReady ? selectedScopeLabel : `All ${overview?.operationalAnalytics?.scopePressCount ?? overview?.presses.length ?? 0} presses`
@@ -335,10 +335,11 @@ function App() {
 
   return <ApplicationShell area={area} theme={theme} onNavigate={navigateArea} onToggleTheme={toggleTheme} context={area === 'state-classification' ? administrationContext : area === 'intelligent-search' ? searchContext : context} footer={footer}>
     {operationsArea && loading && !overview && <section className="panel loading-panel" role="status">Loading Radius operations…</section>}
-    {operationsArea && loading && overview && <div className="scope-progress" role="status"><i aria-hidden="true" />Updating the selected time range; current results remain visible.</div>}
+    {operationsArea && loading && overview && <span className="background-refresh-status" role="status">Updating the selected time range; current results remain visible.</span>}
     {operationsArea && error && !overview && <section className="panel unavailable-panel"><h1>Radius data unavailable</h1><p>{error}</p><p>Dependency health remains available below.</p></section>}
     {operationsArea && error && overview && <div className="scope-progress scope-progress--error" role="alert">{error} Previous results remain visible.</div>}
-    {operationsArea && area !== 'overview' && overview && selectedPress && pressLoading && <div className="scope-progress" role="status"><i aria-hidden="true" />Applying {selectedScopeLabel}; the current timeline remains available.</div>}
+    {operationsArea && area !== 'overview' && overview && selectedPress && pressLoading && !pressAnalyticsReady && <div className="scope-progress" role="status"><i aria-hidden="true" />Applying {selectedScopeLabel}; the current timeline remains available.</div>}
+    {operationsArea && area !== 'overview' && overview && selectedPress && pressLoading && pressAnalyticsReady && <span className="background-refresh-status" role="status">Updating {selectedScopeLabel}; current press results remain visible.</span>}
     {operationsArea && area !== 'overview' && selectedPress && pressError && !pressLoading && <div className="scope-progress scope-progress--error" role="alert">{pressError}</div>}
     {overview && area === 'overview' && <OverviewPage overview={overview} selectedPress={selectedPress} />}
     {overview && activeAnalytics && area === 'operational-analysis' && <OperationalAnalysisPage analytics={activeAnalytics} scopeLabel={analyticsScopeLabel} overview={overview} selectedPress={selectedPress} />}

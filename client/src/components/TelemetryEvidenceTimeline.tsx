@@ -74,7 +74,10 @@ export interface PressTelemetryEvidenceState {
   error: boolean
 }
 
-interface StoredEvidence extends Omit<PressTelemetryEvidenceState, 'range'> { key: string }
+interface StoredEvidence extends Omit<PressTelemetryEvidenceState, 'range'> {
+  key: string
+  pressKey?: RadiusPressKey
+}
 
 interface EvidenceChunk { fromUtc: string; toUtc: string }
 interface ChunkEvidence {
@@ -224,7 +227,9 @@ export function usePressTelemetryEvidence(pressKey: RadiusPressKey | undefined, 
   useEffect(() => {
     if (!enabled || !pressKey) return
     const controller = new AbortController()
-    setStored({ key, loading: true, error: false })
+    setStored((current) => current.pressKey === pressKey
+      ? { ...current, key, pressKey, loading: true, error: false }
+      : { key, pressKey, loading: true, error: false })
     void getPressTelemetryCapabilities(pressKey, controller.signal).then(async (capabilities) => {
       const supported = (canonicalId: string) => capabilities.capabilities.some((item) => item.canonicalId === canonicalId && item.state === 'SUPPORTED')
       const categories = curatedCategoriesForCapabilities(capabilities.capabilities)
@@ -247,14 +252,31 @@ export function usePressTelemetryEvidence(pressKey: RadiusPressKey | undefined, 
         return next
       })
       const merged = mergeTelemetryEvidenceChunks(evidence, range.fromUtc, range.toUtc)
-      if (!controller.signal.aborted) setStored({ key, capabilities, ...merged, loading: false, error: evidence.some(({ error }) => error) })
+      if (!controller.signal.aborted) setStored({ key, pressKey, capabilities, ...merged, loading: false, error: evidence.some(({ error }) => error) })
     }).catch((error) => {
-      if (!controller.signal.aborted && !(error instanceof DOMException && error.name === 'AbortError')) setStored({ key, loading: false, error: true })
+      if (!controller.signal.aborted && !(error instanceof DOMException && error.name === 'AbortError')) {
+        setStored((current) => current.key === key
+          ? { ...current, loading: false, error: true }
+          : { key, pressKey, loading: false, error: true })
+      }
     })
     return () => controller.abort()
   }, [enabled, pressKey, range.fromUtc, range.toUtc, key, chunks])
 
-  if (!enabled || stored.key !== key) return { range, loading: enabled && Boolean(pressKey), error: false }
+  if (!enabled) return { range, loading: false, error: false }
+  if (stored.key !== key) {
+    if (stored.pressKey === pressKey) return {
+      range,
+      capabilities: stored.capabilities,
+      context: stored.context,
+      motion: stored.motion,
+      speed: stored.speed,
+      physical: stored.physical,
+      loading: Boolean(pressKey),
+      error: false,
+    }
+    return { range, loading: Boolean(pressKey), error: false }
+  }
   return { range, capabilities: stored.capabilities, context: stored.context, motion: stored.motion, speed: stored.speed, physical: stored.physical, loading: stored.loading, error: stored.error }
 }
 

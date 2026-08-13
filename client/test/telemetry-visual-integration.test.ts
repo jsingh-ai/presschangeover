@@ -207,6 +207,22 @@ describe('primary telemetry visual integration', () => {
     assert.match(html, /Process Family/)
   })
 
+  it('keeps mounted dashboard evidence stable during live-range background refreshes', () => {
+    const telemetrySource = readFileSync(new URL('../src/components/TelemetryEvidenceTimeline.tsx', import.meta.url), 'utf8')
+    const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
+    const operationalSource = readFileSync(new URL('../src/components/OperationalActivityExplorer.tsx', import.meta.url), 'utf8')
+    const patternSource = readFileSync(new URL('../src/components/PatternExplorer.tsx', import.meta.url), 'utf8')
+
+    assert.match(telemetrySource, /current\.pressKey === pressKey/)
+    assert.match(telemetrySource, /stored\.pressKey === pressKey/)
+    assert.match(telemetrySource, /capabilities: stored\.capabilities/)
+    assert.match(appSource, /pressAnalyticsReady = Boolean\(selectedPress && pressDetail\?\.press\.pressKey === selectedPress\)/)
+    assert.doesNotMatch(appSource, /pressAnalyticsReady[^\n]+!pressLoading/)
+    assert.match(appSource, /loading && overview && <span className="background-refresh-status"/)
+    assert.match(operationalSource, /loading && data && <span className="background-refresh-status"/)
+    assert.match(patternSource, /loading && data && <span className="background-refresh-status"/)
+  })
+
   it('contains no S\/400\/Sort Safety assumption in production visualization source', () => {
     for (const component of ['TelemetryEvidenceTimeline.tsx', 'UnifiedProcessTimeline.tsx', 'RunEvidenceDrawer.tsx', 'OperationalActivityExplorer.tsx', 'RadiusOverview.tsx']) {
       const source = readFileSync(new URL(`../src/components/${component}`, import.meta.url), 'utf8')
