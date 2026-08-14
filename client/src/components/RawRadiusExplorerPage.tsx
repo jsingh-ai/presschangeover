@@ -3,7 +3,7 @@ import { DateTime } from 'luxon'
 import { exploreRawRadius, getRawRadiusIdentities, getRawRadiusOccurrenceDetail, plotRawRadiusSignal } from '../api/process-intelligence-api'
 import { SynchronizedTimeline, type TimelineIntervalItem, type TimelineIntervalTrack, type TimelineNumericTrack } from './SynchronizedTimeline'
 import { createCustomRange, createPresetRange, defaultCustomValues, formatPlantDateTime, formatSelectedRange, PLANT_TIME_ZONE, RangeValidationError, restoreSelectedRange, type SelectedRange } from '../time-ranges'
-import type { RawExplorerChangedSignal, RawExplorerDetail, RawExplorerIdentity, RawExplorerOccurrence, RawExplorerPlotResult, RawExplorerResult, RawExplorerSignalHistory, RawRadiusPhase, RawTelemetryScalar } from '../types/api'
+import type { RawExplorerCategory, RawExplorerChangedSignal, RawExplorerDetail, RawExplorerIdentity, RawExplorerNumericSummary, RawExplorerOccurrence, RawExplorerPlotResult, RawExplorerResult, RawExplorerSignalHistory, RawExplorerStateSummary, RawRadiusPhase, RawTelemetryScalar } from '../types/api'
 import type { TimedNumericSample } from '../types/evidence'
 import { safeEngineeringSourceUnit } from './EngineeringTelemetryInspector'
 
@@ -37,9 +37,14 @@ function durationLabel(seconds: number): string {
   return `${hours ? `${hours}h ` : ''}${minutes}m`
 }
 
-function scalarLabel(value: RawTelemetryScalar): string {
+export function formatRawExplorerNumber(value: number, maximumFractionDigits = 1): string {
+  const normalized = Object.is(value, -0) ? 0 : value
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits, minimumFractionDigits: 0 }).format(normalized)
+}
+
+function scalarLabel(value: RawTelemetryScalar, maximumFractionDigits = 2): string {
   if (value === null) return 'null'
-  if (typeof value === 'number') return Number.isInteger(value) ? String(value) : value.toPrecision(6).replace(/\.?0+$/, '')
+  if (typeof value === 'number') return formatRawExplorerNumber(value, maximumFractionDigits)
   return String(value)
 }
 
@@ -57,9 +62,10 @@ function evidenceUnit(sourceUnit: string | null): string {
 }
 
 export function rawExplorerNumberSamples(history: RawExplorerSignalHistory): TimedNumericSample[] {
-  if (history.representation === 'samples') return history.samples.flatMap((sample) => typeof sample.value === 'number' ? [{ ...sample, valueKind: Number.isInteger(sample.value) ? 'integer' as const : 'numeric' as const, value: sample.value }] : [])
-  const values = [history.seed, ...history.changes].flatMap((sample) => sample && typeof sample.value === 'number' ? [{ ...sample, valueKind: Number.isInteger(sample.value) ? 'integer' as const : 'numeric' as const, value: sample.value }] : [])
-  return values.sort((left, right) => Date.parse(left.observedAtUtc) - Date.parse(right.observedAtUtc))
+  const source = history.representation === 'samples' ? [history.seed, ...history.samples] : [history.seed, ...history.changes]
+  const values = source.flatMap((sample) => sample && typeof sample.value === 'number' ? [{ ...sample, valueKind: Number.isInteger(sample.value) ? 'integer' as const : 'numeric' as const, value: sample.value }] : [])
+  const unique = new Map(values.map((sample) => [`${sample.observedAtUtc}|${sample.value}`, sample]))
+  return [...unique.values()].sort((left, right) => Date.parse(left.observedAtUtc) - Date.parse(right.observedAtUtc))
 }
 
 export function rawExplorerStateIntervals(history: RawExplorerSignalHistory, occurrence: RawExplorerOccurrence): TimelineIntervalItem[] {
@@ -78,15 +84,88 @@ export function rawExplorerStateIntervals(history: RawExplorerSignalHistory, occ
   return intervals
 }
 
-function nearestNumeric(samples: TimedNumericSample[], atUtc: string): TimedNumericSample | undefined {
+export function latestNumericAtOrBefore(samples: TimedNumericSample[], atUtc: string): TimedNumericSample | undefined {
   const at = Date.parse(atUtc)
-  return samples.reduce<TimedNumericSample | undefined>((best, sample) => !best || Math.abs(Date.parse(sample.observedAtUtc) - at) < Math.abs(Date.parse(best.observedAtUtc) - at) ? sample : best, undefined)
+  return samples.filter((sample) => Date.parse(sample.observedAtUtc) <= at).sort((left, right) => Date.parse(left.observedAtUtc) - Date.parse(right.observedAtUtc)).at(-1)
 }
 
 function stateAt(history: RawExplorerSignalHistory, atUtc: string): { value: RawTelemetryScalar; observedAtUtc: string } | undefined {
   const candidates = [history.seed, ...history.changes].filter((item) => item && Date.parse(item.observedAtUtc) <= Date.parse(atUtc)).sort((a, b) => Date.parse(a!.observedAtUtc) - Date.parse(b!.observedAtUtc))
   const item = candidates.at(-1)
   return item ? { value: item.value, observedAtUtc: item.observedAtUtc } : undefined
+}
+
+const CATEGORY_LABELS: Record<RawExplorerCategory, string> = {
+  speed: 'Speed', web_tension: 'Web / Tension', dryer: 'Dryer', ink: 'Deck State', viscosity: 'Ink / Viscosity', temperature: 'Temperature', pump: 'Pump / Wash', wash: 'Pump / Wash', register: 'Register', impression: 'Impression', torque: 'Drive / Torque', drive_temperature: 'Drive / Torque', doctor_blade: 'Doctor Blade', repeat_other: 'Repeat / Other', motion: 'Motion',
+}
+
+const CATEGORY_ORDER = ['Speed', 'Web / Tension', 'Dryer', 'Ink / Viscosity', 'Temperature', 'Pump / Wash', 'Register', 'Impression', 'Anilox', 'Plate Cylinder', 'Doctor Blade', 'Repeat / Other', 'Deck State', 'Drive / Torque', 'Motion']
+
+export function rawExplorerCategoryLabel(signal: Pick<RawExplorerChangedSignal, 'canonicalId' | 'category'>): string {
+  if (signal.category === 'torque' || signal.category === 'drive_temperature') {
+    if (signal.canonicalId.startsWith('anilox.')) return 'Anilox'
+    if (signal.canonicalId.startsWith('plate_cylinder.')) return 'Plate Cylinder'
+  }
+  return CATEGORY_LABELS[signal.category]
+}
+
+export interface RawExplorerScopeGroup {
+  key: string
+  label: string
+  deckNumber: number | null
+  signalCount: number
+  categories: Array<{ label: string; signals: RawExplorerChangedSignal[] }>
+}
+
+export function groupRawExplorerSignals(signals: RawExplorerChangedSignal[]): RawExplorerScopeGroup[] {
+  const scopes = new Map<string, RawExplorerScopeGroup>()
+  for (const signal of signals) {
+    const deckNumber = signal.deckNumber
+    const key = deckNumber === null ? 'machine' : `deck:${deckNumber}`
+    const scope = scopes.get(key) ?? { key, label: deckNumber === null ? 'Machine' : `Deck ${deckNumber}`, deckNumber, signalCount: 0, categories: [] }
+    const categoryLabel = rawExplorerCategoryLabel(signal)
+    const category = scope.categories.find(({ label }) => label === categoryLabel) ?? { label: categoryLabel, signals: [] }
+    if (!scope.categories.includes(category)) scope.categories.push(category)
+    category.signals.push(signal)
+    scope.signalCount += 1
+    scopes.set(key, scope)
+  }
+  return [...scopes.values()].sort((left, right) => (left.deckNumber ?? 0) - (right.deckNumber ?? 0)).map((scope) => ({ ...scope, categories: scope.categories.sort((left, right) => CATEGORY_ORDER.indexOf(left.label) - CATEGORY_ORDER.indexOf(right.label)) }))
+}
+
+export function rawExplorerNumericPresentation(summary: RawExplorerNumericSummary) {
+  const direction = summary.netDelta > 0 ? '↑' : summary.netDelta < 0 ? '↓' : '—'
+  const positive = Math.abs(summary.largestPositiveExcursion)
+  const negative = Math.abs(summary.largestNegativeExcursion)
+  const biggestDirection = positive > negative ? '↑' : negative > positive ? '↓' : summary.largestAbsoluteExcursion ? '↕' : '—'
+  return {
+    started: formatRawExplorerNumber(summary.firstValue), ended: formatRawExplorerNumber(summary.lastValue),
+    overall: summary.netDelta === 0 ? 'No overall change' : `${direction} ${formatRawExplorerNumber(Math.abs(summary.netDelta))} overall`,
+    lowest: formatRawExplorerNumber(summary.minimum), highest: formatRawExplorerNumber(summary.maximum),
+    biggestMove: summary.largestAbsoluteExcursion === 0 ? 'No move from the start' : `${biggestDirection} ${formatRawExplorerNumber(summary.largestAbsoluteExcursion)}`,
+  }
+}
+
+export function rawExplorerStatePresentation(summary: RawExplorerStateSummary) {
+  return { sequence: [summary.firstValue, ...summary.transitions.map(({ value }) => value)].map((value) => scalarLabel(value)).join(' → '), changes: summary.transitions.length }
+}
+
+function formatCrosshairTime(value: string): string {
+  return DateTime.fromISO(value, { zone: 'utc' }).setZone(PLANT_TIME_ZONE).toFormat('h:mm:ss a')
+}
+
+export function RawExplorerInspectionTooltip({ atUtc, detail, histories }: { atUtc: string; detail: RawExplorerDetail; histories: RawExplorerSignalHistory[] }) {
+  const radius = detail.radiusSegments.find((item) => Date.parse(item.startUtc) <= Date.parse(atUtc) && Date.parse(item.endUtc) > Date.parse(atUtc))
+  const speedSamples = detail.speed.samples.flatMap((sample): TimedNumericSample[] => typeof sample.value === 'number' ? [{ ...sample, valueKind: Number.isInteger(sample.value) ? 'integer' : 'numeric', value: sample.value }] : [])
+  const speed = latestNumericAtOrBefore(speedSamples, atUtc)
+  return <div className="raw-inspection-tooltip">
+    <header><span>Wall-clock time</span><strong>{formatCrosshairTime(atUtc)} CT</strong></header>
+    <dl>
+      <div><dt>Radius</dt><dd>{radius?.kind === 'radius' ? `${radius.eventType} / ${radius.statusCode ?? '—'} / ${radius.statusDescription}` : radius ? 'Data unavailable' : 'No observed state'}</dd></div>
+      <div><dt>Actual Speed</dt><dd>{speed ? scalarLabel(speed.value) : 'No observed value yet'}{speed && <small>Last observed: {formatCrosshairTime(speed.observedAtUtc)} CT</small>}</dd></div>
+      {histories.map((history) => { const observed = history.signalType === 'state_event' ? stateAt(history, atUtc) : latestNumericAtOrBefore(rawExplorerNumberSamples(history), atUtc); return <div key={signalKey(history)}><dt>{signalLabel(history)}</dt><dd>{observed ? scalarLabel(observed.value) : 'No observed value yet'}{observed && <small>Last observed: {formatCrosshairTime(observed.observedAtUtc)} CT</small>}</dd></div> })}
+    </dl>
+  </div>
 }
 
 function timelineHue(value: string): string {
@@ -135,7 +214,6 @@ function OccurrenceCard({ occurrence, lookbackMinutes, contextMinutes }: { occur
   const [plotting, setPlotting] = useState<Set<string>>(new Set())
   const [activePlots, setActivePlots] = useState<string[]>([])
   const cache = useRef(new Map<string, RawExplorerPlotResult>())
-  const [inspectionUtc, setInspectionUtc] = useState<string>()
 
   useEffect(() => {
     const element = cardRef.current
@@ -173,18 +251,10 @@ function OccurrenceCard({ occurrence, lookbackMinutes, contextMinutes }: { occur
   const radiusTrack: TimelineIntervalTrack = { id: 'raw-radius', label: 'Raw Radius context', intervals: (detail?.radiusSegments ?? []).map((segment) => ({ id: `${segment.pressKey}:${segment.startUtc}`, startUtc: segment.startUtc, endUtc: segment.endUtc, label: segment.kind === 'offline' ? 'Offline / unavailable' : `${segment.eventType} / ${segment.statusCode ?? '—'}`, details: segment.kind === 'offline' ? 'Radius data unavailable' : `${segment.eventType} / ${segment.statusCode ?? '—'} · ${segment.statusDescription}`, unavailable: segment.kind === 'offline', style: segment.kind === 'radius' ? { background: timelineHue(`${segment.eventType}|${segment.statusCode}|${segment.statusDescription}`) } : undefined })) }
   const intervalTracks: TimelineIntervalTrack[] = [radiusTrack, ...histories.filter((item) => item.signalType === 'state_event').map((history) => ({ id: signalKey(history), label: signalLabel(history), intervals: rawExplorerStateIntervals(history, occurrence) }))]
   const speedSamples = (detail?.speed.samples ?? []).flatMap((sample): TimedNumericSample[] => typeof sample.value === 'number' ? [{ ...sample, valueKind: Number.isInteger(sample.value) ? 'integer' : 'numeric', value: sample.value }] : [])
-  const numericTracks: TimelineNumericTrack[] = [{ id: 'actual-speed', label: 'Actual speed', unit: evidenceUnit(detail?.speed.sourceUnit ?? null), samples: speedSamples, interpolation: 'step', unavailableLabel: 'No actual-speed samples in this chart context' }, ...histories.filter((item) => item.signalType !== 'state_event').map((history) => ({ id: signalKey(history), label: signalLabel(history), unit: evidenceUnit(history.sourceUnit), samples: rawExplorerNumberSamples(history), interpolation: history.signalType === 'step_reference' ? 'step' as const : 'linear' as const, unavailableLabel: 'No observed values in this chart context' }))]
+  const numericTracks: TimelineNumericTrack[] = [{ id: 'actual-speed', label: 'Actual speed', unit: evidenceUnit(detail?.speed.sourceUnit ?? null), samples: speedSamples, interpolation: 'step', connectObservedGaps: true, holdLastObservation: true, unavailableLabel: 'No actual-speed observation is available for this chart context' }, ...histories.filter((item) => item.signalType !== 'state_event').map((history) => ({ id: signalKey(history), label: signalLabel(history), unit: evidenceUnit(history.sourceUnit), samples: rawExplorerNumberSamples(history), interpolation: 'step' as const, connectObservedGaps: true, holdLastObservation: true, unavailableLabel: 'No observed value is available for this chart context' }))]
   const trackOrder = ['interval:raw-radius', 'numeric:actual-speed', ...histories.map((history) => `${history.signalType === 'state_event' ? 'interval' : 'numeric'}:${signalKey(history)}`)]
   const selectedRadiusId = detail?.radiusSegments.find((segment) => segment.kind === 'radius' && segment.startUtc === occurrence.startUtc && segment.endUtc === occurrence.endUtc) ? `${occurrence.pressKey}:${occurrence.startUtc}` : undefined
-  const groups = useMemo(() => {
-    const map = new Map<string, RawExplorerChangedSignal[]>()
-    for (const signal of detail?.changedSignals ?? []) {
-      const scope = signal.deckNumber === null ? 'Machine' : `Deck ${signal.deckNumber}`
-      const key = `${scope}|${signal.category}`
-      map.set(key, [...(map.get(key) ?? []), signal])
-    }
-    return [...map.entries()]
-  }, [detail])
+  const groups = useMemo(() => groupRawExplorerSignals(detail?.changedSignals ?? []), [detail])
 
   return <article ref={cardRef} className="raw-occurrence-card">
     <header className="raw-occurrence-card__header"><div><span>{occurrence.displayName} · occurrence {occurrence.pressOccurrenceIndex} of {occurrence.pressOccurrenceCount}</span><h3>{occurrence.eventType} / {occurrence.statusCode} / {occurrence.statusDescription}</h3><small>Change Lookback {lookbackMinutes}m · Chart Context {contextMinutes}m before and after</small></div><div><strong>{durationLabel(occurrence.durationSeconds)}</strong><small>{formatPlantDateTime(occurrence.startUtc)}–{formatPlantDateTime(occurrence.endUtc)} CT</small></div></header>
@@ -192,12 +262,11 @@ function OccurrenceCard({ occurrence, lookbackMinutes, contextMinutes }: { occur
     {detailLoading && <div className="raw-occurrence-placeholder" role="status">Loading synchronized Radius and telemetry evidence…</div>}
     {detailError && <div className="scope-progress scope-progress--error" role="alert">{detailError}</div>}
     {detail && <>
-      <SynchronizedTimeline fromUtc={occurrence.chartFromUtc} toUtc={occurrence.chartToUtc} intervalTracks={intervalTracks} numericTracks={numericTracks} trackOrder={trackOrder} selectedId={selectedRadiusId} highlightedRange={{ fromUtc: occurrence.startUtc, toUtc: occurrence.endUtc, label: 'Selected raw Radius occurrence' }} onInspectionTimeChange={setInspectionUtc} ariaLabel={`${occurrence.displayName} raw Radius occurrence and telemetry`} />
-      {inspectionUtc && <div className="raw-crosshair-readout"><strong>{formatPlantDateTime(inspectionUtc)} CT</strong><span>Raw Radius: {(() => { const segment = detail.radiusSegments.find((item) => Date.parse(item.startUtc) <= Date.parse(inspectionUtc) && Date.parse(item.endUtc) > Date.parse(inspectionUtc)); return segment?.kind === 'radius' ? `${segment.eventType} / ${segment.statusCode ?? '—'} / ${segment.statusDescription}` : segment ? 'Data unavailable' : 'No observed state' })()}</span><span>Actual speed: {nearestNumeric(speedSamples, inspectionUtc) ? `${scalarLabel(nearestNumeric(speedSamples, inspectionUtc)!.value)} ${evidenceUnit(detail.speed.sourceUnit)} (observed ${formatPlantDateTime(nearestNumeric(speedSamples, inspectionUtc)!.observedAtUtc)} CT)` : 'no nearby sample'}</span>{histories.map((history) => { const observed = history.signalType === 'state_event' ? stateAt(history, inspectionUtc) : nearestNumeric(rawExplorerNumberSamples(history), inspectionUtc); return <span key={signalKey(history)}>{signalLabel(history)}: {observed ? `${scalarLabel(observed.value)} (observed ${formatPlantDateTime(observed.observedAtUtc)} CT)` : 'no observed value'}</span> })}</div>}
+      <SynchronizedTimeline fromUtc={occurrence.chartFromUtc} toUtc={occurrence.chartToUtc} intervalTracks={intervalTracks} numericTracks={numericTracks} trackOrder={trackOrder} selectedId={selectedRadiusId} highlightedRange={{ fromUtc: occurrence.startUtc, toUtc: occurrence.endUtc, label: 'Selected raw Radius occurrence' }} renderInspectionTooltip={(atUtc) => <RawExplorerInspectionTooltip atUtc={atUtc} detail={detail} histories={histories} />} ariaLabel={`${occurrence.displayName} raw Radius occurrence and telemetry`} />
       <section className="raw-change-discovery"><header><div><h4>Changes before entry</h4><p>Strict half-open window: {formatPlantDateTime(detail.lookback.fromUtc)} through, but not including, {formatPlantDateTime(detail.lookback.toUtc)} CT.</p></div><strong>{detail.changedSignals.length} changed signals</strong></header>
         {plotError && <div className="scope-progress scope-progress--error" role="alert">{plotError}</div>}
         {!detail.changedSignals.length && <p className="raw-empty">No mapped, capability-supported signal changed in the selected lookback window.</p>}
-        <div className="raw-change-groups">{groups.map(([key, signals]) => { const [scope, category] = key.split('|'); return <section key={key}><header><strong>{scope}</strong><span>{category.replaceAll('_', ' ')}</span></header>{signals.map((signal) => { const id = signalKey(signal); const summary = signal.summary; const stateSequence = summary.kind === 'state' ? [summary.firstValue, ...summary.transitions.map(({ value }) => value)].map(scalarLabel).join(' → ') : ''; return <div className="raw-change-row" data-signal-type={signal.signalType} key={id}><div><strong>{signal.friendlyName}</strong><small>{summary.kind === 'numeric' ? `${scalarLabel(summary.firstValue)} → ${scalarLabel(summary.lastValue)} · Δ ${scalarLabel(summary.netDelta)} · range ${scalarLabel(summary.minimum)}–${scalarLabel(summary.maximum)} · +exc ${scalarLabel(summary.largestPositiveExcursion)} · −exc ${scalarLabel(summary.largestNegativeExcursion)} · max |exc| ${scalarLabel(summary.largestAbsoluteExcursion)}` : `${stateSequence} · ${summary.transitions.length} ${summary.transitions.length === 1 ? 'transition' : 'transitions'}`}</small></div><button type="button" className={activePlots.includes(id) ? 'secondary-action is-active' : 'secondary-action'} disabled={plotting.has(id)} onClick={() => void togglePlot(signal)}>{plotting.has(id) ? 'Loading…' : activePlots.includes(id) ? 'Remove plot' : 'Plot'}</button></div>})}</section> })}</div>
+        <div className="raw-change-groups">{groups.map((group) => <section className="raw-change-scope" data-scope={group.key} key={group.key}><header><strong>{group.label}</strong><span>{group.signalCount} changed {group.signalCount === 1 ? 'signal' : 'signals'}</span></header><div className="raw-change-categories">{group.categories.map((category) => <section className="raw-change-category" key={category.label}><h5>{category.label}</h5>{category.signals.map((signal) => { const id = signalKey(signal); const summary = signal.summary; const numeric = summary.kind === 'numeric' ? rawExplorerNumericPresentation(summary) : undefined; const state = summary.kind === 'state' ? rawExplorerStatePresentation(summary) : undefined; return <div className="raw-change-row" data-signal-type={signal.signalType} key={id}><div><strong>{signal.friendlyName}</strong>{numeric && <div className="raw-numeric-summary"><span>Started <b>{numeric.started}</b></span><span>Ended <b>{numeric.ended}</b></span><strong>{numeric.overall}</strong><span>Lowest <b>{numeric.lowest}</b></span><span>Highest <b>{numeric.highest}</b></span><span>Biggest move <b>{numeric.biggestMove}</b></span></div>}{state && <div className="raw-state-summary"><span>Changed</span><strong>{state.sequence}</strong><small>{state.changes} {state.changes === 1 ? 'change' : 'changes'}</small></div>}</div><button type="button" className={activePlots.includes(id) ? 'secondary-action is-active' : 'secondary-action'} disabled={plotting.has(id)} onClick={() => void togglePlot(signal)}>{plotting.has(id) ? 'Loading…' : activePlots.includes(id) ? 'Remove plot' : 'Plot'}</button></div> })}</section>)}</div></section>)}</div>
       </section>
       <details className="raw-card-diagnostics"><summary>Request diagnostics</summary><p>{detail.performance.selectorCount} discovery selectors · {detail.performance.semanticHistoryRequests} bounded history requests · {detail.performance.payloadBytes.toLocaleString()} response bytes · {Math.round(detail.performance.totalMs)} ms server time</p></details>
     </>}

@@ -5,7 +5,7 @@ import type { RadiusStatusSegment } from '../src/radius/models.js'
 import { ENGINEERING_CLUE_CATALOG } from '../src/telemetry/engineering-clue-analysis.js'
 import type { CapabilityAssessment, PressSemanticSignalEvidence, TelemetryChange, TelemetrySample, TelemetrySemanticSelector } from '../src/telemetry/telemetry-contracts.js'
 import type { TelemetryFoundationService } from '../src/telemetry/telemetry-foundation-service.js'
-import { normalizeHistorianNumber, numericSummary, RawRadiusExplorerService, RAW_EXPLORER_MAX_WINDOW_MINUTES, stateSummary, type RawExplorerOccurrence } from '../src/raw-radius-explorer/raw-radius-explorer-service.js'
+import { normalizeHistorianNumber, numericSummary, RawRadiusExplorerService, RAW_EXPLORER_MAX_WINDOW_MINUTES, samplesWithSeed, stateSummary, type RawExplorerOccurrence } from '../src/raw-radius-explorer/raw-radius-explorer-service.js'
 
 const startUtc = '2026-08-13T12:00:00.000Z'
 const endUtc = '2026-08-13T12:10:00.000Z'
@@ -62,13 +62,13 @@ describe('Raw Radius Code Explorer', () => {
 
   it('discovers the exact 15-to-40 change in a 15-minute half-open lookback with 40-minute context', async () => {
     const setpoint: CapabilityAssessment = { canonicalId: 'machine.speed.setpoint', state: 'SUPPORTED', deckNumbers: [], historyQueryable: true, evidenceKind: 'semantic_history' }
-    const calls: Array<{ fromUtc: string; toUtc: string; signals: TelemetrySemanticSelector[] }> = []
+    const calls: Array<{ fromUtc: string; toUtc: string; includeSeed: boolean; signals: TelemetrySemanticSelector[] }> = []
     const telemetry = {
       capabilities: { get: async () => ({ capabilities: [setpoint] }) },
-      semanticHistory: async (_pressKey: string, query: { fromUtc: string; toUtc: string; signals: TelemetrySemanticSelector[] }) => {
+      semanticHistory: async (_pressKey: string, query: { fromUtc: string; toUtc: string; includeSeed: boolean; signals: TelemetrySemanticSelector[] }) => {
         calls.push(query)
         return { signals: query.signals.map((selector) => selector.canonicalId === 'machine.speed.actual'
-          ? evidence(selector, null, [], [sample('2026-08-13T11:55:00.000Z', 20), sample('2026-08-13T12:05:00.000Z', 30)])
+          ? evidence(selector, sample('2026-08-13T11:19:00.000Z', 10), [], [sample('2026-08-13T11:55:00.000Z', 20), sample('2026-08-13T12:05:00.000Z', 30)])
           : evidence(selector, sample('2026-08-13T11:44:00.000Z', 15), [change('2026-08-13T11:55:00.000Z', 15, 40), change(startUtc, 40, 50)])) }
       },
     } as unknown as TelemetryFoundationService
@@ -84,6 +84,12 @@ describe('Raw Radius Code Explorer', () => {
     }
     assert.ok(calls.every((call) => Date.parse(call.toUtc) - Date.parse(call.fromUtc) <= 2 * 60 * 60_000))
     assert.ok(calls.every((call) => call.signals.length <= 50))
+    assert.equal(calls.find((call) => call.signals.some(({ canonicalId }) => canonicalId === 'machine.speed.actual'))?.includeSeed, true)
+    assert.deepEqual(detail.speed.samples.map(({ observedAtUtc, value }) => ({ observedAtUtc, value })), [
+      { observedAtUtc: '2026-08-13T11:19:00.000Z', value: 10 },
+      { observedAtUtc: '2026-08-13T11:55:00.000Z', value: 20 },
+      { observedAtUtc: '2026-08-13T12:05:00.000Z', value: 30 },
+    ])
   })
 
   it('chunks the maximum 1,440-minute discovery window and batches mapped supported selectors only', async () => {
@@ -104,6 +110,13 @@ describe('Raw Radius Code Explorer', () => {
   it('removes serialization tails without introducing a process threshold', () => {
     assert.equal(normalizeHistorianNumber(0.30000000000000004), .3)
     assert.notEqual(normalizeHistorianNumber(15), normalizeHistorianNumber(15.0000000001))
+  })
+
+  it('preserves the actual seed observation for held change-only display without inventing samples', () => {
+    const selector = { canonicalId: 'machine.speed.actual', representation: 'samples' as const }
+    const seed = sample('2026-08-13T11:19:00.000Z', 900)
+    const next = sample('2026-08-13T12:05:00.000Z', 700)
+    assert.deepEqual(samplesWithSeed(evidence(selector, seed, [], [next])), [seed, next])
   })
 
   it('detects state transitions strictly before entry and omits unchanged or entry-time values', () => {

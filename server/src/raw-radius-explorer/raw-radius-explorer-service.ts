@@ -132,6 +132,11 @@ function uniqueBy<T>(values: T[], key: (value: T) => string): T[] {
   return values.filter((value) => { const id = key(value); if (seen.has(id)) return false; seen.add(id); return true })
 }
 
+export function samplesWithSeed(signal: Pick<PressSemanticSignalEvidence, 'seed' | 'samples'>): TelemetrySample[] {
+  return uniqueBy([...(signal.seed ? [signal.seed] : []), ...signal.samples], ({ observedAtUtc }) => observedAtUtc)
+    .sort((left, right) => Date.parse(left.observedAtUtc) - Date.parse(right.observedAtUtc))
+}
+
 function mergeSignals(histories: PressSemanticSignalEvidence[][]): PressSemanticSignalEvidence[] {
   const merged = new Map<string, PressSemanticSignalEvidence>()
   for (const history of histories.flat()) {
@@ -273,7 +278,7 @@ export class RawRadiusExplorerService {
     const speedSelector: TelemetrySemanticSelector = { canonicalId: 'machine.speed.actual', representation: 'samples' }
     const [radius, speed, discovery] = await Promise.all([
       this.radius.getRawTimeline(occurrence.pressKey, occurrence.chartFromUtc, occurrence.chartToUtc),
-      this.history(occurrence.pressKey, occurrence.chartFromUtc, occurrence.chartToUtc, [speedSelector], false, requestId, signal),
+      this.history(occurrence.pressKey, occurrence.chartFromUtc, occurrence.chartToUtc, [speedSelector], true, requestId, signal),
       this.history(occurrence.pressKey, lookbackFromUtc, occurrence.startUtc, catalog.map(({ selector }) => selector), true, requestId, signal),
     ])
     const byKey = new Map(catalog.map(({ item, selector }) => [signalKey(selector), item]))
@@ -290,7 +295,7 @@ export class RawRadiusExplorerService {
     const response = {
       occurrence, lookback: { fromUtc: lookbackFromUtc, toUtc: occurrence.startUtc, halfOpen: true },
       radiusSegments: radius.segments,
-      speed: speedSignal ? { sourceUnit: speedSignal.sourceUnit, canonicalUnitStatus: speedSignal.canonicalUnitStatus, samples: speedSignal.samples } : { sourceUnit: null, canonicalUnitStatus: null, samples: [] },
+      speed: speedSignal ? { sourceUnit: speedSignal.sourceUnit, canonicalUnitStatus: speedSignal.canonicalUnitStatus, samples: samplesWithSeed(speedSignal) } : { sourceUnit: null, canonicalUnitStatus: null, samples: [] },
       changedSignals,
       performance: { totalMs: this.now() - started, selectorCount: discovery.selectorCount, semanticHistoryRequests: discovery.requestCount + speed.requestCount, speedHistoryMs: speed.totalMs, payloadBytes: 0 },
     }

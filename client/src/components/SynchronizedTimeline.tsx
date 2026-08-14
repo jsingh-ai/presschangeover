@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from 'react'
+import { useMemo, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
 import { formatPlantDateTime } from '../time-ranges'
 import type { TimedNumericSample } from '../types/evidence'
 
@@ -30,6 +30,7 @@ export interface TimelineNumericTrack {
   unavailableLabel?: string
   connectObservedGaps?: boolean
   interpolation?: 'linear' | 'step'
+  holdLastObservation?: boolean
 }
 
 export interface TimelineEvent {
@@ -93,6 +94,7 @@ export interface SynchronizedTimelineProps {
   minimumCanvasWidth?: number
   highlightedRange?: { fromUtc: string; toUtc: string; label: string }
   onInspectionTimeChange?(atUtc: string): void
+  renderInspectionTooltip?(atUtc: string): ReactNode
 }
 
 export function clusterTimelineEvents(events: TimelineEvent[], fromUtc: string, toUtc: string, thresholdPercent = .8): TimelineEventCluster[] {
@@ -128,8 +130,11 @@ function timeLabel(value: string, from: number, coordinateMode: TimelineCoordina
   return `${hours ? `${hours}h ` : ''}${minutes ? `${minutes}m ` : ''}${remainder}s`
 }
 
-export function numericPaths(samples: TimedNumericSample[], from: number, span: number, width: number, height: number, connectObservedGaps = false, interpolation: 'linear' | 'step' = 'linear'): { paths: string[]; minimum: number; maximum: number } {
-  const visible = samples.filter(({ observedAtUtc, value }) => Number.isFinite(Date.parse(observedAtUtc)) && Number.isFinite(value) && Date.parse(observedAtUtc) >= from && Date.parse(observedAtUtc) <= from + span)
+export function numericPaths(samples: TimedNumericSample[], from: number, span: number, width: number, height: number, connectObservedGaps = false, interpolation: 'linear' | 'step' = 'linear', holdLastObservation = false): { paths: string[]; minimum: number; maximum: number } {
+  const to = from + span
+  const observed = samples.filter(({ observedAtUtc, value }) => Number.isFinite(Date.parse(observedAtUtc)) && Number.isFinite(value) && Date.parse(observedAtUtc) <= to).sort((left, right) => Date.parse(left.observedAtUtc) - Date.parse(right.observedAtUtc))
+  const seed = observed.filter(({ observedAtUtc }) => Date.parse(observedAtUtc) <= from).at(-1)
+  const visible = [...(seed ? [seed] : []), ...observed.filter(({ observedAtUtc }) => Date.parse(observedAtUtc) > from)]
   const minimum = visible.length ? Math.min(...visible.map(({ value }) => value)) : 0
   const maximum = visible.length ? Math.max(...visible.map(({ value }) => value)) : 0
   const valueSpan = Math.max(1, maximum - minimum)
@@ -144,7 +149,7 @@ export function numericPaths(samples: TimedNumericSample[], from: number, span: 
       if (current.length) paths.push(current.join(' '))
       current = []
     }
-    const x = (timestamp - from) / span * width
+    const x = Math.max(0, (timestamp - from) / span * width)
     const y = height - 6 - (sample.value - minimum) / valueSpan * (height - 12)
     if (current.length && interpolation === 'step' && previous) {
       const previousY = height - 6 - (previous.value - minimum) / valueSpan * (height - 12)
@@ -152,11 +157,16 @@ export function numericPaths(samples: TimedNumericSample[], from: number, span: 
     }
     current.push(`${current.length ? 'L' : 'M'} ${x.toFixed(2)} ${y.toFixed(2)}`)
   })
+  if (holdLastObservation && current.length && visible.length) {
+    const final = visible.at(-1)!
+    const finalY = height - 6 - (final.value - minimum) / valueSpan * (height - 12)
+    current.push(`L ${width.toFixed(2)} ${finalY.toFixed(2)}`)
+  }
   if (current.length) paths.push(current.join(' '))
   return { paths, minimum, maximum }
 }
 
-export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolute', elapsedOriginUtc, intervalTracks, numericTracks = [], eventTracks = [], trackOrder, selectedId, onSelect, ariaLabel, minimumCanvasWidth = 760, highlightedRange, onInspectionTimeChange }: SynchronizedTimelineProps) {
+export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolute', elapsedOriginUtc, intervalTracks, numericTracks = [], eventTracks = [], trackOrder, selectedId, onSelect, ariaLabel, minimumCanvasWidth = 760, highlightedRange, onInspectionTimeChange, renderInspectionTooltip }: SynchronizedTimelineProps) {
   const from = Date.parse(fromUtc)
   const to = Date.parse(toUtc)
   const span = Math.max(1, to - from)
@@ -167,12 +177,14 @@ export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolut
   const [selectedEventCluster, setSelectedEventCluster] = useState<string>()
   const [expandedEventGroups, setExpandedEventGroups] = useState<Set<string>>(() => new Set())
   const canvasStyle = { '--timeline-min-width': `${minimumCanvasWidth}px` } as CSSProperties
-  const numericGeometry = useMemo(() => numericTracks.map((track) => ({ track, geometry: numericPaths(track.samples, from, span, 1000, 88, track.connectObservedGaps, track.interpolation) })), [numericTracks, from, span])
+  const numericGeometry = useMemo(() => numericTracks.map((track) => ({ track, geometry: numericPaths(track.samples, from, span, 1000, 88, track.connectObservedGaps, track.interpolation, track.holdLastObservation) })), [numericTracks, from, span])
   const eventGeometry = useMemo(() => eventTracks.map((track) => ({ track, clusters: clusterTimelineEvents(track.events, fromUtc, toUtc) })), [eventTracks, fromUtc, toUtc])
   const highlightedGeometry = highlightedRange ? {
     start: Math.min(1, Math.max(0, (Date.parse(highlightedRange.fromUtc) - from) / span)),
     width: Math.min(1 - Math.min(1, Math.max(0, (Date.parse(highlightedRange.fromUtc) - from) / span)), Math.max(0, (Math.min(to, Date.parse(highlightedRange.toUtc)) - Math.max(from, Date.parse(highlightedRange.fromUtc))) / span)),
   } : undefined
+  const inspectionUtc = crosshair === undefined ? undefined : new Date(from + span * crosshair / 100).toISOString()
+  const inspectionContent = inspectionUtc && renderInspectionTooltip ? renderInspectionTooltip(inspectionUtc) : null
 
   const eventDescription = (event: TimelineEvent) => `${event.label}. ${formatPlantDateTime(event.atUtc)} CT${coordinateMode === 'elapsed' ? `, ${timeLabel(event.atUtc, labelOrigin, coordinateMode)} elapsed` : ''}${event.detail ? `. ${event.detail}` : ''}`
   const focusInterval = (item: TimelineIntervalItem) => {
@@ -256,6 +268,7 @@ export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolut
           </div>
         </div>)}
         {crosshair !== undefined && <div className="synchronized-timeline__crosshair" style={{ '--timeline-position': crosshair / 100 } as CSSProperties} aria-hidden="true" />}
+        {crosshair !== undefined && inspectionContent && <div className="synchronized-timeline__inspection-tooltip" style={{ '--timeline-position': crosshair / 100 } as CSSProperties} role="status" aria-live="polite">{inspectionContent}</div>}
       </div>
     </div>
   </div>
