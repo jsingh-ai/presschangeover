@@ -2682,7 +2682,8 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
 .raw-row-actions { flex: 0 0 auto; display: flex !important; align-items: end; gap: .45rem !important; }
 .raw-row-actions label { display: grid; gap: .15rem; color: var(--text-secondary, #617087); font-size: .65rem; font-weight: 700; }
 .raw-row-actions select { min-width: 8.6rem; padding: .38rem .45rem; border: 1px solid var(--border-subtle, #d8dee8); border-radius: .45rem; color: var(--text-primary, #172033); background: var(--surface-raised, #fff); }
-.raw-unmapped-row > .raw-row-actions { align-self: stretch; flex-direction: column; align-items: flex-end; justify-content: space-between; }
+.raw-unmapped-row { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; }
+.raw-unmapped-row > .raw-row-actions { width: 100%; align-items: flex-end; justify-content: space-between; padding-top: .35rem; border-top: 1px solid color-mix(in srgb, var(--border-subtle, #d8dee8) 65%, transparent); }
 .raw-pin-action { display: inline-flex; align-items: center; justify-content: center; gap: .35rem; min-width: 5.35rem; min-height: 2rem; padding: .35rem .58rem; border-color: color-mix(in srgb, var(--accent, #3167d5) 38%, var(--border-subtle, #d8dee8)); border-radius: 999px; color: var(--accent, #3167d5); background: color-mix(in srgb, var(--accent, #3167d5) 7%, var(--surface-raised, #fff)); box-shadow: 0 3px 8px color-mix(in srgb, var(--accent, #3167d5) 10%, transparent); font-size: .68rem; font-weight: 800; }
 .raw-pin-action:hover:not(:disabled) { border-color: var(--accent, #3167d5); background: color-mix(in srgb, var(--accent, #3167d5) 13%, var(--surface-raised, #fff)); }
 .raw-pin-action.is-active { color: #fff !important; background: var(--accent, #3167d5); }

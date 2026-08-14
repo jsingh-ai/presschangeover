@@ -249,12 +249,20 @@ describe('Raw Radius Code Explorer client', () => {
     assert.match(stylesSource, /\.raw-explorer-setup\.is-collapsed/)
   })
 
-  it('uses one polished Pin control and anchors raw Pin below its separate review control', () => {
+  it('uses one polished Pin control and keeps raw Review and Pin in a separate bottom row', () => {
     assert.match(pageSource, /function RawPinButton/)
     assert.match(pageSource, /raw-pin-action/)
     assert.match(pageSource, /aria-pressed=\{pinned\}/)
-    assert.match(stylesSource, /\.raw-unmapped-row > \.raw-row-actions \{[^}]*flex-direction: column;[^}]*align-items: flex-end;[^}]*justify-content: space-between/)
+    assert.match(stylesSource, /\.raw-unmapped-row \{[^}]*display: grid;[^}]*grid-template-columns: minmax\(0, 1fr\)/)
+    assert.match(stylesSource, /\.raw-unmapped-row > \.raw-row-actions \{[^}]*width: 100%;[^}]*justify-content: space-between/)
     assert.match(stylesSource, /\.raw-pin-action \{[^}]*border-radius: 999px/)
     assert.match(stylesSource, /\.raw-pin-action\.is-active/)
+  })
+
+  it('keeps the raw badge clear of Review and omits Biggest move from raw numeric summaries', () => {
+    const rawRowSource = pageSource.slice(pageSource.indexOf('function RawUnmappedSignalRow'), pageSource.indexOf('function OccurrenceCard'))
+    assert.match(rawRowSource, /RAW \/ UNMAPPED/)
+    assert.match(rawRowSource, />Review<select/)
+    assert.doesNotMatch(rawRowSource, /Biggest move/)
   })
 })
