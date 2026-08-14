@@ -16,6 +16,7 @@ import { PressFilterBar } from './components/PressFilterBar'
 import { RangeControls } from './components/RangeControls'
 import { SystemStatus } from './components/SystemStatus'
 import { StateClassificationPage } from './components/StateClassificationPage'
+import { RawRadiusExplorerPage } from './components/RawRadiusExplorerPage'
 import { areaFromPathname, operationalSectionFromSearch, pressFromLocation, type AnalyticsArea, type OperationalSection } from './navigation'
 import { findRadiusSegment } from './segment-selection'
 import { createPresetRange, restoreSelectedRange, type SelectedRange } from './time-ranges'
@@ -76,6 +77,7 @@ function App() {
   const [error, setError] = useState<string>()
   const [pressError, setPressError] = useState<string>()
   const operationsArea = area === 'overview' || area === 'operational-analysis' || area === 'patterns-episodes'
+  const radiusDataArea = operationsArea || area === 'raw-radius-explorer'
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -120,7 +122,7 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (!operationsArea) { setLoading(false); setError(undefined); return }
+    if (!radiusDataArea) { setLoading(false); setError(undefined); return }
     let active = true
     const controller = new AbortController()
     void getProcessIntelligenceHealth(controller.signal).then(() => active && setApiStatus('healthy')).catch(() => active && setApiStatus('unavailable'))
@@ -135,7 +137,7 @@ function App() {
       setRadiusReason(health.reason)
     }).catch(() => { if (active) { setRadiusStatus('unavailable'); setRadiusReason('not_configured') } })
     return () => { active = false; controller.abort() }
-  }, [operationsArea])
+  }, [radiusDataArea])
 
   useEffect(() => {
     if (!operationsArea) return
@@ -201,7 +203,7 @@ function App() {
 
   function navigateArea(nextArea: AnalyticsArea, section?: OperationalSection) {
     const nextSection = section ?? analysisSection
-    window.history.pushState({}, '', workspaceUrl(range, selectedPress, undefined, nextArea, nextSection))
+    window.history.pushState({}, '', nextArea === 'raw-radius-explorer' ? '/raw-radius-explorer' : workspaceUrl(range, selectedPress, undefined, nextArea, nextSection))
     setArea(nextArea)
     setAnalysisSection(nextSection)
     setInvestigation(undefined)
@@ -325,6 +327,7 @@ function App() {
 
   const administrationContext = <div className="context-summary administration-context"><div><span>Administration</span><strong>Radius semantics</strong><small>Published mappings govern Operations views; Raw Radius evidence remains unchanged.</small></div><span className="data-health data-health--healthy" role="status"><i aria-hidden="true" />Versioned configuration</span></div>
   const searchContext = <div className="context-summary search-context"><div><span>Find and investigate</span><strong>Intelligent Search</strong><small>Search a work name or Radius code, then open it in the right analysis.</small></div><span className="data-health data-health--healthy" role="status"><i aria-hidden="true" />Search ready</span></div>
+  const rawExplorerContext = <div className="context-summary search-context"><div><span>Engineering evidence</span><strong>Raw Radius Code Explorer</strong><small>Exact recorded Radius states and synchronized telemetry.</small></div><span className={`data-health data-health--${dataStatus}`} role="status"><i aria-hidden="true" />{dataStatus === 'healthy' ? 'Evidence services healthy' : dataStatus === 'loading' ? 'Checking evidence services' : 'Evidence services unavailable'}</span></div>
 
   const footer = <details className="system-status-drawer"><summary>System and dependency health</summary><SystemStatus items={[
     { label: 'ProcessIntelligence API', status: apiStatus },
@@ -333,7 +336,7 @@ function App() {
     { label: 'Telemetry historian', status: historianStatus },
   ]} /></details>
 
-  return <ApplicationShell area={area} theme={theme} onNavigate={navigateArea} onToggleTheme={toggleTheme} context={area === 'state-classification' ? administrationContext : area === 'intelligent-search' ? searchContext : context} footer={footer}>
+  return <ApplicationShell area={area} theme={theme} onNavigate={navigateArea} onToggleTheme={toggleTheme} context={area === 'state-classification' ? administrationContext : area === 'intelligent-search' ? searchContext : area === 'raw-radius-explorer' ? rawExplorerContext : context} footer={footer}>
     {operationsArea && loading && !overview && <section className="panel loading-panel" role="status">Loading Radius operations…</section>}
     {operationsArea && loading && overview && <span className="background-refresh-status" role="status">Updating the selected time range; current results remain visible.</span>}
     {operationsArea && error && !overview && <section className="panel unavailable-panel"><h1>Radius data unavailable</h1><p>{error}</p><p>Dependency health remains available below.</p></section>}
@@ -345,6 +348,7 @@ function App() {
     {overview && activeAnalytics && area === 'operational-analysis' && <OperationalAnalysisPage analytics={activeAnalytics} scopeLabel={analyticsScopeLabel} overview={overview} selectedPress={selectedPress} />}
     {overview && activeAnalytics && area === 'patterns-episodes' && <PatternsEpisodesPage analytics={activeAnalytics} scopeLabel={analyticsScopeLabel} overview={overview} selectedPress={selectedPress} />}
     {area === 'intelligent-search' && <IntelligentSearchPage />}
+    {area === 'raw-radius-explorer' && <RawRadiusExplorerPage />}
     {area === 'state-classification' && <StateClassificationPage />}
 
     {investigation && !(area === 'overview' && investigation.mode === 'segment') && investigation.mode !== 'status' && investigation.mode !== 'anomaly' && drawerResultPress && (drawerResult || drawerPressLoading || (investigation.mode === 'segment' && drawerSegment)) && <InvestigationDrawer route={investigation} result={drawerResult} episode={episodeDetail} segment={selectedSegmentDetail} finding={selectedFinding} loading={investigation.mode === 'segment' ? false : drawerPressLoading || drawerLoading} onClose={closeInvestigation} onSelectSegment={(nextSegment) => navigateSegment(nextSegment.pressKey, nextSegment)} contextSegments={drawerContextSegments} />}

@@ -25,6 +25,7 @@ import { TelemetryFoundationService } from './telemetry/telemetry-foundation-ser
 import { PHYSICAL_EVIDENCE_CATEGORIES, TELEMETRY_REPRESENTATIONS, type CuratedPhysicalEvidenceRequest, type TelemetryRepresentation, type TelemetrySemanticHistoryQuery } from './telemetry/telemetry-contracts.js'
 import { EngineeringClueAnalysisService, type ClueOccurrenceInput } from './telemetry/engineering-clue-analysis.js'
 import { StopRestartAnalysisService, type FleetSpeedContextInput, type RadiusTimingAnalysisInput, type StopRestartAnalysisInput } from './telemetry/stop-restart-analysis-service.js'
+import { RAW_EXPLORER_MAX_WINDOW_MINUTES, RawRadiusExplorerService, type RawExplorerOccurrence, type RawExplorerSetup, type RawExplorerSignalIdentity } from './raw-radius-explorer/raw-radius-explorer-service.js'
 
 const MAX_PHYSICAL_STATE_RANGE_MS = 2 * 60 * 60 * 1_000
 const MAX_RADIUS_RANGE_MS = 31 * 24 * 60 * 60 * 1_000
@@ -270,6 +271,49 @@ function parseFleetSpeedContextInput(body: unknown): FleetSpeedContextInput {
   return { fromUtc, toUtc, pressKeys: raw.pressKeys.map((value) => parsePressKey(String(value))) }
 }
 
+function rawExplorerIdentity(value: unknown): RawExplorerSetup['identity'] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RequestValidationError('invalid_raw_radius_identity')
+  const raw = value as Record<string, unknown>
+  if (raw.eventType !== 'G' && raw.eventType !== 'B' && raw.eventType !== 'M' && raw.eventType !== 'S') throw new RequestValidationError('invalid_raw_radius_identity')
+  if (typeof raw.statusCode !== 'string' || !raw.statusCode.trim() || raw.statusCode.length > 128 || typeof raw.statusDescription !== 'string' || !raw.statusDescription.trim() || raw.statusDescription.length > 512) throw new RequestValidationError('invalid_raw_radius_identity')
+  return { eventType: raw.eventType, statusCode: raw.statusCode, statusDescription: raw.statusDescription }
+}
+
+function rawExplorerMinutes(value: unknown, allowZero: boolean, code: string): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value > RAW_EXPLORER_MAX_WINDOW_MINUTES || (allowZero ? value < 0 : value <= 0)) throw new RequestValidationError(code)
+  return value
+}
+
+function parseRawExplorerSetup(body: unknown): RawExplorerSetup {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new RequestValidationError('invalid_raw_explorer_request')
+  const raw = body as Record<string, unknown>
+  const fromUtc = parseUtcTimestamp(raw.fromUtc, 'invalid_from_utc'); const toUtc = parseUtcTimestamp(raw.toUtc, 'invalid_to_utc')
+  const rangeMs = Date.parse(toUtc) - Date.parse(fromUtc)
+  if (rangeMs <= 0 || rangeMs > MAX_RADIUS_RANGE_MS) throw new RequestValidationError('invalid_time_range')
+  return { fromUtc, toUtc, identity: rawExplorerIdentity(raw.identity), changeLookbackMinutes: rawExplorerMinutes(raw.changeLookbackMinutes, false, 'invalid_change_lookback'), chartContextMinutes: rawExplorerMinutes(raw.chartContextMinutes, true, 'invalid_chart_context') }
+}
+
+function parseRawExplorerOccurrence(value: unknown): RawExplorerOccurrence {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RequestValidationError('invalid_raw_explorer_occurrence')
+  const raw = value as Record<string, unknown>
+  const pressKey = parsePressKey(String(raw.pressKey ?? ''))
+  const startUtc = parseUtcTimestamp(raw.startUtc, 'invalid_raw_explorer_occurrence'); const endUtc = parseUtcTimestamp(raw.endUtc, 'invalid_raw_explorer_occurrence')
+  const chartFromUtc = parseUtcTimestamp(raw.chartFromUtc, 'invalid_raw_explorer_occurrence'); const chartToUtc = parseUtcTimestamp(raw.chartToUtc, 'invalid_raw_explorer_occurrence')
+  const maximumChartRangeMs = MAX_RADIUS_RANGE_MS + 2 * RAW_EXPLORER_MAX_WINDOW_MINUTES * 60_000
+  if (Date.parse(endUtc) <= Date.parse(startUtc) || Date.parse(chartFromUtc) > Date.parse(startUtc) || Date.parse(chartToUtc) < Date.parse(endUtc) || Date.parse(chartToUtc) - Date.parse(chartFromUtc) > maximumChartRangeMs) throw new RequestValidationError('invalid_raw_explorer_occurrence')
+  const identity = rawExplorerIdentity(raw)
+  if (typeof raw.occurrenceId !== 'string' || !/^[A-Za-z0-9:._-]{1,300}$/.test(raw.occurrenceId) || typeof raw.displayName !== 'string' || !raw.displayName || raw.displayName.length > 100 || !Number.isSafeInteger(raw.pressOccurrenceIndex) || Number(raw.pressOccurrenceIndex) < 1 || !Number.isSafeInteger(raw.pressOccurrenceCount) || Number(raw.pressOccurrenceCount) < Number(raw.pressOccurrenceIndex)) throw new RequestValidationError('invalid_raw_explorer_occurrence')
+  return { occurrenceId: raw.occurrenceId, pressKey, displayName: raw.displayName, pressOccurrenceIndex: Number(raw.pressOccurrenceIndex), pressOccurrenceCount: Number(raw.pressOccurrenceCount), ...identity, startUtc, endUtc, durationSeconds: (Date.parse(endUtc) - Date.parse(startUtc)) / 1_000, chartFromUtc, chartToUtc }
+}
+
+function parseRawExplorerSignal(value: unknown): RawExplorerSignalIdentity {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RequestValidationError('invalid_raw_explorer_signal')
+  const raw = value as Record<string, unknown>
+  const signalTypes = ['continuous', 'step_reference', 'state_event']; const categories = ['speed', 'web_tension', 'dryer', 'ink', 'viscosity', 'temperature', 'pump', 'wash', 'register', 'impression', 'torque', 'drive_temperature', 'doctor_blade', 'repeat_other', 'motion']
+  if (typeof raw.canonicalId !== 'string' || !/^[a-z0-9_.]{1,200}$/.test(raw.canonicalId) || raw.deckNumber !== null && (!Number.isSafeInteger(raw.deckNumber) || Number(raw.deckNumber) < 1 || Number(raw.deckNumber) > 10) || typeof raw.friendlyName !== 'string' || !raw.friendlyName || !signalTypes.includes(String(raw.signalType)) || !categories.includes(String(raw.category)) || raw.scope !== 'machine' && raw.scope !== 'deck') throw new RequestValidationError('invalid_raw_explorer_signal')
+  return { canonicalId: raw.canonicalId, deckNumber: raw.deckNumber === null ? null : Number(raw.deckNumber), friendlyName: raw.friendlyName, signalType: raw.signalType as RawExplorerSignalIdentity['signalType'], category: raw.category as RawExplorerSignalIdentity['category'], scope: raw.scope }
+}
+
 function cancellationSignal(request: Request, response: Response): AbortSignal {
   const controller = new AbortController()
   request.once('aborted', () => controller.abort())
@@ -327,6 +371,7 @@ export function createApp({
   const telemetry = new TelemetryFoundationService(telemetryClient)
   const engineeringClues = new EngineeringClueAnalysisService(telemetry)
   const stopRestart = new StopRestartAnalysisService(telemetry)
+  const rawRadiusExplorer = new RawRadiusExplorerService(radiusService, telemetry)
   const observedIdentityCache = new ObservedIdentityCache(
     () => radiusService.getObservedIdentities?.() ?? Promise.resolve([]),
     { onRefreshError: () => { if (logger) logger.error('classification_observed_identity_refresh_unavailable') } },
@@ -485,6 +530,27 @@ export function createApp({
       response.status(200).json(overview)
     }),
   )
+
+  app.get('/api/radius/raw-explorer/identities', asyncRoute(async (request, response) => {
+    const { fromUtc, toUtc } = validateRadiusRange(request.query)
+    response.status(200).json(await rawRadiusExplorer.identities(fromUtc, toUtc))
+  }))
+
+  app.post('/api/radius/raw-explorer/explore', asyncRoute(async (request, response) => {
+    response.status(200).json(await rawRadiusExplorer.explore(parseRawExplorerSetup(request.body)))
+  }))
+
+  app.post('/api/radius/raw-explorer/detail', asyncRoute(async (request, response) => {
+    if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)) throw new RequestValidationError('invalid_raw_explorer_request')
+    const raw = request.body as Record<string, unknown>
+    response.status(200).json(await rawRadiusExplorer.detail({ occurrence: parseRawExplorerOccurrence(raw.occurrence), changeLookbackMinutes: rawExplorerMinutes(raw.changeLookbackMinutes, false, 'invalid_change_lookback') }, String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.post('/api/radius/raw-explorer/plot', asyncRoute(async (request, response) => {
+    if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)) throw new RequestValidationError('invalid_raw_explorer_request')
+    const raw = request.body as Record<string, unknown>
+    response.status(200).json(await rawRadiusExplorer.plot({ occurrence: parseRawExplorerOccurrence(raw.occurrence), signal: parseRawExplorerSignal(raw.signal) }, String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
 
   app.get(
     '/api/radius/activity-analysis',

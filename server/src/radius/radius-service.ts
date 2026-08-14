@@ -23,6 +23,7 @@ import type {
   RadiusPressMapping,
   RadiusPollRun,
   RadiusStatusSegment,
+  RawRadiusTimeline,
 } from './models.js'
 import { RADIUS_PRESS_KEYS } from './models.js'
 import { RadiusRepository } from './radius-repository.js'
@@ -67,6 +68,7 @@ export interface RadiusService {
     episodeId: string,
   ): Promise<OperationalEpisode>
   getObservedIdentities?(): Promise<ObservedRadiusIdentity[]>
+  getRawTimeline?(pressKey: RadiusPressKey, fromUtc: string, toUtc: string): Promise<RawRadiusTimeline>
   getActivityAnalysis?(fromUtc: string, toUtc: string, selection?: import('./models.js').ActivitySelection, pressKey?: RadiusPressKey, evidencePage?: { offset?: number; limit?: number }): Promise<import('./models.js').ActivityAnalysis>
   getPatternAnalysis?(fromUtc: string, toUtc: string, input?: { selectedPatternKey?: string; conditions?: import('./models.js').ActivitySelection[]; matchMode?: import('./models.js').PatternMatchMode; pressKey?: RadiusPressKey }): Promise<import('./models.js').PatternAnalysis>
 }
@@ -89,6 +91,10 @@ export class UnavailableRadiusService implements RadiusService {
   }
 
   async getObservedIdentities(): Promise<ObservedRadiusIdentity[]> {
+    throw new RadiusUnavailableError()
+  }
+
+  async getRawTimeline(): Promise<RawRadiusTimeline> {
     throw new RadiusUnavailableError()
   }
 }
@@ -218,6 +224,13 @@ export class DatabaseRadiusService implements RadiusService {
   async getObservedIdentities(): Promise<ObservedRadiusIdentity[]> {
     await this.assertSafeAccess()
     return this.repository.getObservedIdentities()
+  }
+
+  async getRawTimeline(pressKey: RadiusPressKey, fromUtc: string, toUtc: string): Promise<RawRadiusTimeline> {
+    await this.assertSafeAccess()
+    const mapping = this.requireMapping(pressKey)
+    const data = await this.loadPressData(mapping, fromUtc, toUtc)
+    return { pressKey, displayName: mapping.displayName, fromUtc, toUtc, segments: data.visibleSegments }
   }
 
   private requireMapping(pressKey: RadiusPressKey): RadiusPressMapping {

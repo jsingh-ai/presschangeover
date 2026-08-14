@@ -88,6 +88,14 @@ export interface RadiusOfflineSegment extends BaseRadiusTimelineSegment {
 
 export type RadiusStatusSegment = RadiusStateSegment | RadiusOfflineSegment
 
+export interface RawRadiusTimeline {
+  pressKey: RadiusPressKey
+  displayName: string
+  fromUtc: string
+  toUtc: string
+  segments: RadiusStatusSegment[]
+}
+
 export type RadiusAvailability = 'online' | 'offline'
 export type RadiusFeedStatus = 'ONLINE' | 'DEGRADED' | 'OFFLINE'
 export type EpisodeCompletionStatus =

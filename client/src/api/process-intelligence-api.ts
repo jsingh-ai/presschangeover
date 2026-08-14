@@ -21,6 +21,13 @@ import type {
   ActivitySelection,
   PatternAnalysis,
   PatternMatchMode,
+  RawExplorerDetail,
+  RawExplorerIdentity,
+  RawExplorerOccurrence,
+  RawExplorerPlotResult,
+  RawExplorerResult,
+  RawExplorerSetup,
+  RawExplorerSignalIdentity,
 } from '../types/api'
 import type {
   CuratedPhysicalEvidence,
@@ -148,6 +155,22 @@ export function getRadiusOverview(fromUtc: string, toUtc: string, decisionOnly =
     `/api/radius/overview?${rangeQuery(fromUtc, toUtc)}${decisionOnly ? '&view=decision' : ''}`,
     signal,
   )
+}
+
+export function getRawRadiusIdentities(fromUtc: string, toUtc: string, signal?: AbortSignal) {
+  return getJson<RawExplorerIdentity[]>(`/api/radius/raw-explorer/identities?${rangeQuery(fromUtc, toUtc)}`, signal)
+}
+
+export function exploreRawRadius(setup: RawExplorerSetup, signal?: AbortSignal) {
+  return sendJson<RawExplorerResult>('/api/radius/raw-explorer/explore', 'POST', setup, signal)
+}
+
+export function getRawRadiusOccurrenceDetail(occurrence: RawExplorerOccurrence, changeLookbackMinutes: number, signal?: AbortSignal) {
+  return sendJson<RawExplorerDetail>('/api/radius/raw-explorer/detail', 'POST', { occurrence, changeLookbackMinutes }, signal)
+}
+
+export function plotRawRadiusSignal(occurrence: RawExplorerOccurrence, plottedSignal: RawExplorerSignalIdentity, signal?: AbortSignal) {
+  return sendJson<RawExplorerPlotResult>('/api/radius/raw-explorer/plot', 'POST', { occurrence, signal: plottedSignal }, signal)
 }
 
 export function getActivityAnalysis(fromUtc: string, toUtc: string, selection?: ActivitySelection, pressKey?: RadiusPressKey, signal?: AbortSignal, evidenceOffset = 0) {

@@ -596,3 +596,129 @@ export interface ClassificationSearchResponse {
   results: ClassificationSearchResult[]
 }
 export interface ClassificationValidation { valid: boolean; errors: string[]; warnings: string[]; mappedCount: number; fallbackCount: number; reviewRequiredCount: number }
+
+export type RawRadiusPhase = 'G' | 'B' | 'M' | 'S'
+export type RawExplorerSignalType = 'continuous' | 'step_reference' | 'state_event'
+export type RawExplorerCategory = 'speed' | 'web_tension' | 'dryer' | 'ink' | 'viscosity' | 'temperature' | 'pump' | 'wash' | 'register' | 'impression' | 'torque' | 'drive_temperature' | 'doctor_blade' | 'repeat_other' | 'motion'
+export type RawTelemetryScalar = string | number | boolean | null
+
+export interface RawExplorerIdentity {
+  identity: string
+  eventType: RawRadiusPhase
+  statusCode: string
+  statusDescription: string
+  eventCount: number
+  lastSeenUtc: string | null
+}
+
+export interface RawExplorerSetup {
+  fromUtc: string
+  toUtc: string
+  identity: Pick<RawExplorerIdentity, 'eventType' | 'statusCode' | 'statusDescription'>
+  changeLookbackMinutes: number
+  chartContextMinutes: number
+}
+
+export interface RawExplorerOccurrence {
+  occurrenceId: string
+  pressKey: RadiusPressKey
+  displayName: string
+  pressOccurrenceIndex: number
+  pressOccurrenceCount: number
+  eventType: string
+  statusCode: string
+  statusDescription: string
+  startUtc: string
+  endUtc: string
+  durationSeconds: number
+  chartFromUtc: string
+  chartToUtc: string
+}
+
+export interface RawExplorerResult {
+  setup: RawExplorerSetup
+  summary: {
+    totalOccurrences: number
+    pressesContainingCode: number
+    totalObservedDurationSeconds: number
+    pressCounts: Array<{ pressKey: RadiusPressKey; displayName: string; occurrenceCount: number }>
+  }
+  occurrences: RawExplorerOccurrence[]
+  performance: { totalMs: number; payloadBytes: number }
+}
+
+export interface RawExplorerSignalIdentity {
+  canonicalId: string
+  deckNumber: number | null
+  friendlyName: string
+  signalType: RawExplorerSignalType
+  category: RawExplorerCategory
+  scope: 'machine' | 'deck'
+}
+
+export interface RawExplorerNumericSummary {
+  kind: 'numeric'
+  firstValue: number
+  lastValue: number
+  netDelta: number
+  minimum: number
+  maximum: number
+  largestPositiveExcursion: number
+  largestNegativeExcursion: number
+  largestAbsoluteExcursion: number
+  observationCount: number
+}
+
+export interface RawExplorerStateSummary {
+  kind: 'state'
+  firstValue: RawTelemetryScalar
+  lastValue: RawTelemetryScalar
+  transitions: Array<{ atUtc: string; previousValue: RawTelemetryScalar; value: RawTelemetryScalar }>
+}
+
+export interface RawExplorerChangedSignal extends RawExplorerSignalIdentity {
+  summary: RawExplorerNumericSummary | RawExplorerStateSummary
+  sourceUnit: string | null
+  canonicalUnitStatus: string | null
+}
+
+export interface RawTelemetrySample {
+  observedAtUtc: string
+  receivedAtUtc: string
+  sourceTimestampUtc: string
+  qualityState: string
+  valueKind: string
+  value: RawTelemetryScalar
+}
+
+export interface RawTelemetryChange extends RawTelemetrySample {
+  previousObservedAtUtc: string
+  previousReceivedAtUtc: string
+  previousSourceTimestampUtc: string
+  previousQualityState: string
+  previousValueKind: string
+  previousValue: RawTelemetryScalar
+}
+
+export interface RawExplorerDetail {
+  occurrence: RawExplorerOccurrence
+  lookback: { fromUtc: string; toUtc: string; halfOpen: true }
+  radiusSegments: RadiusStatusSegment[]
+  speed: { sourceUnit: string | null; canonicalUnitStatus: string | null; samples: RawTelemetrySample[] }
+  changedSignals: RawExplorerChangedSignal[]
+  performance: { totalMs: number; selectorCount: number; semanticHistoryRequests: number; speedHistoryMs: number; payloadBytes: number }
+}
+
+export interface RawExplorerSignalHistory extends RawExplorerSignalIdentity {
+  representation: 'samples' | 'changes'
+  sourceUnit: string | null
+  canonicalUnitStatus: string | null
+  seed: RawTelemetrySample | null
+  samples: RawTelemetrySample[]
+  changes: RawTelemetryChange[]
+}
+
+export interface RawExplorerPlotResult {
+  signal: RawExplorerSignalHistory
+  performance: { totalMs: number; semanticHistoryRequests: number; payloadBytes: number }
+}
