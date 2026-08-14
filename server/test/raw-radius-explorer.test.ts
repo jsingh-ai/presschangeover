@@ -5,7 +5,7 @@ import type { RadiusStatusSegment } from '../src/radius/models.js'
 import { ENGINEERING_CLUE_CATALOG } from '../src/telemetry/engineering-clue-analysis.js'
 import type { CapabilityAssessment, PressSemanticSignalEvidence, TelemetryChange, TelemetrySample, TelemetrySemanticSelector } from '../src/telemetry/telemetry-contracts.js'
 import type { TelemetryFoundationService } from '../src/telemetry/telemetry-foundation-service.js'
-import { normalizeHistorianNumber, numericSummary, RawRadiusExplorerService, RAW_EXPLORER_MAX_WINDOW_MINUTES, samplesWithSeed, stateSummary, type RawExplorerOccurrence } from '../src/raw-radius-explorer/raw-radius-explorer-service.js'
+import { CURRENT_ROLL_LENGTH_CANONICAL_ID, normalizeHistorianNumber, numericSummary, RawRadiusExplorerService, RAW_EXPLORER_LENGTH_CATALOG, RAW_EXPLORER_MAX_WINDOW_MINUTES, samplesWithSeed, stateSummary, type RawExplorerOccurrence } from '../src/raw-radius-explorer/raw-radius-explorer-service.js'
 
 const startUtc = '2026-08-13T12:00:00.000Z'
 const endUtc = '2026-08-13T12:10:00.000Z'
@@ -90,6 +90,40 @@ describe('Raw Radius Code Explorer', () => {
       { observedAtUtc: '2026-08-13T11:55:00.000Z', value: 20 },
       { observedAtUtc: '2026-08-13T12:05:00.000Z', value: 30 },
     ])
+  })
+
+  it('loads one held current-roll track and exposes only changed optional machine length evidence', async () => {
+    const capabilities: CapabilityAssessment[] = RAW_EXPLORER_LENGTH_CATALOG.map(({ canonicalId }) => ({ canonicalId, state: 'SUPPORTED', deckNumbers: [], historyQueryable: true, evidenceKind: 'semantic_history' }))
+    const calls: Array<{ fromUtc: string; toUtc: string; includeSeed: boolean; signals: TelemetrySemanticSelector[] }> = []
+    const telemetry = {
+      capabilities: { get: async () => ({ capabilities }) },
+      semanticHistory: async (_pressKey: string, query: { fromUtc: string; toUtc: string; includeSeed: boolean; signals: TelemetrySemanticSelector[] }) => {
+        calls.push(query)
+        return { signals: query.signals.map((selector) => {
+          if (selector.canonicalId === 'machine.speed.actual') return evidence(selector)
+          if (selector.canonicalId === CURRENT_ROLL_LENGTH_CANONICAL_ID && query.fromUtc === occurrence.chartFromUtc) return evidence(selector, sample('2026-08-13T11:29:00.000Z', 14_900), [change('2026-08-13T12:05:00.000Z', 14_920, 100)])
+          if (selector.canonicalId === CURRENT_ROLL_LENGTH_CANONICAL_ID) return evidence(selector, sample('2026-08-13T11:44:00.000Z', 14_800), [change('2026-08-13T11:55:00.000Z', 14_800, 14_900)])
+          if (selector.canonicalId === 'production.order.length.actual') return evidence(selector, sample('2026-08-13T11:44:00.000Z', 20_000), [], [sample('2026-08-13T11:58:00.000Z', 20_100)])
+          return evidence(selector, sample('2026-08-13T11:44:00.000Z', 30_000))
+        }) }
+      },
+    } as unknown as TelemetryFoundationService
+    const explorer = new RawRadiusExplorerService(radiusService(), telemetry)
+    const detail = await explorer.detail({ occurrence, changeLookbackMinutes: 15 })
+    assert.equal(detail.currentRollLength?.canonicalId, CURRENT_ROLL_LENGTH_CANONICAL_ID)
+    assert.equal(detail.currentRollLength?.representation, 'changes')
+    assert.equal(detail.currentRollLength?.seed?.value, 14_900)
+    assert.deepEqual(detail.currentRollLength?.changes.map(({ value }) => value), [100])
+    assert.ok(calls.some((call) => call.fromUtc === occurrence.chartFromUtc && call.toUtc === occurrence.chartToUtc && call.signals.length === 1 && call.signals[0]?.canonicalId === CURRENT_ROLL_LENGTH_CANONICAL_ID && call.signals[0]?.representation === 'changes'))
+    assert.deepEqual(detail.changedSignals.filter(({ canonicalId }) => canonicalId.startsWith('production.')).map(({ canonicalId, friendlyName, scope, deckNumber }) => ({ canonicalId, friendlyName, scope, deckNumber })), [
+      { canonicalId: CURRENT_ROLL_LENGTH_CANONICAL_ID, friendlyName: 'Current Roll Length', scope: 'machine', deckNumber: null },
+      { canonicalId: 'production.order.length.actual', friendlyName: 'Order Length', scope: 'machine', deckNumber: null },
+    ])
+    assert.equal(detail.changedSignals.some(({ canonicalId }) => canonicalId === 'production.roll.length.target'), false)
+    const plotted = await explorer.plot({ occurrence, signal: { canonicalId: 'production.order.length.actual', deckNumber: null, friendlyName: 'Order Length', signalType: 'step_reference', category: 'repeat_other', scope: 'machine' } })
+    assert.equal(plotted.signal.canonicalId, 'production.order.length.actual')
+    assert.equal(plotted.signal.representation, 'samples')
+    await assert.rejects(() => explorer.plot({ occurrence, signal: { canonicalId: CURRENT_ROLL_LENGTH_CANONICAL_ID, deckNumber: null, friendlyName: 'Current Roll Length', signalType: 'step_reference', category: 'repeat_other', scope: 'machine' } }))
   })
 
   it('chunks the maximum 1,440-minute discovery window and batches mapped supported selectors only', async () => {

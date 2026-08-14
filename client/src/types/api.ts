@@ -704,6 +704,7 @@ export interface RawExplorerDetail {
   occurrence: RawExplorerOccurrence
   lookback: { fromUtc: string; toUtc: string; halfOpen: true }
   radiusSegments: RadiusStatusSegment[]
+  currentRollLength: RawExplorerSignalHistory | null
   speed: { sourceUnit: string | null; canonicalUnitStatus: string | null; samples: RawTelemetrySample[] }
   changedSignals: RawExplorerChangedSignal[]
   performance: { totalMs: number; selectorCount: number; semanticHistoryRequests: number; speedHistoryMs: number; payloadBytes: number }

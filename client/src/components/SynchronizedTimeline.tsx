@@ -1,4 +1,5 @@
-import { useMemo, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { formatPlantDateTime } from '../time-ranges'
 import type { TimedNumericSample } from '../types/evidence'
 
@@ -97,6 +98,47 @@ export interface SynchronizedTimelineProps {
   renderInspectionTooltip?(atUtc: string): ReactNode
 }
 
+const INSPECTION_TOOLTIP_GAP = 24
+const INSPECTION_TOOLTIP_EDGE_MARGIN = 12
+
+export function positionInspectionTooltip(anchor: { x: number; y: number }, tooltip: { width: number; height: number }, viewport: { width: number; height: number }) {
+  const right = anchor.x + INSPECTION_TOOLTIP_GAP
+  const left = right + tooltip.width <= viewport.width - INSPECTION_TOOLTIP_EDGE_MARGIN ? right : anchor.x - INSPECTION_TOOLTIP_GAP - tooltip.width
+  const above = anchor.y - INSPECTION_TOOLTIP_GAP - tooltip.height
+  const top = above >= INSPECTION_TOOLTIP_EDGE_MARGIN ? above : anchor.y + INSPECTION_TOOLTIP_GAP
+  return {
+    left: Math.min(Math.max(INSPECTION_TOOLTIP_EDGE_MARGIN, left), Math.max(INSPECTION_TOOLTIP_EDGE_MARGIN, viewport.width - tooltip.width - INSPECTION_TOOLTIP_EDGE_MARGIN)),
+    top: Math.min(Math.max(INSPECTION_TOOLTIP_EDGE_MARGIN, top), Math.max(INSPECTION_TOOLTIP_EDGE_MARGIN, viewport.height - tooltip.height - INSPECTION_TOOLTIP_EDGE_MARGIN)),
+  }
+}
+
+function ViewportInspectionTooltip({ anchor, children }: { anchor: { x: number; y: number }; children: ReactNode }) {
+  const tooltipRef = useRef<HTMLDivElement>(null)
+  const [position, setPosition] = useState({ left: anchor.x + INSPECTION_TOOLTIP_GAP, top: anchor.y + INSPECTION_TOOLTIP_GAP, ready: false })
+
+  useLayoutEffect(() => {
+    const tooltip = tooltipRef.current
+    if (!tooltip) return
+    const place = () => {
+      const bounds = tooltip.getBoundingClientRect()
+      const next = positionInspectionTooltip(anchor, bounds, { width: window.innerWidth, height: window.innerHeight })
+      setPosition((current) => current.left === next.left && current.top === next.top && current.ready ? current : { ...next, ready: true })
+    }
+    place()
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(place)
+    observer?.observe(tooltip)
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      observer?.disconnect()
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [anchor])
+
+  return createPortal(<div ref={tooltipRef} className="synchronized-timeline__inspection-tooltip" style={{ left: position.left, top: position.top, visibility: position.ready ? 'visible' : 'hidden' }} role="status" aria-live="polite">{children}</div>, document.body)
+}
+
 export function clusterTimelineEvents(events: TimelineEvent[], fromUtc: string, toUtc: string, thresholdPercent = .8): TimelineEventCluster[] {
   const from = Date.parse(fromUtc)
   const span = Math.max(1, Date.parse(toUtc) - from)
@@ -174,8 +216,10 @@ export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolut
   const [hovered, setHovered] = useState<TimelineIntervalItem>()
   const [hoveredEventUtc, setHoveredEventUtc] = useState<string>()
   const [crosshair, setCrosshair] = useState<number>()
+  const [tooltipAnchor, setTooltipAnchor] = useState<{ x: number; y: number }>()
   const [selectedEventCluster, setSelectedEventCluster] = useState<string>()
   const [expandedEventGroups, setExpandedEventGroups] = useState<Set<string>>(() => new Set())
+  const canvasRef = useRef<HTMLDivElement>(null)
   const canvasStyle = { '--timeline-min-width': `${minimumCanvasWidth}px` } as CSSProperties
   const numericGeometry = useMemo(() => numericTracks.map((track) => ({ track, geometry: numericPaths(track.samples, from, span, 1000, 88, track.connectObservedGaps, track.interpolation, track.holdLastObservation) })), [numericTracks, from, span])
   const eventGeometry = useMemo(() => eventTracks.map((track) => ({ track, clusters: clusterTimelineEvents(track.events, fromUtc, toUtc) })), [eventTracks, fromUtc, toUtc])
@@ -215,12 +259,17 @@ export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolut
   function moveCrosshair(event: PointerEvent<HTMLDivElement>) {
     const plot = event.currentTarget.querySelector<HTMLElement>('.synchronized-timeline__track, .synchronized-timeline__numeric, .synchronized-timeline__events')
     const bounds = plot?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect()
-    updateCrosshair(Math.min(100, Math.max(0, (event.clientX - bounds.left) / Math.max(1, bounds.width) * 100)))
+    updateCrosshair(Math.min(100, Math.max(0, (event.clientX - bounds.left) / Math.max(1, bounds.width) * 100)), { x: event.clientX, y: event.clientY })
   }
 
-  function updateCrosshair(percent: number) {
+  function updateCrosshair(percent: number, anchor?: { x: number; y: number }) {
     const resolved = Math.min(100, Math.max(0, percent))
     setCrosshair(resolved)
+    if (anchor) setTooltipAnchor(anchor)
+    else {
+      const bounds = canvasRef.current?.getBoundingClientRect()
+      if (bounds) setTooltipAnchor({ x: bounds.left + bounds.width * resolved / 100, y: bounds.top + Math.min(bounds.height / 2, 160) })
+    }
     onInspectionTimeChange?.(new Date(from + span * resolved / 100).toISOString())
   }
 
@@ -234,7 +283,7 @@ export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolut
 
   return <div className="synchronized-timeline" aria-label={ariaLabel}>
     <div className="synchronized-timeline__scroll" tabIndex={0} aria-label={`Scrollable ${coordinateMode === 'absolute' ? 'wall-clock' : 'elapsed-time'} timeline. Use Left and Right Arrow keys to move the inspection time; Shift moves farther.`} onKeyDown={moveCrosshairWithKeyboard}>
-      <div className="synchronized-timeline__canvas" style={canvasStyle} onPointerMove={moveCrosshair} onPointerLeave={() => { setCrosshair(undefined); setHovered(undefined); setHoveredEventUtc(undefined) }}>
+      <div ref={canvasRef} className="synchronized-timeline__canvas" style={canvasStyle} onPointerMove={moveCrosshair} onPointerLeave={() => { setCrosshair(undefined); setTooltipAnchor(undefined); setHovered(undefined); setHoveredEventUtc(undefined) }}>
         <div className="synchronized-timeline__axis"><time>{timeLabel(fromUtc, labelOrigin, coordinateMode)}</time><span>{coordinateMode === 'absolute' ? 'Wall clock' : 'Elapsed Run time'}</span><time>{timeLabel(toUtc, labelOrigin, coordinateMode)}</time></div>
         {highlightedGeometry && <div className="synchronized-timeline__highlight" style={{ '--timeline-highlight-start': highlightedGeometry.start, '--timeline-highlight-width': highlightedGeometry.width } as CSSProperties} title={highlightedRange?.label} aria-hidden="true" />}
         {intervalTracks.map((track) => <div className="synchronized-timeline__row" key={track.id} style={rowOrder('interval', track.id)}>
@@ -261,15 +310,15 @@ export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolut
               {clusters.length ? clusters.map((cluster) => {
                 const description = cluster.events.map(eventDescription).join(' ')
                 const category = cluster.events.length === 1 ? cluster.events[0]!.category.replace(/[^a-z0-9_-]/gi, '-').toLowerCase() : 'cluster'
-                return <button type="button" key={cluster.id} className={`synchronized-timeline__event synchronized-timeline__event--${category} ${selectedEventCluster === cluster.id ? 'is-selected' : ''}`} style={{ left: `${cluster.positionPercent}%` }} title={description} aria-label={description} onMouseEnter={() => { updateCrosshair(cluster.positionPercent); setHoveredEventUtc(cluster.events[0]?.atUtc) }} onFocus={() => { updateCrosshair(cluster.positionPercent); setHoveredEventUtc(cluster.events[0]?.atUtc) }} onMouseLeave={() => { setCrosshair(undefined); setHoveredEventUtc(undefined) }} onBlur={() => { setCrosshair(undefined); setHoveredEventUtc(undefined) }} onClick={() => selectEventCluster(cluster.id)}><i aria-hidden="true" />{cluster.events.length > 1 && <b>{cluster.events.length}</b>}</button>
+                return <button type="button" key={cluster.id} className={`synchronized-timeline__event synchronized-timeline__event--${category} ${selectedEventCluster === cluster.id ? 'is-selected' : ''}`} style={{ left: `${cluster.positionPercent}%` }} title={description} aria-label={description} onMouseEnter={() => { updateCrosshair(cluster.positionPercent); setHoveredEventUtc(cluster.events[0]?.atUtc) }} onFocus={() => { updateCrosshair(cluster.positionPercent); setHoveredEventUtc(cluster.events[0]?.atUtc) }} onMouseLeave={() => { setCrosshair(undefined); setTooltipAnchor(undefined); setHoveredEventUtc(undefined) }} onBlur={() => { setCrosshair(undefined); setTooltipAnchor(undefined); setHoveredEventUtc(undefined) }} onClick={() => selectEventCluster(cluster.id)}><i aria-hidden="true" />{cluster.events.length > 1 && <b>{cluster.events.length}</b>}</button>
               }) : <span>{track.unavailableLabel ?? 'No observed changes in this range'}</span>}
             </div>
             {clusters.map((cluster) => selectedEventCluster === cluster.id && <div className="synchronized-timeline__event-detail" role="region" aria-label="Selected event details" key={`detail:${cluster.id}`}><header><strong>{cluster.events.length === 1 ? 'Observed event' : `${cluster.events.length} events`}</strong><span>{groupTimelineEvents(cluster.events).length} {groupTimelineEvents(cluster.events).length === 1 ? 'change group' : 'change groups'}</span></header><div className="synchronized-timeline__event-groups">{groupTimelineEvents(cluster.events).map((group) => { const groupId = `${cluster.id}:${group.key}`; const expanded = expandedEventGroups.has(groupId); const visible = expanded ? group.events : group.events.slice(0, 6); return <section key={group.key} className="synchronized-timeline__event-group"><div><strong>{group.label}</strong><b>{group.events.length}</b></div><ol>{visible.map((event) => <li key={event.id}><time>{formatPlantDateTime(event.atUtc)} CT</time><span>{event.label}</span></li>)}</ol>{group.events.length > 6 && <button type="button" className="secondary-action" onClick={() => toggleEventGroup(groupId)}>{expanded ? 'Show first 6' : `Show all ${group.events.length}`}</button>}</section> })}</div></div>)}
           </div>
         </div>)}
         {crosshair !== undefined && <div className="synchronized-timeline__crosshair" style={{ '--timeline-position': crosshair / 100 } as CSSProperties} aria-hidden="true" />}
-        {crosshair !== undefined && inspectionContent && <div className="synchronized-timeline__inspection-tooltip" style={{ '--timeline-position': crosshair / 100 } as CSSProperties} role="status" aria-live="polite">{inspectionContent}</div>}
       </div>
     </div>
+    {crosshair !== undefined && tooltipAnchor && inspectionContent && typeof document !== 'undefined' && <ViewportInspectionTooltip anchor={tooltipAnchor}>{inspectionContent}</ViewportInspectionTooltip>}
   </div>
 }

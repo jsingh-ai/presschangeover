@@ -1,7 +1,7 @@
 import { exactRadiusIdentity } from '../radius/radius-identity.js'
 import { RADIUS_PRESS_KEYS, type RadiusPressKey, type RadiusStatusSegment } from '../radius/models.js'
 import { RadiusUnavailableError, type RadiusService } from '../radius/radius-service.js'
-import { ENGINEERING_CLUE_CATALOG, type EngineeringCategory, type EngineeringSignalType } from '../telemetry/engineering-clue-analysis.js'
+import { ENGINEERING_CLUE_CATALOG, type EngineeringCategory, type EngineeringClueCatalogItem, type EngineeringSignalType } from '../telemetry/engineering-clue-analysis.js'
 import type { PressSemanticSignalEvidence, TelemetryChange, TelemetrySample, TelemetryScalarValue, TelemetrySemanticSelector } from '../telemetry/telemetry-contracts.js'
 import { TelemetryFoundationService } from '../telemetry/telemetry-foundation-service.js'
 
@@ -9,6 +9,18 @@ const TWO_HOURS_MS = 2 * 60 * 60_000
 const SELECTOR_BATCH_SIZE = 50
 const REQUEST_CONCURRENCY = 3
 export const RAW_EXPLORER_MAX_WINDOW_MINUTES = 24 * 60
+export const CURRENT_ROLL_LENGTH_CANONICAL_ID = 'production.roll.length.actual'
+
+export const RAW_EXPLORER_LENGTH_CATALOG: readonly EngineeringClueCatalogItem[] = [
+  { canonicalId: 'production.order.length.actual', friendlyName: 'Order Length', signalType: 'step_reference', category: 'repeat_other', scope: 'machine' },
+  { canonicalId: 'production.order.length.target', friendlyName: 'Order Length Target', signalType: 'step_reference', category: 'repeat_other', scope: 'machine' },
+  { canonicalId: CURRENT_ROLL_LENGTH_CANONICAL_ID, friendlyName: 'Current Roll Length', signalType: 'step_reference', category: 'repeat_other', scope: 'machine' },
+  { canonicalId: 'production.roll.length.target', friendlyName: 'Roll Length Target', signalType: 'step_reference', category: 'repeat_other', scope: 'machine' },
+  { canonicalId: 'production.previous_roll.length.actual', friendlyName: 'Previous Roll Length', signalType: 'step_reference', category: 'repeat_other', scope: 'machine' },
+  { canonicalId: 'production.roll.remaining_length', friendlyName: 'Remaining Roll Length', signalType: 'step_reference', category: 'repeat_other', scope: 'machine' },
+]
+
+const RAW_EXPLORER_DISCOVERY_CATALOG = [...new Map([...RAW_EXPLORER_LENGTH_CATALOG, ...ENGINEERING_CLUE_CATALOG].map((item) => [item.canonicalId, item])).values()]
 
 export interface RawExplorerIdentity {
   identity: string
@@ -246,7 +258,7 @@ export class RawRadiusExplorerService {
   }
 
   private selectors(capabilities: Awaited<ReturnType<TelemetryFoundationService['capabilities']['get']>>['capabilities']) {
-    return ENGINEERING_CLUE_CATALOG.flatMap((item) => {
+    return RAW_EXPLORER_DISCOVERY_CATALOG.flatMap((item) => {
       if (item.canonicalId === 'physical.motion_state' || item.canonicalId === 'machine.speed.actual') return []
       const capability = capabilities.find((candidate) => candidate.canonicalId === item.canonicalId)
       if (capability?.state !== 'SUPPORTED' || !capability.historyQueryable || capability.evidenceKind !== 'semantic_history') return []
@@ -276,10 +288,14 @@ export class RawRadiusExplorerService {
     const catalog = this.selectors(capabilities.capabilities)
     const lookbackFromUtc = new Date(Date.parse(occurrence.startUtc) - input.changeLookbackMinutes * 60_000).toISOString()
     const speedSelector: TelemetrySemanticSelector = { canonicalId: 'machine.speed.actual', representation: 'samples' }
-    const [radius, speed, discovery] = await Promise.all([
+    const currentRollSelector = catalog.find(({ selector }) => selector.canonicalId === CURRENT_ROLL_LENGTH_CANONICAL_ID)?.selector
+    const [radius, speed, discovery, currentRoll] = await Promise.all([
       this.radius.getRawTimeline(occurrence.pressKey, occurrence.chartFromUtc, occurrence.chartToUtc),
       this.history(occurrence.pressKey, occurrence.chartFromUtc, occurrence.chartToUtc, [speedSelector], true, requestId, signal),
       this.history(occurrence.pressKey, lookbackFromUtc, occurrence.startUtc, catalog.map(({ selector }) => selector), true, requestId, signal),
+      currentRollSelector
+        ? this.history(occurrence.pressKey, occurrence.chartFromUtc, occurrence.chartToUtc, [currentRollSelector], true, requestId, signal).catch(() => undefined)
+        : Promise.resolve(undefined),
     ])
     const byKey = new Map(catalog.map(({ item, selector }) => [signalKey(selector), item]))
     const changedSignals = discovery.signals.flatMap((item): RawExplorerChangedSignal[] => {
@@ -292,18 +308,22 @@ export class RawRadiusExplorerService {
       return [{ canonicalId: item.canonicalId, deckNumber: item.deckNumber, friendlyName: definition.friendlyName, signalType: definition.signalType, category: definition.category, scope: definition.scope, summary, sourceUnit: item.sourceUnit, canonicalUnitStatus: item.canonicalUnitStatus }]
     }).sort((a, b) => (a.deckNumber ?? 0) - (b.deckNumber ?? 0) || a.category.localeCompare(b.category) || a.friendlyName.localeCompare(b.friendlyName))
     const speedSignal = speed.signals.find((item) => item.canonicalId === 'machine.speed.actual')
+    const currentRollSignal = currentRoll?.signals.find((item) => item.canonicalId === CURRENT_ROLL_LENGTH_CANONICAL_ID)
+    const currentRollDefinition = RAW_EXPLORER_LENGTH_CATALOG.find((item) => item.canonicalId === CURRENT_ROLL_LENGTH_CANONICAL_ID)!
     const response = {
       occurrence, lookback: { fromUtc: lookbackFromUtc, toUtc: occurrence.startUtc, halfOpen: true },
       radiusSegments: radius.segments,
+      currentRollLength: currentRollSignal ? { canonicalId: CURRENT_ROLL_LENGTH_CANONICAL_ID, deckNumber: null, friendlyName: currentRollDefinition.friendlyName, signalType: currentRollDefinition.signalType, category: currentRollDefinition.category, scope: currentRollDefinition.scope, representation: currentRollSignal.representation, sourceUnit: currentRollSignal.sourceUnit, canonicalUnitStatus: currentRollSignal.canonicalUnitStatus, seed: currentRollSignal.seed, samples: currentRollSignal.samples, changes: currentRollSignal.changes } : null,
       speed: speedSignal ? { sourceUnit: speedSignal.sourceUnit, canonicalUnitStatus: speedSignal.canonicalUnitStatus, samples: samplesWithSeed(speedSignal) } : { sourceUnit: null, canonicalUnitStatus: null, samples: [] },
       changedSignals,
-      performance: { totalMs: this.now() - started, selectorCount: discovery.selectorCount, semanticHistoryRequests: discovery.requestCount + speed.requestCount, speedHistoryMs: speed.totalMs, payloadBytes: 0 },
+      performance: { totalMs: this.now() - started, selectorCount: discovery.selectorCount, semanticHistoryRequests: discovery.requestCount + speed.requestCount + (currentRoll?.requestCount ?? 0), speedHistoryMs: speed.totalMs, payloadBytes: 0 },
     }
     response.performance.payloadBytes = Buffer.byteLength(JSON.stringify(response))
     return response
   }
 
   async plot(input: { occurrence: RawExplorerOccurrence; signal: RawExplorerSignalIdentity }, requestId?: string, abortSignal?: AbortSignal) {
+    if (input.signal.canonicalId === CURRENT_ROLL_LENGTH_CANONICAL_ID && input.signal.deckNumber === null) throw new RadiusUnavailableError()
     const capabilities = await this.telemetry.capabilities.get(input.occurrence.pressKey, requestId, abortSignal)
     const requestedSignalKey = signalKey(input.signal)
     const available = this.selectors(capabilities.capabilities).find(({ selector }) => signalKey(selector) === requestedSignalKey)

@@ -5,7 +5,7 @@ import React, { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { areaFromPathname, areaPath } from '../src/navigation'
 import { DEFAULT_RAW_EXPLORER_CONTEXT_MINUTES, DEFAULT_RAW_EXPLORER_LOOKBACK_MINUTES, filterRawExplorerIdentities, formatRawExplorerNumber, groupRawExplorerSignals, latestNumericAtOrBefore, RawExplorerInspectionTooltip, rawExplorerNumberSamples, rawExplorerNumericPresentation, rawExplorerStateIntervals, rawExplorerStatePresentation, validateRawExplorerWindow } from '../src/components/RawRadiusExplorerPage'
-import { numericPaths } from '../src/components/SynchronizedTimeline'
+import { numericPaths, positionInspectionTooltip } from '../src/components/SynchronizedTimeline'
 import type { RawExplorerChangedSignal, RawExplorerDetail, RawExplorerOccurrence, RawExplorerSignalHistory, RawTelemetryChange, RawTelemetrySample } from '../src/types/api'
 
 const pageSource = readFileSync(new URL('../src/components/RawRadiusExplorerPage.tsx', import.meta.url), 'utf8')
@@ -85,20 +85,31 @@ describe('Raw Radius Code Explorer client', () => {
       occurrence,
       lookback: { fromUtc: '2026-08-13T11:45:00.000Z', toUtc: occurrence.startUtc, halfOpen: true },
       radiusSegments: [{ kind: 'radius', machineId: 3, pressKey: 'press3', displayName: 'Press 3', startUtc: occurrence.startUtc, endUtc: occurrence.endUtc, durationSeconds: 600, isOpen: false, sourceGeneration: 'legacy', eventType: 'B', statusCode: '400', statusDescription: 'Recorded', isProduction: false }],
+      currentRollLength: history({ canonicalId: 'production.roll.length.actual', deckNumber: null, friendlyName: 'Current Roll Length', signalType: 'step_reference', category: 'repeat_other', scope: 'machine', seed: sample('2026-08-13T11:50:00.000Z', 14_900), changes: [change('2026-08-13T12:02:00.000Z', 14_900, 14_915)] }),
       speed: { sourceUnit: 'fpm', canonicalUnitStatus: 'UNVERIFIED', samples: [sample('2026-08-13T12:01:00.000Z', 847)] },
       changedSignals: [], performance: { totalMs: 1, selectorCount: 2, semanticHistoryRequests: 1, speedHistoryMs: 1, payloadBytes: 10 },
     } as RawExplorerDetail
     const html = renderToStaticMarkup(createElement(RawExplorerInspectionTooltip, { atUtc: '2026-08-13T12:04:00.000Z', detail, histories: [numeric, state] }))
     assert.match(html, /Wall-clock time/)
+    assert.match(html, /Current Roll Length/)
+    assert.match(html, /14,915/)
     assert.match(html, /B \/ 400 \/ Recorded/)
     assert.match(html, /Actual Speed/)
     assert.match(html, /847/)
     assert.match(html, /Deck 4 · Anilox Drive Torque/)
     assert.match(html, /Deck 4 · Pump status/)
     assert.match(html, />11</)
-    assert.ok((html.match(/Last observed:/g) ?? []).length >= 3)
+    assert.ok((html.match(/Last observed:/g) ?? []).length >= 4)
     assert.match(timelineSource, /renderInspectionTooltip/)
     assert.match(timelineSource, /moveCrosshairWithKeyboard/)
+    assert.match(timelineSource, /createPortal/)
+    assert.match(timelineSource, /INSPECTION_TOOLTIP_GAP = 24/)
+    assert.deepEqual(positionInspectionTooltip({ x: 400, y: 400 }, { width: 200, height: 100 }, { width: 1_000, height: 800 }), { left: 424, top: 276 })
+    assert.deepEqual(positionInspectionTooltip({ x: 950, y: 50 }, { width: 200, height: 100 }, { width: 1_000, height: 800 }), { left: 726, top: 74 })
+    assert.match(pageSource, /\['numeric:current-roll-length', 'interval:raw-radius', 'numeric:actual-speed'/)
+    assert.match(pageSource, /Current Roll Length unavailable/)
+    assert.match(pageSource, /alreadyShown \? 'Already shown'/)
+    assert.match(pageSource, /unit: 'Unit unverified'/)
     assert.doesNotMatch(pageSource, /raw-crosshair-readout/)
   })
 
@@ -115,11 +126,13 @@ describe('Raw Radius Code Explorer client', () => {
     const changed = (canonicalId: string, deckNumber: number | null, friendlyName: string, category: RawExplorerChangedSignal['category']): RawExplorerChangedSignal => ({ canonicalId, deckNumber, friendlyName, category, signalType: 'continuous', scope: deckNumber === null ? 'machine' : 'deck', summary: { kind: 'numeric', firstValue: 1, lastValue: 2, netDelta: 1, minimum: 1, maximum: 2, largestPositiveExcursion: 1, largestNegativeExcursion: 0, largestAbsoluteExcursion: 1, observationCount: 2 }, sourceUnit: null, canonicalUnitStatus: null })
     const groups = groupRawExplorerSignals([
       changed('dryer.tunnel.temperature.actual', null, 'Dryer', 'dryer'),
+      changed('production.order.length.actual', null, 'Order Length', 'repeat_other'),
       changed('ink.viscosity.actual', 4, 'Viscosity', 'viscosity'),
       changed('ink.pump.status', 4, 'Pump', 'pump'),
       changed('register.long.preset', 7, 'Register', 'register'),
     ])
     assert.deepEqual(groups.map(({ label }) => label), ['Machine', 'Deck 4', 'Deck 7'])
+    assert.deepEqual(groups[0]?.categories.map(({ label }) => label), ['Dryer', 'Repeat / Other'])
     assert.deepEqual(groups[1]?.categories.map(({ label }) => label), ['Ink / Viscosity', 'Pump / Wash'])
     assert.equal(groups.some(({ label }) => label === 'Deck 1'), false)
     assert.match(pageSource, /className="raw-change-scope"/)
