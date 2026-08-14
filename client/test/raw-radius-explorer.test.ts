@@ -238,4 +238,14 @@ describe('Raw Radius Code Explorer client', () => {
     assert.match(stylesSource, /\.raw-telemetry-browser \{[\s\S]*?overflow: hidden auto/)
     assert.match(stylesSource, /@media \(max-width: 1050px\)/)
   })
+
+  it('right-aligns Explore, collapses setup after success, and restores the same setup for another code', () => {
+    assert.match(pageSource, /setSetupCollapsed\(true\)/)
+    assert.match(pageSource, /Search another code/)
+    assert.match(pageSource, /setSetupCollapsed\(false\)/)
+    assert.match(pageSource, /raw-explorer-setup-fields/)
+    assert.match(pageSource, /raw-explorer-actions/)
+    assert.match(stylesSource, /\.raw-explorer-actions \{[^}]*justify-content: flex-end/)
+    assert.match(stylesSource, /\.raw-explorer-setup\.is-collapsed/)
+  })
 })
