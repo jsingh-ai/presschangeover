@@ -1,4 +1,4 @@
-import React, { type ReactNode } from 'react'
+import React, { useState, type ReactNode } from 'react'
 import type { AnalyticsArea } from '../navigation'
 import type { Theme } from '../theme'
 
@@ -21,15 +21,31 @@ const navigation: Array<{ area: AnalyticsArea; label: string; description: strin
   { area: 'state-classification', label: 'State Classification', description: 'Administration', icon: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h10M4 12h16M4 19h12M17 3v4M8 10v4M18 17v4" /></svg> },
 ]
 
+const MAIN_SIDEBAR_STORAGE_KEY = 'process-intelligence-sidebar-collapsed'
+
 export function ApplicationShell({ area, theme, onNavigate, onToggleTheme, context, children, footer }: Props) {
-  return <div className="application-shell">
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    if (typeof window === 'undefined') return false
+    try { return window.localStorage.getItem(MAIN_SIDEBAR_STORAGE_KEY) === 'true' } catch { return false }
+  })
+
+  function toggleSidebar() {
+    setSidebarCollapsed((current) => {
+      const next = !current
+      try { window.localStorage.setItem(MAIN_SIDEBAR_STORAGE_KEY, String(next)) } catch {}
+      return next
+    })
+  }
+
+  return <div className={`application-shell${sidebarCollapsed ? ' is-main-sidebar-collapsed' : ''}`}>
     <aside className="app-sidebar" aria-label="Primary navigation">
-      <div className="sidebar-brand"><span className="brand-mark" aria-hidden="true">PI</span><div><strong>Process Intelligence</strong><small>Radius operations</small></div></div>
+      <div className="sidebar-brand"><span className="brand-mark" aria-hidden="true">PI</span><div><strong>Process Intelligence</strong><small>Radius operations</small></div><button type="button" className="sidebar-collapse-toggle" onClick={toggleSidebar} aria-label={sidebarCollapsed ? 'Show main navigation' : 'Hide main navigation'} aria-expanded={!sidebarCollapsed} title={sidebarCollapsed ? 'Show navigation' : 'Hide navigation'}><svg viewBox="0 0 24 24" aria-hidden="true">{sidebarCollapsed ? <path d="M4 4v16m6-14 6 6-6 6" /> : <path d="M20 4v16M14 6l-6 6 6 6" />}</svg></button></div>
       <nav className="primary-navigation">{navigation.map((item) => <a
         key={item.area}
         href={item.area === 'overview' ? '/overview' : item.area === 'state-classification' ? '/administration/state-classification' : `/${item.area}`}
         className={area === item.area ? 'primary-nav-link active' : 'primary-nav-link'}
         aria-current={area === item.area ? 'page' : undefined}
+        title={sidebarCollapsed ? item.label : undefined}
         onClick={(event) => { event.preventDefault(); onNavigate(item.area) }}
       ><span className="nav-icon">{item.icon}</span><span><strong>{item.label}</strong><small>{item.description}</small></span></a>)}</nav>
       <div className="sidebar-footer">

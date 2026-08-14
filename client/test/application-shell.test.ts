@@ -3,8 +3,11 @@ import { describe, it } from 'node:test'
 import React, { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { ApplicationShell } from '../src/components/ApplicationShell'
+import { readFileSync } from 'node:fs'
 
 Object.assign(globalThis, { React })
+const shellSource = readFileSync(new URL('../src/components/ApplicationShell.tsx', import.meta.url), 'utf8')
+const stylesSource = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
 
 describe('application shell', () => {
   it('renders analytics, Raw Radius Explorer, Intelligent Search, and State Classification destinations', () => {
@@ -21,6 +24,8 @@ describe('application shell', () => {
     assert.match(html, /State Classification/)
     assert.match(html, /aria-current="page"/)
     assert.match(html, /Switch to dark mode/)
+    assert.match(html, /Hide main navigation/)
+    assert.match(html, /aria-expanded="true"/)
   })
 
   it('exposes a persisted dark-mode state without removing navigation labels', () => {
@@ -31,5 +36,15 @@ describe('application shell', () => {
     assert.match(html, /aria-pressed="true"/)
     assert.match(html, /Switch to light mode/)
     assert.match(html, /Patterns &amp; Episodes/)
+  })
+
+  it('persists a compact desktop navigation state and keeps the control available in the sidebar', () => {
+    assert.match(shellSource, /process-intelligence-sidebar-collapsed/)
+    assert.match(shellSource, /localStorage\.setItem/)
+    assert.match(shellSource, /is-main-sidebar-collapsed/)
+    assert.match(shellSource, /Show main navigation/)
+    assert.match(stylesSource, /grid-template-columns: 4\.6rem minmax\(0, 1fr\)/)
+    assert.match(stylesSource, /@media \(min-width: 1181px\)/)
+    assert.match(stylesSource, /\.sidebar-collapse-toggle \{ display: none; \}/)
   })
 })
