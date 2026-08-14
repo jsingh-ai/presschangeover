@@ -504,6 +504,7 @@ export function RawRadiusExplorerPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
   const [visibleCount, setVisibleCount] = useState(INITIAL_OCCURRENCE_COUNT)
+  const [setupCollapsed, setSetupCollapsed] = useState(false)
   const restoredFromUrl = useRef(false)
 
   useEffect(() => {
@@ -526,13 +527,13 @@ export function RawRadiusExplorerPage() {
       if (window.location.pathname !== '/raw-radius-explorer') return
       const restored = setupFromUrl(identities)
       setRange(restored.range); setPhase(restored.phase); setLookback(restored.lookback); setContext(restored.context); setSelectedIdentity(restored.identity); setError(undefined); setVisibleCount(INITIAL_OCCURRENCE_COUNT)
-      if (!restored.identity) { setResult(undefined); setAppliedSignature(undefined); return }
+      if (!restored.identity) { setResult(undefined); setAppliedSignature(undefined); setSetupCollapsed(false); return }
       try {
         const changeLookbackMinutes = validateRawExplorerWindow(restored.lookback, 'Change Lookback', false)
         const chartContextMinutes = validateRawExplorerWindow(restored.context, 'Chart Context', true)
         setLoading(true)
         void exploreRawRadius({ fromUtc: restored.range.fromUtc, toUtc: restored.range.toUtc, identity: { eventType: restored.identity.eventType, statusCode: restored.identity.statusCode, statusDescription: restored.identity.statusDescription }, changeLookbackMinutes, chartContextMinutes })
-          .then((next) => { setResult(next); setAppliedSignature(setupSignature(restored.range, restored.identity, restored.lookback, restored.context)) })
+          .then((next) => { setResult(next); setAppliedSignature(setupSignature(restored.range, restored.identity, restored.lookback, restored.context)); setSetupCollapsed(true) })
           .catch(() => setError('The restored exploration could not be loaded.'))
           .finally(() => setLoading(false))
       } catch (caught) { setError(caught instanceof Error ? caught.message : 'The restored setup is invalid.') }
@@ -559,7 +560,7 @@ export function RawRadiusExplorerPage() {
       const setup = { fromUtc: range.fromUtc, toUtc: range.toUtc, identity: { eventType: selectedIdentity.eventType, statusCode: selectedIdentity.statusCode, statusDescription: selectedIdentity.statusDescription }, changeLookbackMinutes, chartContextMinutes }
       setLoading(true)
       const next = await exploreRawRadius(setup)
-      setResult(next); setAppliedSignature(draftSignature); setVisibleCount(INITIAL_OCCURRENCE_COUNT)
+      setResult(next); setAppliedSignature(draftSignature); setVisibleCount(INITIAL_OCCURRENCE_COUNT); setSetupCollapsed(true)
       window.history.pushState({}, '', explorerUrl(range, selectedIdentity, changeLookbackMinutes, chartContextMinutes))
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'The raw Radius exploration could not be completed.') }
     finally { setLoading(false) }
@@ -568,17 +569,19 @@ export function RawRadiusExplorerPage() {
   const visibleOccurrences = result?.occurrences.slice(0, visibleCount) ?? []
   let previousPress = ''
   return <div className="raw-radius-explorer-page">
-    <section className="panel raw-explorer-setup">
-      <div className="raw-explorer-title"><div><span className="eyebrow">Read-only evidence workspace</span><h1>Raw Radius Code Explorer</h1><p>Choose an exact Radius-recorded state, find every occurrence, then compare its wall-clock context with actual speed and signals that changed immediately before entry.</p></div>{settingsChanged && <span className="settings-changed" role="status">Settings changed · Explore to apply</span>}</div>
-      <div className="raw-setup-grid">
+    <section className={`panel raw-explorer-setup${setupCollapsed ? ' is-collapsed' : ''}`}>
+      {result && <div className="raw-explorer-setup__collapsed" hidden={!setupCollapsed}><div><span className="eyebrow">Current exploration</span><strong>{result.setup.identity.eventType} / {result.setup.identity.statusCode} / {result.setup.identity.statusDescription}</strong><small>{result.summary.totalOccurrences.toLocaleString()} {result.summary.totalOccurrences === 1 ? 'occurrence' : 'occurrences'} · {formatPlantDateTime(result.setup.fromUtc)}–{formatPlantDateTime(result.setup.toUtc)} CT</small></div><button type="button" className="secondary-action raw-search-another" onClick={() => setSetupCollapsed(false)} aria-expanded={!setupCollapsed} aria-controls="raw-explorer-setup-fields"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 4 4" /></svg><span>Search another code</span></button></div>}
+      <div id="raw-explorer-setup-fields" hidden={setupCollapsed}>
+        <div className="raw-explorer-title"><div><span className="eyebrow">Read-only evidence workspace</span><h1>Raw Radius Code Explorer</h1><p>Choose an exact Radius-recorded state, find every occurrence, then compare its wall-clock context with actual speed and signals that changed immediately before entry.</p></div>{settingsChanged && <span className="settings-changed" role="status">Settings changed · Explore to apply</span>}</div>
+        <div className="raw-setup-grid">
         <fieldset><legend>Time range</legend><div className="raw-choice-row"><button type="button" className={range.preset === 'last24' ? 'filter-chip active' : 'filter-chip'} onClick={() => selectPreset('last24')}>Last 24 hours</button><button type="button" className={range.preset === 'custom' ? 'filter-chip active' : 'filter-chip'} onClick={() => selectPreset('custom')}>Custom</button></div>{range.preset === 'custom' && <div className="raw-custom-range"><label>Start (CT)<input type="datetime-local" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} /></label><label>End (CT)<input type="datetime-local" value={customTo} onChange={(event) => setCustomTo(event.target.value)} /></label><button type="button" className="secondary-action" onClick={() => selectPreset('custom')}>Set custom range</button></div>}<small>{formatSelectedRange(range)}</small></fieldset>
         <fieldset><legend>Radius phase</legend><div className="raw-choice-row">{PHASES.map((item) => <button type="button" key={item.key} className={phase === item.key ? 'filter-chip active' : 'filter-chip'} onClick={() => { setPhase(item.key); setSelectedIdentity(undefined) }}>{item.label}</button>)}</div></fieldset>
         <fieldset className="raw-code-picker"><legend>Exact raw code</legend><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search code or recorded description" aria-label="Search exact raw Radius codes" />{identityError && <p role="alert">{identityError}</p>}<div className="raw-code-list" role="listbox" aria-label={`${phase} raw Radius codes`}>{filteredIdentities.map((identity) => <button type="button" role="option" aria-selected={selectedIdentity?.identity === identity.identity} className={selectedIdentity?.identity === identity.identity ? 'raw-code-option is-selected' : 'raw-code-option'} key={identity.identity} onClick={() => setSelectedIdentity(identity)}><strong>{identity.eventType} / {identity.statusCode}</strong><span>{identity.statusDescription}</span><small>{identity.eventCount.toLocaleString()} observed events</small></button>)}</div></fieldset>
         <fieldset className="raw-window-settings"><legend>Evidence windows</legend><label>Change Lookback (minutes)<input type="number" min="1" max={MAX_WINDOW_MINUTES} step="1" value={lookback} onChange={(event) => setLookback(event.target.value)} /><small>Signals are checked in [occurrence start − lookback, occurrence start).</small></label><label>Chart Context (minutes)<input type="number" min="0" max={MAX_WINDOW_MINUTES} step="1" value={context} onChange={(event) => setContext(event.target.value)} /><small>Surrounding time shown before and after each occurrence.</small></label><small>Maximum: 1,440 minutes (24 hours) per setting.</small></fieldset>
+        </div>
+        {error && <div className="scope-progress scope-progress--error" role="alert">{error}</div>}
+        <div className="raw-explorer-actions">{selectedIdentity ? <div className="raw-selected-code"><span>Selected</span><strong>{selectedIdentity.eventType} / {selectedIdentity.statusCode}</strong><span>{selectedIdentity.statusDescription}</span></div> : <span className="raw-explorer-action-hint">Choose an exact Radius code to continue.</span>}<button type="button" className="primary-action raw-explore-action" onClick={() => void runExplorer()} disabled={loading || !identities.length || !selectedIdentity}>{loading ? 'Exploring…' : <><span>Explore</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5" /></svg></>}</button></div>
       </div>
-      {selectedIdentity && <div className="raw-selected-code"><span>Selected</span><strong>{selectedIdentity.eventType} / {selectedIdentity.statusCode}</strong><span>{selectedIdentity.statusDescription}</span></div>}
-      {error && <div className="scope-progress scope-progress--error" role="alert">{error}</div>}
-      <button type="button" className="primary-action raw-explore-action" onClick={() => void runExplorer()} disabled={loading || !identities.length}>{loading ? 'Exploring…' : 'Explore'}</button>
     </section>
 
     {result && <>
