@@ -24,6 +24,7 @@ import { exactRadiusIdentity } from './radius/radius-identity.js'
 import { TelemetryFoundationService } from './telemetry/telemetry-foundation-service.js'
 import { PHYSICAL_EVIDENCE_CATEGORIES, TELEMETRY_REPRESENTATIONS, type CuratedPhysicalEvidenceRequest, type TelemetryRepresentation, type TelemetrySemanticHistoryQuery } from './telemetry/telemetry-contracts.js'
 import { EngineeringClueAnalysisService, type ClueOccurrenceInput } from './telemetry/engineering-clue-analysis.js'
+import { StopRestartAnalysisService, type FleetSpeedContextInput, type RadiusTimingAnalysisInput, type StopRestartAnalysisInput } from './telemetry/stop-restart-analysis-service.js'
 
 const MAX_PHYSICAL_STATE_RANGE_MS = 2 * 60 * 60 * 1_000
 const MAX_RADIUS_RANGE_MS = 31 * 24 * 60 * 60 * 1_000
@@ -218,6 +219,57 @@ function parseClueOccurrence(body: unknown, pressKey: RadiusPressKey): ClueOccur
   return { occurrenceId: raw.occurrenceId, pressKey, displayName: raw.displayName, startUtc, endUtc, durationSeconds: (Date.parse(endUtc) - Date.parse(startUtc)) / 1_000, exactIdentities }
 }
 
+function parseStopRestartInput(body: unknown, pressKey: RadiusPressKey): StopRestartAnalysisInput {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new RequestValidationError('invalid_stop_restart_request')
+  const raw = body as Record<string, unknown>
+  if (!raw.occurrence || typeof raw.occurrence !== 'object' || Array.isArray(raw.occurrence)) throw new RequestValidationError('invalid_stop_restart_request')
+  const occurrenceRaw = raw.occurrence as Record<string, unknown>
+  const clueOccurrence = parseClueOccurrence(occurrenceRaw, pressKey)
+  const requiredText = (key: string) => {
+    const value = occurrenceRaw[key]
+    if (typeof value !== 'string' || !value.trim() || value.length > 200) throw new RequestValidationError('invalid_stop_restart_request')
+    return value
+  }
+  if (!Array.isArray(raw.candidates) || raw.candidates.length > 24) throw new RequestValidationError('invalid_stop_restart_request')
+  const candidates = raw.candidates.map((candidate) => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) throw new RequestValidationError('invalid_stop_restart_request')
+    const item = candidate as Record<string, unknown>
+    if (typeof item.canonicalId !== 'string' || !/^[a-z0-9._]+$/.test(item.canonicalId) || item.canonicalId.length > 200) throw new RequestValidationError('invalid_stop_restart_request')
+    if (item.deckNumber !== undefined && (!Number.isSafeInteger(item.deckNumber) || Number(item.deckNumber) < 1 || Number(item.deckNumber) > 10)) throw new RequestValidationError('invalid_stop_restart_request')
+    if (item.source !== 'clue' && item.source !== 'pin' && item.source !== 'priority') throw new RequestValidationError('invalid_stop_restart_request')
+    if (item.friendlyName !== undefined && (typeof item.friendlyName !== 'string' || item.friendlyName.length > 200)) throw new RequestValidationError('invalid_stop_restart_request')
+    if (item.signalType !== undefined && item.signalType !== 'continuous' && item.signalType !== 'step_reference' && item.signalType !== 'state_event') throw new RequestValidationError('invalid_stop_restart_request')
+    const categories = ['speed', 'web_tension', 'dryer', 'ink', 'viscosity', 'temperature', 'pump', 'wash', 'register', 'impression', 'torque', 'drive_temperature', 'doctor_blade', 'repeat_other', 'motion']
+    if (item.category !== undefined && (typeof item.category !== 'string' || !categories.includes(item.category))) throw new RequestValidationError('invalid_stop_restart_request')
+    return { canonicalId: item.canonicalId, ...(item.deckNumber === undefined ? {} : { deckNumber: Number(item.deckNumber) }), ...(item.friendlyName === undefined ? {} : { friendlyName: item.friendlyName }), ...(item.signalType === undefined ? {} : { signalType: item.signalType as 'continuous' | 'step_reference' | 'state_event' }), ...(item.category === undefined ? {} : { category: item.category as StopRestartAnalysisInput['candidates'][number]['category'] }), source: item.source as 'clue' | 'pin' | 'priority' }
+  })
+  return { occurrence: { ...clueOccurrence, operationalGroupKey: requiredText('operationalGroupKey'), operationalGroupName: requiredText('operationalGroupName'), processFamilyKey: requiredText('processFamilyKey'), processFamilyName: requiredText('processFamilyName') }, candidates }
+}
+
+function parseRadiusTimingInput(body: unknown): RadiusTimingAnalysisInput {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new RequestValidationError('invalid_radius_timing_request')
+  const raw = body as Record<string, unknown>
+  if (!raw.exactIdentity || typeof raw.exactIdentity !== 'object' || Array.isArray(raw.exactIdentity) || !Array.isArray(raw.occurrences) || raw.occurrences.length < 1 || raw.occurrences.length > 30) throw new RequestValidationError('invalid_radius_timing_request')
+  const identity = raw.exactIdentity as Record<string, unknown>
+  if (typeof identity.eventType !== 'string' || !identity.eventType.trim() || identity.eventType.length > 50 || identity.statusCode !== null && typeof identity.statusCode !== 'string' || typeof identity.statusDescription !== 'string' || !identity.statusDescription.trim() || identity.statusDescription.length > 300) throw new RequestValidationError('invalid_radius_timing_request')
+  const occurrences = raw.occurrences.map((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RequestValidationError('invalid_radius_timing_request')
+    const item = value as Record<string, unknown>
+    if (typeof item.occurrenceId !== 'string' || !item.occurrenceId || item.occurrenceId.length > 300 || typeof item.displayName !== 'string' || !item.displayName || item.displayName.length > 100) throw new RequestValidationError('invalid_radius_timing_request')
+    return { occurrenceId: item.occurrenceId, pressKey: parsePressKey(String(item.pressKey ?? '')), displayName: item.displayName, startUtc: parseUtcTimestamp(item.startUtc, 'invalid_start_utc') }
+  })
+  return { exactIdentity: { eventType: identity.eventType, statusCode: identity.statusCode as string | null, statusDescription: identity.statusDescription }, occurrences }
+}
+
+function parseFleetSpeedContextInput(body: unknown): FleetSpeedContextInput {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new RequestValidationError('invalid_fleet_speed_context_request')
+  const raw = body as Record<string, unknown>
+  const fromUtc = parseUtcTimestamp(raw.fromUtc, 'invalid_from_utc'); const toUtc = parseUtcTimestamp(raw.toUtc, 'invalid_to_utc')
+  const rangeMs = Date.parse(toUtc) - Date.parse(fromUtc)
+  if (rangeMs <= 0 || rangeMs > 24 * 60 * 60_000 || !Array.isArray(raw.pressKeys) || raw.pressKeys.length < 1 || raw.pressKeys.length > 6) throw new RequestValidationError('invalid_fleet_speed_context_request')
+  return { fromUtc, toUtc, pressKeys: raw.pressKeys.map((value) => parsePressKey(String(value))) }
+}
+
 function cancellationSignal(request: Request, response: Response): AbortSignal {
   const controller = new AbortController()
   request.once('aborted', () => controller.abort())
@@ -274,6 +326,7 @@ export function createApp({
   const app = express()
   const telemetry = new TelemetryFoundationService(telemetryClient)
   const engineeringClues = new EngineeringClueAnalysisService(telemetry)
+  const stopRestart = new StopRestartAnalysisService(telemetry)
   const observedIdentityCache = new ObservedIdentityCache(
     () => radiusService.getObservedIdentities?.() ?? Promise.resolve([]),
     { onRefreshError: () => { if (logger) logger.error('classification_observed_identity_refresh_unavailable') } },
@@ -361,6 +414,19 @@ export function createApp({
   app.post('/api/telemetry/presses/:pressKey/clues', asyncRoute(async (request, response) => {
     const pressKey = parsePressKey(request.params.pressKey)
     response.status(200).json(await engineeringClues.analyze(parseClueOccurrence(request.body, pressKey), String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.post('/api/telemetry/presses/:pressKey/stop-restart-analysis', asyncRoute(async (request, response) => {
+    const pressKey = parsePressKey(request.params.pressKey)
+    response.status(200).json(await stopRestart.analyze(parseStopRestartInput(request.body, pressKey), String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.post('/api/telemetry/radius-timing-analysis', asyncRoute(async (request, response) => {
+    response.status(200).json(await stopRestart.analyzeRadiusTiming(parseRadiusTimingInput(request.body), String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.post('/api/telemetry/fleet-speed-context', asyncRoute(async (request, response) => {
+    response.status(200).json(await stopRestart.fleetSpeedContext(parseFleetSpeedContextInput(request.body), String(response.locals.requestId), cancellationSignal(request, response)))
   }))
 
   app.get(

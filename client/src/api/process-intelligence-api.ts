@@ -33,6 +33,9 @@ import type {
   PressTelemetrySource,
   PressSemanticHistoryEvidence,
   ProductionContextEvidence,
+  StopRestartResponse,
+  RadiusTimingAnalysisResponse,
+  FleetSpeedContextResponse,
   TelemetryRepresentation,
 } from '../types/evidence'
 
@@ -100,6 +103,18 @@ export function getCuratedPhysicalEvidence(pressKey: RadiusPressKey, input: { fr
 
 export function getEngineeringClues(pressKey: RadiusPressKey, occurrence: { occurrenceId: string; displayName: string; startUtc: string; endUtc: string; exactIdentities: Array<{ eventType: string; statusCode: string | null; statusDescription: string }> }, signal?: AbortSignal) {
   return sendJson<EngineeringClueResponse>(`/api/telemetry/presses/${pressKey}/clues`, 'POST', occurrence, signal)
+}
+
+export function getStopRestartAnalysis(pressKey: RadiusPressKey, occurrence: ActivityAnalysis['occurrences'][number], candidates: Array<{ canonicalId: string; deckNumber?: number; friendlyName?: string; signalType?: EngineeringSignalType; category?: string; source: 'clue' | 'pin' | 'priority' }>, signal?: AbortSignal) {
+  return sendJson<StopRestartResponse>(`/api/telemetry/presses/${pressKey}/stop-restart-analysis`, 'POST', { occurrence: { occurrenceId: occurrence.occurrenceId, displayName: occurrence.displayName, startUtc: occurrence.startUtc, endUtc: occurrence.endUtc, operationalGroupKey: occurrence.operationalGroupKey, operationalGroupName: occurrence.operationalGroupName, processFamilyKey: occurrence.processFamilyKey, processFamilyName: occurrence.processFamilyName, exactIdentities: occurrence.exactIdentities.map(({ eventType, statusCode, statusDescription }) => ({ eventType, statusCode, statusDescription })) }, candidates }, signal)
+}
+
+export function getRadiusTimingAnalysis(exactIdentity: { eventType: string; statusCode: string | null; statusDescription: string }, occurrences: ActivityAnalysis['occurrences'], signal?: AbortSignal) {
+  return sendJson<RadiusTimingAnalysisResponse>('/api/telemetry/radius-timing-analysis', 'POST', { exactIdentity, occurrences: occurrences.slice(0, 30).map(({ occurrenceId, pressKey, displayName, startUtc }) => ({ occurrenceId, pressKey, displayName, startUtc })) }, signal)
+}
+
+export function getFleetSpeedContext(fromUtc: string, toUtc: string, pressKeys: RadiusPressKey[], signal?: AbortSignal) {
+  return sendJson<FleetSpeedContextResponse>('/api/telemetry/fleet-speed-context', 'POST', { fromUtc, toUtc, pressKeys: pressKeys.slice(0, 6) }, signal)
 }
 
 export function getPressSemanticHistory(pressKey: RadiusPressKey, input: { fromUtc: string; toUtc: string; includeSeed: boolean; signals: Array<{ canonicalId: string; deckNumber?: number; representation: TelemetryRepresentation; signalType?: EngineeringSignalType }> }, signal?: AbortSignal) {

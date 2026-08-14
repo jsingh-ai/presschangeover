@@ -2224,3 +2224,68 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
 @media (max-width: 700px) { .classification-confirmation { align-items: stretch; flex-direction: column; } }
 .context-timeline-value { background: var(--primary); }
 .timeline-quality-row { display: flex; flex-wrap: wrap; gap: .5rem 1rem; margin: .7rem 0; color: var(--text-muted); font-size: .76rem; }
+
+/* Phase 3: physical stop/restart evidence is intentionally separated from generic telemetry changes. */
+.stop-restart-analysis { display: grid; gap: 1rem; margin-top: 1rem; padding: clamp(.9rem, 2vw, 1.35rem); border: 1px solid color-mix(in srgb, var(--primary) 28%, var(--border)); border-radius: 18px; background: color-mix(in srgb, var(--surface) 94%, var(--primary) 6%); }
+.stop-match { align-self: start; padding: .42rem .68rem; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: .73rem; font-weight: 800; letter-spacing: .04em; }
+.stop-match--matched { border-color: color-mix(in srgb, var(--primary) 45%, var(--border)); color: var(--primary); }
+.stop-radius-facts, .stop-analysis-grid, .flag-comparison { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .7rem; }
+.stop-radius-facts article, .stop-subsection, .speed-bucket-cards article, .prestop-flag-grid > article { min-width: 0; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.stop-radius-facts article { display: grid; gap: .2rem; padding: .8rem; }
+.stop-radius-facts span, .flag-comparison span, .stop-speed-current dt { color: var(--muted); font-size: .72rem; font-weight: 750; text-transform: uppercase; letter-spacing: .035em; }
+.stop-radius-facts strong, .stop-radius-facts small, .prestop-flag-grid code { overflow-wrap: anywhere; }
+.stop-subsection { padding: .9rem; }
+.stop-subsection > h3 { margin-top: 0; }
+.stop-analysis-grid { grid-template-columns: minmax(0, 2fr) minmax(16rem, 1fr); }
+.stop-speed-current { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .55rem; margin: 0 0 .8rem; }
+.stop-speed-current div { padding: .55rem; border-radius: 10px; background: var(--surface-subtle); }
+.stop-speed-current dd { margin: .24rem 0 0; font-weight: 800; }
+.speed-bucket-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .55rem; }
+.speed-bucket-cards article { display: grid; gap: .2rem; padding: .65rem; }
+.speed-bucket-cards span, .speed-bucket-cards small { color: var(--muted); font-size: .74rem; }
+.restart-attempts, .stop-sequence { display: grid; gap: .5rem; margin: 0; padding: 0; list-style: none; }
+.restart-attempts li { display: grid; gap: .16rem; padding: .65rem; border-left: 3px solid color-mix(in srgb, var(--primary) 45%, var(--border)); background: var(--surface-subtle); }
+.restart-attempts span, .restart-attempts small { color: var(--muted); }
+.prestop-flag-grid { display: grid; gap: .75rem; }
+.prestop-flag-grid > article { padding: .85rem; }
+.prestop-flag-grid header { display: grid; gap: .12rem; }
+.prestop-flag-grid header span { color: var(--muted); font-size: .76rem; font-weight: 800; }
+.prestop-flag-grid h4 { margin: 0; }
+.prestop-flag-grid code { color: var(--muted); font-size: .76rem; }
+.flag-comparison { margin: .75rem 0; }
+.flag-comparison div { display: grid; gap: .15rem; padding: .65rem; border-radius: 10px; background: var(--surface-subtle); }
+.flag-comparison strong { font-size: 1.15rem; }
+.flag-comparison small { color: var(--muted); }
+.prestop-flag-grid footer { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.prestop-flag-grid footer > span { color: var(--muted); font-size: .78rem; }
+.prestop-flag-grid footer div { display: flex; gap: .45rem; }
+.stop-sequence { max-height: 24rem; overflow: auto; }
+.stop-sequence li { display: grid; grid-template-columns: minmax(9rem, auto) minmax(0, 1fr); gap: .75rem; padding: .48rem .2rem; border-bottom: 1px solid var(--border); }
+.stop-sequence time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: .78rem; }
+.stop-sequence span { display: grid; gap: .1rem; overflow-wrap: anywhere; }
+.stop-sequence b { color: var(--muted); font-size: .7rem; letter-spacing: .04em; }
+.analysis-method, .other-telemetry-changes { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.analysis-method > summary, .other-telemetry-changes > summary { cursor: pointer; padding: .75rem .85rem; font-weight: 800; }
+.analysis-method > p { padding: 0 .85rem; }
+.radius-timing-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .65rem; }
+.radius-timing-summary article, .radius-timing-presses article, .fleet-speed-context article { border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); padding: .7rem; display: grid; gap: .2rem; }
+.radius-timing-summary span, .radius-timing-presses span, .radius-timing-presses small, .fleet-speed-context small { color: var(--muted); }
+.radius-timing-presses, .fleet-speed-context { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: .55rem; margin-top: .75rem; }
+.fleet-speed-context > p { grid-column: 1 / -1; margin: .25rem 0; }
+.other-telemetry-changes > summary { display: flex; justify-content: space-between; gap: .75rem; }
+.other-telemetry-changes > summary small { color: var(--muted); font-weight: 500; }
+.other-telemetry-changes > div { padding: 0 .85rem .85rem; }
+
+@media (max-width: 900px) {
+  .stop-radius-facts, .stop-analysis-grid, .flag-comparison, .radius-timing-summary { grid-template-columns: 1fr; }
+  .stop-speed-current, .speed-bucket-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 520px) {
+  .stop-restart-analysis { padding: .7rem; border-radius: 14px; }
+  .stop-speed-current, .speed-bucket-cards { grid-template-columns: 1fr; }
+  .prestop-flag-grid footer, .other-telemetry-changes > summary { align-items: stretch; flex-direction: column; }
+  .prestop-flag-grid footer div { width: 100%; }
+  .prestop-flag-grid footer button { flex: 1; }
+  .stop-sequence li { grid-template-columns: 1fr; gap: .2rem; }
+}

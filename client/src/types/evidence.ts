@@ -216,6 +216,45 @@ export interface EngineeringClueResponse {
   performance: { upstreamCalls: number; semanticCalls: number; totalSelectors: number; upstreamMs: number; calculationMs: number; totalMs: number; responsePayloadBytes: number }
 }
 
+export type PhysicalSpeedBucket = 'STOPPED' | 'LOW_TRANSITION' | 'RUNNING' | 'HIGH_SPEED_RUNNING'
+export type StopMatchStatus = 'MATCHED' | 'AMBIGUOUS' | 'NO_PHYSICAL_STOP_FOUND' | 'INSUFFICIENT_SPEED_EVIDENCE'
+export interface StopRestartStats { count: number; mean: number; median: number; p05: number; p25: number; p75: number; p95: number; iqr: number; minimum: number; maximum: number }
+export interface StopRestartRunningWindow { supported: boolean; fromUtc: string | null; toUtc: string | null; durationSeconds: number | null; bucket: PhysicalSpeedBucket | null; stats: StopRestartStats | null; changing: boolean | null; timeSincePreviousStoppedSeconds: number | null }
+export interface StopRestartResponse {
+  occurrence: { occurrenceId: string; pressKey: RadiusPressKey; displayName: string; startUtc: string; endUtc: string; operationalGroupKey: string; operationalGroupName: string; processFamilyKey: string; processFamilyName: string; exactIdentities: Array<{ eventType: string; statusCode: string | null; statusDescription: string }> }
+  analysisWindow: { fromUtc: string; toUtc: string }
+  physicalStopMatch: { status: StopMatchStatus; selected: null | { atUtc: string; observedSpeed: number; previousObservedSpeed: number; radiusOffsetSeconds: number }; candidates: Array<{ atUtc: string; observedSpeed: number; previousObservedSpeed: number; radiusOffsetSeconds: number }>; speedObservationCount: number }
+  phases: null | { stableRunningBefore: StopRestartRunningWindow; deceleration: { fromUtc: string | null; toUtc: string | null }; stopped: { fromUtc: string; toUtc: string | null; durationSeconds: number | null }; restartAttempts: Array<{ attempt: number; startUtc: string; endUtc: string | null; durationSeconds: number | null; maximumObservedSpeed: number; highestBucket: PhysicalSpeedBucket; returnedToStopped: boolean; sustainedRunning: boolean; sustainedConfirmedAtUtc: string | null }>; sustainedRunningAgain: StopRestartRunningWindow; sustainedRunningReachedAtUtc: string | null; sustainedRunningConfirmedAtUtc: string | null }
+  radiusTiming: { offsetSeconds: number | null; wording: string }
+  speedContext: { preStopBucket: PhysicalSpeedBucket | null; currentPercentile: number | null; referencePeriod: { fromUtc: string; toUtc: string; hours: number }; samePressBuckets: Array<{ bucket: PhysicalSpeedBucket; stats: StopRestartStats | null; observationCount: number; observedDurationSeconds: number; sharePercent: number; sustainedSpanCount: number }> }
+  preStopFlags: Array<{ canonicalId: string; deckNumber: number | null; friendlyName: string; signalType: EngineeringSignalType; category: EngineeringCategory; direction: 'ABOVE' | 'BELOW'; current: StopRestartStats; reference: StopRestartStats; afterRestart: StopRestartStats | null; speedBucket: PhysicalSpeedBucket; referencePercentile: number; robustDeviation: number; excludedReferenceObservationsWithoutFreshSpeed: number; recovery: 'RETURNED_TOWARD_REFERENCE' | 'REMAINED_SHIFTED' | 'AFTER_RESTART_SPEED_NOT_COMPARABLE' | 'INSUFFICIENT_AFTER_RESTART_EVIDENCE'; wording: string }>
+  noFlagMessage: string | null
+  stopRestartContext: Array<{ atUtc: string; kind: 'SPEED' | 'RADIUS' | 'MOTION' | 'RAW_STATE'; label: string; canonicalId?: string; deckNumber?: number | null }>
+  referenceMetadata: { status: 'AVAILABLE' | 'NOT_APPLICABLE' | 'INSUFFICIENT' | 'TEMPORARILY_UNAVAILABLE'; chunkHours: number; requestCount: number; candidateCount: number; excludedObservationsWithoutFreshSpeed: number; automaticCandidateLimit: number; flagLimit: number; cache: 'hit' | 'miss'; message: string }
+  performance: { upstreamCalls: number; currentSelectors: number; referenceSelectors: number; totalMs: number; responsePayloadBytes: number }
+}
+export interface RadiusTimingAnalysisResponse {
+  exactIdentity: { eventType: string; statusCode: string | null; statusDescription: string }
+  occurrenceCount: number
+  matchedCount: number
+  beforeCount: number
+  nearCount: number
+  afterCount: number
+  medianOffsetSeconds: number | null
+  iqrSeconds: number | null
+  minimumOffsetSeconds: number | null
+  maximumOffsetSeconds: number | null
+  byPress: Array<{ pressKey: RadiusPressKey; displayName: string; occurrenceCount: number; matchedCount: number; medianOffsetSeconds: number | null; medianSupport: 'SUPPORTED' | 'INSUFFICIENT' }>
+  support: { analyzedOccurrenceCount: number; maximumOccurrences: number; pressMedianMinimumMatched: number; nearThresholdSeconds: number }
+  performance: { upstreamCalls: number; cacheHits: number; totalMs: number }
+}
+export interface FleetSpeedContextResponse {
+  referencePeriod: { fromUtc: string; toUtc: string; hours: number }
+  presses: Array<{ pressKey: RadiusPressKey; status: 'AVAILABLE' | 'TEMPORARILY_UNAVAILABLE'; buckets: StopRestartResponse['speedContext']['samePressBuckets']; cache: 'hit' | 'miss' }>
+  rawEngineeringComparison: { status: 'DEFERRED'; message: string }
+  performance: { upstreamCalls: number; totalMs: number }
+}
+
 export interface EvidenceQuality {
   radius: 'available' | 'unavailable'
   classification: ClassificationStatus
