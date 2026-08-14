@@ -1,0 +1,3352 @@
+{
+  "generatedAtUtc": "2026-08-14T00:42:53.571Z",
+  "source": "file:///C:/ProcessIntelligence/review-artifacts/phase3-stop-restart/phase31-real-data-validation.json",
+  "counts": {
+    "USEFUL": 5,
+    "PLAUSIBLE BUT WEAK": 4,
+    "MISLEADING": 0,
+    "INSUFFICIENT": 0
+  },
+  "reviewed": [
+    {
+      "pressKey": "press5",
+      "occurrenceId": "press5:2026-08-13T16:56:43.166Z:85",
+      "startUtc": "2026-08-13T16:56:43.166Z",
+      "exactIdentities": [
+        {
+          "identity": "B\u001f145-8\u001fDr. Blade Change",
+          "eventType": "B",
+          "statusCode": "145-8",
+          "statusDescription": "Dr. Blade Change",
+          "durationSeconds": 196.834,
+          "needsClassification": false
+        }
+      ],
+      "canonicalId": "anilox.drive.temperature.actual",
+      "deckNumber": 8,
+      "current": {
+        "count": 3,
+        "mean": 115.74119833333333,
+        "median": 115.973259,
+        "p05": 115.3466952,
+        "p25": 115.625168,
+        "p75": 115.973259,
+        "p95": 115.973259,
+        "iqr": 0.3480909999999966,
+        "minimum": 115.277077,
+        "maximum": 115.973259
+      },
+      "reference": {
+        "count": 195,
+        "mean": 179.19035415897426,
+        "median": 180.456543,
+        "p05": 160.49880480000002,
+        "p25": 171.94059,
+        "p75": 191.2715,
+        "p95": 196.396423,
+        "iqr": 19.330910000000017,
+        "minimum": 116.669777,
+        "maximum": 205.420319
+      },
+      "robustDeviation": 3.335760396173794,
+      "trace": [
+        {
+          "observedAtUtc": "2026-08-13T16:40:51.427015Z",
+          "receivedAtUtc": "2026-08-13T16:40:51.427015Z",
+          "sourceTimestampUtc": "2026-08-13T16:25:38.765Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 115.973259
+        },
+        {
+          "observedAtUtc": "2026-08-13T16:45:41.433334Z",
+          "receivedAtUtc": "2026-08-13T16:45:41.433334Z",
+          "sourceTimestampUtc": "2026-08-13T16:45:39.776Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 115.277077
+        },
+        {
+          "observedAtUtc": "2026-08-13T16:48:46.430096Z",
+          "receivedAtUtc": "2026-08-13T16:48:46.430096Z",
+          "sourceTimestampUtc": "2026-08-13T16:48:39.774Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 115.973259
+        }
+      ],
+      "deckActiveEvidence": {
+        "seed": {
+          "observedAtUtc": "2026-08-13T16:26:16.425805Z",
+          "receivedAtUtc": "2026-08-13T16:26:16.425805Z",
+          "sourceTimestampUtc": "2026-08-13T03:02:46.357Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 1
+        },
+        "changes": []
+      },
+      "qa": "PLAUSIBLE BUT WEAK",
+      "rationale": "The strict heuristic qualifies, but trace support or effect strength remains modest."
+    },
+    {
+      "pressKey": "press5",
+      "occurrenceId": "press5:2026-08-13T15:28:25.063Z:84",
+      "startUtc": "2026-08-13T15:28:25.063Z",
+      "exactIdentities": [
+        {
+          "identity": "B\u001f350\u001fRoll Change",
+          "eventType": "B",
+          "statusCode": "350",
+          "statusDescription": "Roll Change",
+          "durationSeconds": 862.849,
+          "needsClassification": false
+        }
+      ],
+      "canonicalId": "anilox.drive.temperature.actual",
+      "deckNumber": 8,
+      "current": {
+        "count": 8,
+        "mean": 119.808914,
+        "median": 119.808914,
+        "p05": 119.459694,
+        "p25": 119.459694,
+        "p75": 120.158134,
+        "p95": 120.158134,
+        "iqr": 0.6984400000000051,
+        "minimum": 119.459694,
+        "maximum": 120.158134
+      },
+      "reference": {
+        "count": 329,
+        "mean": 167.9315535227966,
+        "median": 168.489227,
+        "p05": 162.240891,
+        "p25": 165.985764,
+        "p75": 169.743042,
+        "p95": 171.626358,
+        "iqr": 3.7572780000000137,
+        "minimum": 153.415619,
+        "maximum": 206.067596
+      },
+      "robustDeviation": 5.778448137814769,
+      "trace": [
+        {
+          "observedAtUtc": "2026-08-13T15:21:41.431246Z",
+          "receivedAtUtc": "2026-08-13T15:21:41.431246Z",
+          "sourceTimestampUtc": "2026-08-13T15:21:37.74Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 120.158134
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:23:11.406005Z",
+          "receivedAtUtc": "2026-08-13T15:23:11.406005Z",
+          "sourceTimestampUtc": "2026-08-13T15:23:07.741Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 119.459694
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:23:41.402641Z",
+          "receivedAtUtc": "2026-08-13T15:23:41.402641Z",
+          "sourceTimestampUtc": "2026-08-13T15:23:37.741Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 120.158134
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:24:11.416574Z",
+          "receivedAtUtc": "2026-08-13T15:24:11.416574Z",
+          "sourceTimestampUtc": "2026-08-13T15:24:07.743Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 119.459694
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:24:41.405576Z",
+          "receivedAtUtc": "2026-08-13T15:24:41.405576Z",
+          "sourceTimestampUtc": "2026-08-13T15:24:37.741Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 120.158134
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:25:11.445018Z",
+          "receivedAtUtc": "2026-08-13T15:25:11.445018Z",
+          "sourceTimestampUtc": "2026-08-13T15:25:07.742Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 119.459694
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:25:41.479792Z",
+          "receivedAtUtc": "2026-08-13T15:25:41.479792Z",
+          "sourceTimestampUtc": "2026-08-13T15:25:37.744Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 120.158134
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:26:11.417507Z",
+          "receivedAtUtc": "2026-08-13T15:26:11.417507Z",
+          "sourceTimestampUtc": "2026-08-13T15:26:07.745Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 119.459694
+        }
+      ],
+      "deckActiveEvidence": {
+        "seed": {
+          "observedAtUtc": "2026-08-13T14:55:26.390764Z",
+          "receivedAtUtc": "2026-08-13T14:55:26.390764Z",
+          "sourceTimestampUtc": "2026-08-13T03:02:46.357Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 1
+        },
+        "changes": []
+      },
+      "qa": "USEFUL",
+      "rationale": "The timestamped trace has at least five observations and a strong same-speed robust deviation."
+    },
+    {
+      "pressKey": "press5",
+      "occurrenceId": "press5:2026-08-13T15:28:25.063Z:84",
+      "startUtc": "2026-08-13T15:28:25.063Z",
+      "exactIdentities": [
+        {
+          "identity": "B\u001f350\u001fRoll Change",
+          "eventType": "B",
+          "statusCode": "350",
+          "statusDescription": "Roll Change",
+          "durationSeconds": 862.849,
+          "needsClassification": false
+        }
+      ],
+      "canonicalId": "anilox.drive.temperature.actual",
+      "deckNumber": 3,
+      "current": {
+        "count": 5,
+        "mean": 114.97510380000001,
+        "median": 114.696625,
+        "p05": 114.696625,
+        "p25": 114.696625,
+        "p75": 115.392822,
+        "p95": 115.392822,
+        "iqr": 0.696196999999998,
+        "minimum": 114.696625,
+        "maximum": 115.392822
+      },
+      "reference": {
+        "count": 313,
+        "mean": 154.08532745686918,
+        "median": 155.527802,
+        "p05": 143.552231,
+        "p25": 150.688522,
+        "p75": 158.009491,
+        "p95": 159.874344,
+        "iqr": 7.320968999999991,
+        "minimum": 133.626678,
+        "maximum": 172.385788
+      },
+      "robustDeviation": 5.250659557318248,
+      "trace": [
+        {
+          "observedAtUtc": "2026-08-13T15:22:11.400057Z",
+          "receivedAtUtc": "2026-08-13T15:22:11.400057Z",
+          "sourceTimestampUtc": "2026-08-13T15:22:07.741Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 114.696625
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:22:41.401165Z",
+          "receivedAtUtc": "2026-08-13T15:22:41.401165Z",
+          "sourceTimestampUtc": "2026-08-13T15:22:37.742Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 115.392822
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:23:41.402641Z",
+          "receivedAtUtc": "2026-08-13T15:23:41.402641Z",
+          "sourceTimestampUtc": "2026-08-13T15:23:37.741Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 114.696625
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:24:41.405576Z",
+          "receivedAtUtc": "2026-08-13T15:24:41.405576Z",
+          "sourceTimestampUtc": "2026-08-13T15:24:37.741Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 115.392822
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:25:11.445018Z",
+          "receivedAtUtc": "2026-08-13T15:25:11.445018Z",
+          "sourceTimestampUtc": "2026-08-13T15:25:07.742Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 114.696625
+        }
+      ],
+      "deckActiveEvidence": {
+        "seed": {
+          "observedAtUtc": "2026-08-13T14:55:26.390764Z",
+          "receivedAtUtc": "2026-08-13T14:55:26.390764Z",
+          "sourceTimestampUtc": "2026-08-13T13:26:06.141Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 1
+        },
+        "changes": []
+      },
+      "qa": "USEFUL",
+      "rationale": "The timestamped trace has at least five observations and a strong same-speed robust deviation."
+    },
+    {
+      "pressKey": "press5",
+      "occurrenceId": "press5:2026-08-13T15:28:25.063Z:84",
+      "startUtc": "2026-08-13T15:28:25.063Z",
+      "exactIdentities": [
+        {
+          "identity": "B\u001f350\u001fRoll Change",
+          "eventType": "B",
+          "statusCode": "350",
+          "statusDescription": "Roll Change",
+          "durationSeconds": 862.849,
+          "needsClassification": false
+        }
+      ],
+      "canonicalId": "ink.pump.frequency.return",
+      "deckNumber": 7,
+      "current": {
+        "count": 23,
+        "mean": 173.47826086956522,
+        "median": 170,
+        "p05": 161,
+        "p25": 170,
+        "p75": 180,
+        "p95": 180,
+        "iqr": 10,
+        "minimum": 160,
+        "maximum": 180
+      },
+      "reference": {
+        "count": 1466,
+        "mean": 203.30832196452934,
+        "median": 200,
+        "p05": 200,
+        "p25": 200,
+        "p75": 210,
+        "p95": 210,
+        "iqr": 10,
+        "minimum": 0,
+        "maximum": 220
+      },
+      "robustDeviation": 3,
+      "trace": [
+        {
+          "observedAtUtc": "2026-08-13T15:21:46.401361Z",
+          "receivedAtUtc": "2026-08-13T15:21:46.401361Z",
+          "sourceTimestampUtc": "2026-08-13T15:21:44.761Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 160
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:21:51.436894Z",
+          "receivedAtUtc": "2026-08-13T15:21:51.436894Z",
+          "sourceTimestampUtc": "2026-08-13T15:21:49.755Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 170
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:21:56.404872Z",
+          "receivedAtUtc": "2026-08-13T15:21:56.404872Z",
+          "sourceTimestampUtc": "2026-08-13T15:21:50.753Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 160
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:22:16.422532Z",
+          "receivedAtUtc": "2026-08-13T15:22:16.422532Z",
+          "sourceTimestampUtc": "2026-08-13T15:22:13.759Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 170
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:23:16.428964Z",
+          "receivedAtUtc": "2026-08-13T15:23:16.428964Z",
+          "sourceTimestampUtc": "2026-08-13T15:23:14.757Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 180
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:23:21.401916Z",
+          "receivedAtUtc": "2026-08-13T15:23:21.401916Z",
+          "sourceTimestampUtc": "2026-08-13T15:23:17.756Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 170
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:23:26.420578Z",
+          "receivedAtUtc": "2026-08-13T15:23:26.420578Z",
+          "sourceTimestampUtc": "2026-08-13T15:23:23.754Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 180
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:23:31.408425Z",
+          "receivedAtUtc": "2026-08-13T15:23:31.408425Z",
+          "sourceTimestampUtc": "2026-08-13T15:23:26.754Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 170
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:23:36.402497Z",
+          "receivedAtUtc": "2026-08-13T15:23:36.402497Z",
+          "sourceTimestampUtc": "2026-08-13T15:23:32.755Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 180
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:23:41.402641Z",
+          "receivedAtUtc": "2026-08-13T15:23:41.402641Z",
+          "sourceTimestampUtc": "2026-08-13T15:23:35.756Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 170
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:23:46.438092Z",
+          "receivedAtUtc": "2026-08-13T15:23:46.438092Z",
+          "sourceTimestampUtc": "2026-08-13T15:23:44.755Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 180
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:23:51.438485Z",
+          "receivedAtUtc": "2026-08-13T15:23:51.438485Z",
+          "sourceTimestampUtc": "2026-08-13T15:23:47.756Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 170
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:24:01.430806Z",
+          "receivedAtUtc": "2026-08-13T15:24:01.430806Z",
+          "sourceTimestampUtc": "2026-08-13T15:23:59.762Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 180
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:24:06.404683Z",
+          "receivedAtUtc": "2026-08-13T15:24:06.404683Z",
+          "sourceTimestampUtc": "2026-08-13T15:24:02.751Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 170
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:24:26.403238Z",
+          "receivedAtUtc": "2026-08-13T15:24:26.403238Z",
+          "sourceTimestampUtc": "2026-08-13T15:24:23.756Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 180
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:24:36.403225Z",
+          "receivedAtUtc": "2026-08-13T15:24:36.403225Z",
+          "sourceTimestampUtc": "2026-08-13T15:24:32.753Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 170
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:24:46.417201Z",
+          "receivedAtUtc": "2026-08-13T15:24:46.417201Z",
+          "sourceTimestampUtc": "2026-08-13T15:24:44.76Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 180
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:24:51.43172Z",
+          "receivedAtUtc": "2026-08-13T15:24:51.43172Z",
+          "sourceTimestampUtc": "2026-08-13T15:24:49.755Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 170
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:25:06.402978Z",
+          "receivedAtUtc": "2026-08-13T15:25:06.402978Z",
+          "sourceTimestampUtc": "2026-08-13T15:25:04.754Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 180
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:25:21.414669Z",
+          "receivedAtUtc": "2026-08-13T15:25:21.414669Z",
+          "sourceTimestampUtc": "2026-08-13T15:25:19.759Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 170
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:25:26.40338Z",
+          "receivedAtUtc": "2026-08-13T15:25:26.40338Z",
+          "sourceTimestampUtc": "2026-08-13T15:25:20.757Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 180
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:26:11.417507Z",
+          "receivedAtUtc": "2026-08-13T15:26:11.417507Z",
+          "sourceTimestampUtc": "2026-08-13T15:26:06.757Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 170
+        },
+        {
+          "observedAtUtc": "2026-08-13T15:26:26.409242Z",
+          "receivedAtUtc": "2026-08-13T15:26:26.409242Z",
+          "sourceTimestampUtc": "2026-08-13T15:26:22.756Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 180
+        }
+      ],
+      "deckActiveEvidence": {
+        "seed": {
+          "observedAtUtc": "2026-08-13T14:55:26.390764Z",
+          "receivedAtUtc": "2026-08-13T14:55:26.390764Z",
+          "sourceTimestampUtc": "2026-08-13T01:12:00.315Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 1
+        },
+        "changes": []
+      },
+      "qa": "PLAUSIBLE BUT WEAK",
+      "rationale": "The strict heuristic qualifies, but trace support or effect strength remains modest."
+    },
+    {
+      "pressKey": "press8",
+      "occurrenceId": "press8:2026-08-13T05:37:02.841Z:81",
+      "startUtc": "2026-08-13T05:37:02.841Z",
+      "exactIdentities": [
+        {
+          "identity": "B\u001f82\u001fDr. Blade Change",
+          "eventType": "B",
+          "statusCode": "82",
+          "statusDescription": "Dr. Blade Change",
+          "durationSeconds": 2591.838,
+          "needsClassification": false
+        }
+      ],
+      "canonicalId": "anilox.drive.temperature.actual",
+      "deckNumber": 6,
+      "current": {
+        "count": 5,
+        "mean": 105.240976,
+        "median": 105.240883,
+        "p05": 104.5367694,
+        "p25": 105.240883,
+        "p75": 105.240883,
+        "p95": 105.9453686,
+        "iqr": 0,
+        "minimum": 104.360741,
+        "maximum": 106.12149
+      },
+      "reference": {
+        "count": 554,
+        "mean": 145.26158104512604,
+        "median": 155.729218,
+        "p05": 108.708839,
+        "p25": 146.81940824999998,
+        "p75": 158.05425625,
+        "p95": 159.451508,
+        "iqr": 11.234848000000028,
+        "minimum": 103.481064,
+        "maximum": 161.939865
+      },
+      "robustDeviation": 4.493904590431476,
+      "trace": [
+        {
+          "observedAtUtc": "2026-08-13T05:21:56.291947Z",
+          "receivedAtUtc": "2026-08-13T05:21:56.291947Z",
+          "sourceTimestampUtc": "2026-08-13T05:16:54.952Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 105.240883
+        },
+        {
+          "observedAtUtc": "2026-08-13T05:26:56.264287Z",
+          "receivedAtUtc": "2026-08-13T05:26:56.264287Z",
+          "sourceTimestampUtc": "2026-08-13T05:26:54.958Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 106.12149
+        },
+        {
+          "observedAtUtc": "2026-08-13T05:27:26.254546Z",
+          "receivedAtUtc": "2026-08-13T05:27:26.254546Z",
+          "sourceTimestampUtc": "2026-08-13T05:27:24.957Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 104.360741
+        },
+        {
+          "observedAtUtc": "2026-08-13T05:28:01.260666Z",
+          "receivedAtUtc": "2026-08-13T05:28:01.260666Z",
+          "sourceTimestampUtc": "2026-08-13T05:27:54.956Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 105.240883
+        },
+        {
+          "observedAtUtc": "2026-08-13T05:33:01.279039Z",
+          "receivedAtUtc": "2026-08-13T05:33:01.279039Z",
+          "sourceTimestampUtc": "2026-08-13T05:27:54.956Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 105.240883
+        }
+      ],
+      "deckActiveEvidence": {
+        "seed": {
+          "observedAtUtc": "2026-08-13T05:04:46.278395Z",
+          "receivedAtUtc": "2026-08-13T05:04:46.278395Z",
+          "sourceTimestampUtc": "2026-08-11T14:32:23.43Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 1
+        },
+        "changes": []
+      },
+      "qa": "USEFUL",
+      "rationale": "The timestamped trace has at least five observations and a strong same-speed robust deviation."
+    },
+    {
+      "pressKey": "press8",
+      "occurrenceId": "press8:2026-08-13T05:37:02.841Z:81",
+      "startUtc": "2026-08-13T05:37:02.841Z",
+      "exactIdentities": [
+        {
+          "identity": "B\u001f82\u001fDr. Blade Change",
+          "eventType": "B",
+          "statusCode": "82",
+          "statusDescription": "Dr. Blade Change",
+          "durationSeconds": 2591.838,
+          "needsClassification": false
+        }
+      ],
+      "canonicalId": "anilox.drive.temperature.actual",
+      "deckNumber": 4,
+      "current": {
+        "count": 7,
+        "mean": 109.19810700000001,
+        "median": 109.102585,
+        "p05": 108.6004316,
+        "p25": 109.102585,
+        "p75": 109.449089,
+        "p95": 109.795593,
+        "iqr": 0.3465039999999959,
+        "minimum": 108.385223,
+        "maximum": 109.795593
+      },
+      "reference": {
+        "count": 490,
+        "mean": 155.4415640163267,
+        "median": 164.814896,
+        "p05": 111.182732,
+        "p25": 154.220352,
+        "p75": 169.195999,
+        "p95": 173.594025,
+        "iqr": 14.97564700000001,
+        "minimum": 109.102585,
+        "maximum": 178.641235
+      },
+      "robustDeviation": 3.7201939255111958,
+      "trace": [
+        {
+          "observedAtUtc": "2026-08-13T05:23:01.261208Z",
+          "receivedAtUtc": "2026-08-13T05:23:01.261208Z",
+          "sourceTimestampUtc": "2026-08-13T05:22:54.953Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 109.795593
+        },
+        {
+          "observedAtUtc": "2026-08-13T05:23:26.27982Z",
+          "receivedAtUtc": "2026-08-13T05:23:26.27982Z",
+          "sourceTimestampUtc": "2026-08-13T05:23:24.953Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 109.102585
+        },
+        {
+          "observedAtUtc": "2026-08-13T05:28:31.269443Z",
+          "receivedAtUtc": "2026-08-13T05:28:31.269443Z",
+          "sourceTimestampUtc": "2026-08-13T05:23:24.953Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 109.102585
+        },
+        {
+          "observedAtUtc": "2026-08-13T05:31:26.269323Z",
+          "receivedAtUtc": "2026-08-13T05:31:26.269323Z",
+          "sourceTimestampUtc": "2026-08-13T05:31:24.957Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.385223
+        },
+        {
+          "observedAtUtc": "2026-08-13T05:31:56.261609Z",
+          "receivedAtUtc": "2026-08-13T05:31:56.261609Z",
+          "sourceTimestampUtc": "2026-08-13T05:31:54.957Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 109.102585
+        },
+        {
+          "observedAtUtc": "2026-08-13T05:33:26.296092Z",
+          "receivedAtUtc": "2026-08-13T05:33:26.296092Z",
+          "sourceTimestampUtc": "2026-08-13T05:33:24.958Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 109.795593
+        },
+        {
+          "observedAtUtc": "2026-08-13T05:34:01.272023Z",
+          "receivedAtUtc": "2026-08-13T05:34:01.272023Z",
+          "sourceTimestampUtc": "2026-08-13T05:33:54.957Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 109.102585
+        }
+      ],
+      "deckActiveEvidence": {
+        "seed": {
+          "observedAtUtc": "2026-08-13T05:04:46.278395Z",
+          "receivedAtUtc": "2026-08-13T05:04:46.278395Z",
+          "sourceTimestampUtc": "2026-08-11T14:32:23.429Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 1
+        },
+        "changes": []
+      },
+      "qa": "PLAUSIBLE BUT WEAK",
+      "rationale": "The strict heuristic qualifies, but trace support or effect strength remains modest."
+    },
+    {
+      "pressKey": "press12",
+      "occurrenceId": "press12:2026-08-13T15:06:10.171Z:54",
+      "startUtc": "2026-08-13T15:06:10.171Z",
+      "exactIdentities": [
+        {
+          "identity": "B\u001f450\u001fNon Productive",
+          "eventType": "B",
+          "statusCode": "450",
+          "statusDescription": "Non Productive",
+          "durationSeconds": 61.25,
+          "needsClassification": false
+        }
+      ],
+      "canonicalId": "ink.viscosity.actual",
+      "deckNumber": 3,
+      "current": {
+        "count": 230,
+        "mean": 18.32186961739132,
+        "median": 18.2099991,
+        "p05": 17.343500215,
+        "p25": 17.700000250000002,
+        "p75": 18.8299999,
+        "p95": 19.64200025,
+        "iqr": 1.1299996499999985,
+        "minimum": 17.25,
+        "maximum": 19.9599991
+      },
+      "reference": {
+        "count": 5382,
+        "mean": 25.36299145971746,
+        "median": 25.4400005,
+        "p05": 23.25,
+        "p25": 24.9500008,
+        "p75": 25.8700008,
+        "p95": 26.9200001,
+        "iqr": 0.9199999999999982,
+        "minimum": 19.7800007,
+        "maximum": 31.3799992
+      },
+      "robustDeviation": 5.683963253066759,
+      "trace": [
+        {
+          "observedAtUtc": "2026-08-13T14:40:21.454292Z",
+          "receivedAtUtc": "2026-08-13T14:40:21.454292Z",
+          "sourceTimestampUtc": "2026-08-13T08:41:02.896Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.25
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:40:26.430983Z",
+          "receivedAtUtc": "2026-08-13T14:40:26.430983Z",
+          "sourceTimestampUtc": "2026-08-13T08:41:05.907Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.25
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:40:31.468755Z",
+          "receivedAtUtc": "2026-08-13T14:40:31.468755Z",
+          "sourceTimestampUtc": "2026-08-13T08:41:14.942Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.25
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:40:36.512574Z",
+          "receivedAtUtc": "2026-08-13T14:40:36.512574Z",
+          "sourceTimestampUtc": "2026-08-13T08:41:18.454Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.25
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:40:41.480615Z",
+          "receivedAtUtc": "2026-08-13T14:40:41.480615Z",
+          "sourceTimestampUtc": "2026-08-13T08:41:23.473Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.25
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:40:46.416735Z",
+          "receivedAtUtc": "2026-08-13T14:40:46.416735Z",
+          "sourceTimestampUtc": "2026-08-13T08:41:29.995Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.25
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:40:51.411782Z",
+          "receivedAtUtc": "2026-08-13T14:40:51.411782Z",
+          "sourceTimestampUtc": "2026-08-13T08:41:35.014Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.3299999
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:40:56.423925Z",
+          "receivedAtUtc": "2026-08-13T14:40:56.423925Z",
+          "sourceTimestampUtc": "2026-08-13T08:41:39.031Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.3299999
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:41:01.40563Z",
+          "receivedAtUtc": "2026-08-13T14:41:01.40563Z",
+          "sourceTimestampUtc": "2026-08-13T08:41:43.546Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.3299999
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:41:06.408133Z",
+          "receivedAtUtc": "2026-08-13T14:41:06.408133Z",
+          "sourceTimestampUtc": "2026-08-13T08:41:48.566Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.4400005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:41:11.406061Z",
+          "receivedAtUtc": "2026-08-13T14:41:11.406061Z",
+          "sourceTimestampUtc": "2026-08-13T08:41:53.59Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.4400005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:41:16.408702Z",
+          "receivedAtUtc": "2026-08-13T14:41:16.408702Z",
+          "sourceTimestampUtc": "2026-08-13T08:42:00.112Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.4400005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:41:21.405485Z",
+          "receivedAtUtc": "2026-08-13T14:41:21.405485Z",
+          "sourceTimestampUtc": "2026-08-13T08:42:04.13Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.6200008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:41:26.417484Z",
+          "receivedAtUtc": "2026-08-13T14:41:26.417484Z",
+          "sourceTimestampUtc": "2026-08-13T08:42:09.152Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.6200008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:41:31.421003Z",
+          "receivedAtUtc": "2026-08-13T14:41:31.421003Z",
+          "sourceTimestampUtc": "2026-08-13T08:42:15.171Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.6200008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:41:36.445513Z",
+          "receivedAtUtc": "2026-08-13T14:41:36.445513Z",
+          "sourceTimestampUtc": "2026-08-13T08:42:19.69Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.5400009
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:41:41.412907Z",
+          "receivedAtUtc": "2026-08-13T14:41:41.412907Z",
+          "sourceTimestampUtc": "2026-08-13T08:42:24.709Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.5400009
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:41:51.440105Z",
+          "receivedAtUtc": "2026-08-13T14:41:51.440105Z",
+          "sourceTimestampUtc": "2026-08-13T08:42:33.74Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.3899994
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:41:56.433798Z",
+          "receivedAtUtc": "2026-08-13T14:41:56.433798Z",
+          "sourceTimestampUtc": "2026-08-13T08:42:40.265Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.3899994
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:42:01.411122Z",
+          "receivedAtUtc": "2026-08-13T14:42:01.411122Z",
+          "sourceTimestampUtc": "2026-08-13T08:42:44.784Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.3899994
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:42:06.48042Z",
+          "receivedAtUtc": "2026-08-13T14:42:06.48042Z",
+          "sourceTimestampUtc": "2026-08-13T08:42:49.299Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.3099995
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:42:11.418372Z",
+          "receivedAtUtc": "2026-08-13T14:42:11.418372Z",
+          "sourceTimestampUtc": "2026-08-13T08:42:52.811Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.3099995
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:42:16.408683Z",
+          "receivedAtUtc": "2026-08-13T14:42:16.408683Z",
+          "sourceTimestampUtc": "2026-08-13T08:42:57.325Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.3099995
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:42:21.438383Z",
+          "receivedAtUtc": "2026-08-13T14:42:21.438383Z",
+          "sourceTimestampUtc": "2026-08-13T08:43:04.856Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.3600006
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:42:26.416947Z",
+          "receivedAtUtc": "2026-08-13T14:42:26.416947Z",
+          "sourceTimestampUtc": "2026-08-13T08:43:10.376Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.3600006
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:42:31.402125Z",
+          "receivedAtUtc": "2026-08-13T14:42:31.402125Z",
+          "sourceTimestampUtc": "2026-08-13T08:43:12.885Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.3600006
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:42:36.443123Z",
+          "receivedAtUtc": "2026-08-13T14:42:36.443123Z",
+          "sourceTimestampUtc": "2026-08-13T08:43:20.411Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.5799999
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:42:41.414461Z",
+          "receivedAtUtc": "2026-08-13T14:42:41.414461Z",
+          "sourceTimestampUtc": "2026-08-13T08:43:23.924Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.5799999
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:42:46.438846Z",
+          "receivedAtUtc": "2026-08-13T14:42:46.438846Z",
+          "sourceTimestampUtc": "2026-08-13T08:43:28.435Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.5799999
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:42:51.401405Z",
+          "receivedAtUtc": "2026-08-13T14:42:51.401405Z",
+          "sourceTimestampUtc": "2026-08-13T08:43:32.451Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.5799999
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:42:56.406714Z",
+          "receivedAtUtc": "2026-08-13T14:42:56.406714Z",
+          "sourceTimestampUtc": "2026-08-13T08:43:38.985Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.7700005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:43:01.560207Z",
+          "receivedAtUtc": "2026-08-13T14:43:01.560207Z",
+          "sourceTimestampUtc": "2026-08-13T08:43:44.005Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.7700005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:43:06.447145Z",
+          "receivedAtUtc": "2026-08-13T14:43:06.447145Z",
+          "sourceTimestampUtc": "2026-08-13T08:43:48.018Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.7700005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:43:11.406119Z",
+          "receivedAtUtc": "2026-08-13T14:43:11.406119Z",
+          "sourceTimestampUtc": "2026-08-13T08:43:54.049Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.7299995
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:43:16.40665Z",
+          "receivedAtUtc": "2026-08-13T14:43:16.40665Z",
+          "sourceTimestampUtc": "2026-08-13T08:43:58.564Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.7299995
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:43:21.490632Z",
+          "receivedAtUtc": "2026-08-13T14:43:21.490632Z",
+          "sourceTimestampUtc": "2026-08-13T08:44:03.081Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.7299995
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:43:26.399866Z",
+          "receivedAtUtc": "2026-08-13T14:43:26.399866Z",
+          "sourceTimestampUtc": "2026-08-13T08:44:09.603Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.5400009
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:43:31.413096Z",
+          "receivedAtUtc": "2026-08-13T14:43:31.413096Z",
+          "sourceTimestampUtc": "2026-08-13T08:44:14.116Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.5400009
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:43:36.417998Z",
+          "receivedAtUtc": "2026-08-13T14:43:36.417998Z",
+          "sourceTimestampUtc": "2026-08-13T08:44:18.631Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.5400009
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:43:41.40625Z",
+          "receivedAtUtc": "2026-08-13T14:43:41.40625Z",
+          "sourceTimestampUtc": "2026-08-13T08:44:24.653Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.4200001
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:43:46.438022Z",
+          "receivedAtUtc": "2026-08-13T14:43:46.438022Z",
+          "sourceTimestampUtc": "2026-08-13T08:44:29.681Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.4200001
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:43:51.399813Z",
+          "receivedAtUtc": "2026-08-13T14:43:51.399813Z",
+          "sourceTimestampUtc": "2026-08-13T08:44:33.701Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.4200001
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:43:56.424342Z",
+          "receivedAtUtc": "2026-08-13T14:43:56.424342Z",
+          "sourceTimestampUtc": "2026-08-13T08:44:36.213Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.4400005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:44:01.473958Z",
+          "receivedAtUtc": "2026-08-13T14:44:01.473958Z",
+          "sourceTimestampUtc": "2026-08-13T08:44:42.736Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.4400005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:44:06.426089Z",
+          "receivedAtUtc": "2026-08-13T14:44:06.426089Z",
+          "sourceTimestampUtc": "2026-08-13T08:44:48.756Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.4400005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:44:11.429012Z",
+          "receivedAtUtc": "2026-08-13T14:44:11.429012Z",
+          "sourceTimestampUtc": "2026-08-13T08:44:54.284Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.6499996
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:44:16.462306Z",
+          "receivedAtUtc": "2026-08-13T14:44:16.462306Z",
+          "sourceTimestampUtc": "2026-08-13T08:44:59.803Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.6499996
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:44:21.437891Z",
+          "receivedAtUtc": "2026-08-13T14:44:21.437891Z",
+          "sourceTimestampUtc": "2026-08-13T08:45:04.323Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.6499996
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:44:26.415439Z",
+          "receivedAtUtc": "2026-08-13T14:44:26.415439Z",
+          "sourceTimestampUtc": "2026-08-13T08:45:10.859Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.8500004
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:44:31.416586Z",
+          "receivedAtUtc": "2026-08-13T14:44:31.416586Z",
+          "sourceTimestampUtc": "2026-08-13T08:45:15.375Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.8500004
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:44:36.437304Z",
+          "receivedAtUtc": "2026-08-13T14:44:36.437304Z",
+          "sourceTimestampUtc": "2026-08-13T08:45:19.893Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.8500004
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:44:41.501471Z",
+          "receivedAtUtc": "2026-08-13T14:44:41.501471Z",
+          "sourceTimestampUtc": "2026-08-13T08:45:22.903Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.8899994
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:44:46.421902Z",
+          "receivedAtUtc": "2026-08-13T14:44:46.421902Z",
+          "sourceTimestampUtc": "2026-08-13T08:45:28.421Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.8899994
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:44:51.463494Z",
+          "receivedAtUtc": "2026-08-13T14:44:51.463494Z",
+          "sourceTimestampUtc": "2026-08-13T08:45:34.939Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.8899994
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:44:56.460216Z",
+          "receivedAtUtc": "2026-08-13T14:44:56.460216Z",
+          "sourceTimestampUtc": "2026-08-13T08:45:39.462Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.6900005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:45:01.428385Z",
+          "receivedAtUtc": "2026-08-13T14:45:01.428385Z",
+          "sourceTimestampUtc": "2026-08-13T08:45:43.985Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.6900005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:45:06.418951Z",
+          "receivedAtUtc": "2026-08-13T14:45:06.418951Z",
+          "sourceTimestampUtc": "2026-08-13T08:45:50.009Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.6900005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:45:11.415237Z",
+          "receivedAtUtc": "2026-08-13T14:45:11.415237Z",
+          "sourceTimestampUtc": "2026-08-13T08:45:55.025Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.4699993
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:45:16.416093Z",
+          "receivedAtUtc": "2026-08-13T14:45:16.416093Z",
+          "sourceTimestampUtc": "2026-08-13T08:45:58.538Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.4699993
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:45:21.427166Z",
+          "receivedAtUtc": "2026-08-13T14:45:21.427166Z",
+          "sourceTimestampUtc": "2026-08-13T08:46:05.062Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.4699993
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:45:26.453923Z",
+          "receivedAtUtc": "2026-08-13T14:45:26.453923Z",
+          "sourceTimestampUtc": "2026-08-13T08:46:08.579Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.5400009
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:45:31.409571Z",
+          "receivedAtUtc": "2026-08-13T14:45:31.409571Z",
+          "sourceTimestampUtc": "2026-08-13T08:46:14.097Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.5400009
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:45:36.466719Z",
+          "receivedAtUtc": "2026-08-13T14:45:36.466719Z",
+          "sourceTimestampUtc": "2026-08-13T08:46:16.61Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.5400009
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:45:41.468956Z",
+          "receivedAtUtc": "2026-08-13T14:45:41.468956Z",
+          "sourceTimestampUtc": "2026-08-13T08:46:24.132Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.7700005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:45:46.39891Z",
+          "receivedAtUtc": "2026-08-13T14:45:46.39891Z",
+          "sourceTimestampUtc": "2026-08-13T08:46:27.644Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.7700005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:45:51.407141Z",
+          "receivedAtUtc": "2026-08-13T14:45:51.407141Z",
+          "sourceTimestampUtc": "2026-08-13T08:46:32.16Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.7700005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:45:56.479141Z",
+          "receivedAtUtc": "2026-08-13T14:45:56.479141Z",
+          "sourceTimestampUtc": "2026-08-13T08:46:38.691Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.0100002
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:46:01.416572Z",
+          "receivedAtUtc": "2026-08-13T14:46:01.416572Z",
+          "sourceTimestampUtc": "2026-08-13T08:46:43.204Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.0100002
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:46:06.499346Z",
+          "receivedAtUtc": "2026-08-13T14:46:06.499346Z",
+          "sourceTimestampUtc": "2026-08-13T08:46:47.721Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.0100002
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:46:11.39948Z",
+          "receivedAtUtc": "2026-08-13T14:46:11.39948Z",
+          "sourceTimestampUtc": "2026-08-13T08:46:54.242Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.0499992
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:46:16.41666Z",
+          "receivedAtUtc": "2026-08-13T14:46:16.41666Z",
+          "sourceTimestampUtc": "2026-08-13T08:46:59.764Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.0499992
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:46:21.401661Z",
+          "receivedAtUtc": "2026-08-13T14:46:21.401661Z",
+          "sourceTimestampUtc": "2026-08-13T08:47:05.284Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.0499992
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:46:26.427876Z",
+          "receivedAtUtc": "2026-08-13T14:46:26.427876Z",
+          "sourceTimestampUtc": "2026-08-13T08:47:09.804Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.8899994
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:46:31.415228Z",
+          "receivedAtUtc": "2026-08-13T14:46:31.415228Z",
+          "sourceTimestampUtc": "2026-08-13T08:47:15.32Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.8899994
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:46:36.42915Z",
+          "receivedAtUtc": "2026-08-13T14:46:36.42915Z",
+          "sourceTimestampUtc": "2026-08-13T08:47:17.833Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.8899994
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:46:41.403933Z",
+          "receivedAtUtc": "2026-08-13T14:46:41.403933Z",
+          "sourceTimestampUtc": "2026-08-13T08:47:25.362Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.6900005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:46:46.429639Z",
+          "receivedAtUtc": "2026-08-13T14:46:46.429639Z",
+          "sourceTimestampUtc": "2026-08-13T08:47:28.877Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.6900005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:46:51.467373Z",
+          "receivedAtUtc": "2026-08-13T14:46:51.467373Z",
+          "sourceTimestampUtc": "2026-08-13T08:47:33.397Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.6900005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:46:56.448881Z",
+          "receivedAtUtc": "2026-08-13T14:46:56.448881Z",
+          "sourceTimestampUtc": "2026-08-13T08:47:37.413Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.6900005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:47:01.44187Z",
+          "receivedAtUtc": "2026-08-13T14:47:01.44187Z",
+          "sourceTimestampUtc": "2026-08-13T08:47:44.437Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.6900005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:47:06.416193Z",
+          "receivedAtUtc": "2026-08-13T14:47:06.416193Z",
+          "sourceTimestampUtc": "2026-08-13T08:47:48.955Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.6900005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:47:11.406079Z",
+          "receivedAtUtc": "2026-08-13T14:47:11.406079Z",
+          "sourceTimestampUtc": "2026-08-13T08:47:52.967Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.6900005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:47:16.418456Z",
+          "receivedAtUtc": "2026-08-13T14:47:16.418456Z",
+          "sourceTimestampUtc": "2026-08-13T08:47:58.491Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.8899994
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:47:21.405265Z",
+          "receivedAtUtc": "2026-08-13T14:47:21.405265Z",
+          "sourceTimestampUtc": "2026-08-13T08:48:03.009Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.8899994
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:47:26.452224Z",
+          "receivedAtUtc": "2026-08-13T14:47:26.452224Z",
+          "sourceTimestampUtc": "2026-08-13T08:48:08.03Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.8899994
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:47:31.411814Z",
+          "receivedAtUtc": "2026-08-13T14:47:31.411814Z",
+          "sourceTimestampUtc": "2026-08-13T08:48:13.549Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.1299992
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:47:36.427252Z",
+          "receivedAtUtc": "2026-08-13T14:47:36.427252Z",
+          "sourceTimestampUtc": "2026-08-13T08:48:19.069Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.1299992
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:47:41.412384Z",
+          "receivedAtUtc": "2026-08-13T14:47:41.412384Z",
+          "sourceTimestampUtc": "2026-08-13T08:48:23.083Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.1299992
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:47:46.414976Z",
+          "receivedAtUtc": "2026-08-13T14:47:46.414976Z",
+          "sourceTimestampUtc": "2026-08-13T08:48:29.103Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.2099991
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:47:51.434823Z",
+          "receivedAtUtc": "2026-08-13T14:47:51.434823Z",
+          "sourceTimestampUtc": "2026-08-13T08:48:34.625Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.2099991
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:47:56.455827Z",
+          "receivedAtUtc": "2026-08-13T14:47:56.455827Z",
+          "sourceTimestampUtc": "2026-08-13T08:48:38.646Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.2099991
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:48:01.419127Z",
+          "receivedAtUtc": "2026-08-13T14:48:01.419127Z",
+          "sourceTimestampUtc": "2026-08-13T08:48:45.674Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.0100002
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:48:06.539891Z",
+          "receivedAtUtc": "2026-08-13T14:48:06.539891Z",
+          "sourceTimestampUtc": "2026-08-13T08:48:50.197Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.0100002
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:48:11.448052Z",
+          "receivedAtUtc": "2026-08-13T14:48:11.448052Z",
+          "sourceTimestampUtc": "2026-08-13T08:48:54.212Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.0100002
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:48:16.447896Z",
+          "receivedAtUtc": "2026-08-13T14:48:16.447896Z",
+          "sourceTimestampUtc": "2026-08-13T08:48:59.737Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.8099995
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:48:21.421645Z",
+          "receivedAtUtc": "2026-08-13T14:48:21.421645Z",
+          "sourceTimestampUtc": "2026-08-13T08:49:04.256Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.8099995
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:48:26.405947Z",
+          "receivedAtUtc": "2026-08-13T14:48:26.405947Z",
+          "sourceTimestampUtc": "2026-08-13T08:49:09.27Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.8099995
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:48:31.420168Z",
+          "receivedAtUtc": "2026-08-13T14:48:31.420168Z",
+          "sourceTimestampUtc": "2026-08-13T08:49:15.292Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.7700005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:48:36.412792Z",
+          "receivedAtUtc": "2026-08-13T14:48:36.412792Z",
+          "sourceTimestampUtc": "2026-08-13T08:49:19.807Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.7700005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:48:41.438076Z",
+          "receivedAtUtc": "2026-08-13T14:48:41.438076Z",
+          "sourceTimestampUtc": "2026-08-13T08:49:24.838Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.7700005
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:48:46.401669Z",
+          "receivedAtUtc": "2026-08-13T14:48:46.401669Z",
+          "sourceTimestampUtc": "2026-08-13T08:49:29.857Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.0900002
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:48:51.42007Z",
+          "receivedAtUtc": "2026-08-13T14:48:51.42007Z",
+          "sourceTimestampUtc": "2026-08-13T08:49:33.367Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.0900002
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:48:56.41228Z",
+          "receivedAtUtc": "2026-08-13T14:48:56.41228Z",
+          "sourceTimestampUtc": "2026-08-13T08:49:39.894Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.0900002
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:49:01.444288Z",
+          "receivedAtUtc": "2026-08-13T14:49:01.444288Z",
+          "sourceTimestampUtc": "2026-08-13T08:49:44.411Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.2900009
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:49:06.456868Z",
+          "receivedAtUtc": "2026-08-13T14:49:06.456868Z",
+          "sourceTimestampUtc": "2026-08-13T08:49:46.916Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.2900009
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:49:11.44129Z",
+          "receivedAtUtc": "2026-08-13T14:49:11.44129Z",
+          "sourceTimestampUtc": "2026-08-13T08:49:54.445Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.2900009
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:49:16.429666Z",
+          "receivedAtUtc": "2026-08-13T14:49:16.429666Z",
+          "sourceTimestampUtc": "2026-08-13T08:49:59.964Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.3299999
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:49:21.419954Z",
+          "receivedAtUtc": "2026-08-13T14:49:21.419954Z",
+          "sourceTimestampUtc": "2026-08-13T08:50:02.978Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.3299999
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:49:26.410703Z",
+          "receivedAtUtc": "2026-08-13T14:49:26.410703Z",
+          "sourceTimestampUtc": "2026-08-13T08:50:10.002Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.3299999
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:49:31.405451Z",
+          "receivedAtUtc": "2026-08-13T14:49:31.405451Z",
+          "sourceTimestampUtc": "2026-08-13T08:50:13.517Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.1299992
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:49:36.414415Z",
+          "receivedAtUtc": "2026-08-13T14:49:36.414415Z",
+          "sourceTimestampUtc": "2026-08-13T08:50:18.534Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.1299992
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:49:41.425005Z",
+          "receivedAtUtc": "2026-08-13T14:49:41.425005Z",
+          "sourceTimestampUtc": "2026-08-13T08:50:24.56Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.1299992
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:49:46.438016Z",
+          "receivedAtUtc": "2026-08-13T14:49:46.438016Z",
+          "sourceTimestampUtc": "2026-08-13T08:50:29.077Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.9300003
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:49:51.430826Z",
+          "receivedAtUtc": "2026-08-13T14:49:51.430826Z",
+          "sourceTimestampUtc": "2026-08-13T08:50:34.095Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.9300003
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:49:56.422256Z",
+          "receivedAtUtc": "2026-08-13T14:49:56.422256Z",
+          "sourceTimestampUtc": "2026-08-13T08:50:40.12Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 17.9300003
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:50:01.461242Z",
+          "receivedAtUtc": "2026-08-13T14:50:01.461242Z",
+          "sourceTimestampUtc": "2026-08-13T08:50:43.632Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.0499992
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:50:06.401599Z",
+          "receivedAtUtc": "2026-08-13T14:50:06.401599Z",
+          "sourceTimestampUtc": "2026-08-13T08:50:50.164Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.0499992
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:50:11.45408Z",
+          "receivedAtUtc": "2026-08-13T14:50:11.45408Z",
+          "sourceTimestampUtc": "2026-08-13T08:50:54.681Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.0499992
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:50:16.407639Z",
+          "receivedAtUtc": "2026-08-13T14:50:16.407639Z",
+          "sourceTimestampUtc": "2026-08-13T08:50:59.194Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.4200001
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:50:21.443807Z",
+          "receivedAtUtc": "2026-08-13T14:50:21.443807Z",
+          "sourceTimestampUtc": "2026-08-13T08:51:04.216Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.4200001
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:50:26.408672Z",
+          "receivedAtUtc": "2026-08-13T14:50:26.408672Z",
+          "sourceTimestampUtc": "2026-08-13T08:51:10.239Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.4200001
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:50:31.416465Z",
+          "receivedAtUtc": "2026-08-13T14:50:31.416465Z",
+          "sourceTimestampUtc": "2026-08-13T08:51:11.248Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.4200001
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:50:36.40607Z",
+          "receivedAtUtc": "2026-08-13T14:50:36.40607Z",
+          "sourceTimestampUtc": "2026-08-13T08:51:17.774Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.6200008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:50:41.41995Z",
+          "receivedAtUtc": "2026-08-13T14:50:41.41995Z",
+          "sourceTimestampUtc": "2026-08-13T08:51:22.292Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.6200008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:50:46.441309Z",
+          "receivedAtUtc": "2026-08-13T14:50:46.441309Z",
+          "sourceTimestampUtc": "2026-08-13T08:51:30.327Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.4599991
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:50:51.495654Z",
+          "receivedAtUtc": "2026-08-13T14:50:51.495654Z",
+          "sourceTimestampUtc": "2026-08-13T08:51:35.344Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.4599991
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:50:56.413487Z",
+          "receivedAtUtc": "2026-08-13T14:50:56.413487Z",
+          "sourceTimestampUtc": "2026-08-13T08:51:37.854Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.4599991
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:51:01.40721Z",
+          "receivedAtUtc": "2026-08-13T14:51:01.40721Z",
+          "sourceTimestampUtc": "2026-08-13T08:51:44.881Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.2099991
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:51:06.466999Z",
+          "receivedAtUtc": "2026-08-13T14:51:06.466999Z",
+          "sourceTimestampUtc": "2026-08-13T08:51:49.397Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.2099991
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:51:11.453891Z",
+          "receivedAtUtc": "2026-08-13T14:51:11.453891Z",
+          "sourceTimestampUtc": "2026-08-13T08:51:50.906Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.2099991
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:51:16.459333Z",
+          "receivedAtUtc": "2026-08-13T14:51:16.459333Z",
+          "sourceTimestampUtc": "2026-08-13T08:52:00.437Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.0900002
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:51:21.493327Z",
+          "receivedAtUtc": "2026-08-13T14:51:21.493327Z",
+          "sourceTimestampUtc": "2026-08-13T08:52:05.456Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.0900002
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:51:26.406915Z",
+          "receivedAtUtc": "2026-08-13T14:51:26.406915Z",
+          "sourceTimestampUtc": "2026-08-13T08:52:07.967Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.0900002
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:51:31.408076Z",
+          "receivedAtUtc": "2026-08-13T14:51:31.408076Z",
+          "sourceTimestampUtc": "2026-08-13T08:52:12.482Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.0900002
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:51:36.453646Z",
+          "receivedAtUtc": "2026-08-13T14:51:36.453646Z",
+          "sourceTimestampUtc": "2026-08-13T08:52:19.006Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.4200001
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:51:41.458551Z",
+          "receivedAtUtc": "2026-08-13T14:51:41.458551Z",
+          "sourceTimestampUtc": "2026-08-13T08:52:23.526Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.4200001
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:51:46.432921Z",
+          "receivedAtUtc": "2026-08-13T14:51:46.432921Z",
+          "sourceTimestampUtc": "2026-08-13T08:52:28.044Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.4200001
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:51:51.411403Z",
+          "receivedAtUtc": "2026-08-13T14:51:51.411403Z",
+          "sourceTimestampUtc": "2026-08-13T08:52:34.572Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.7399998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:51:56.431674Z",
+          "receivedAtUtc": "2026-08-13T14:51:56.431674Z",
+          "sourceTimestampUtc": "2026-08-13T08:52:39.092Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.7399998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:52:01.40832Z",
+          "receivedAtUtc": "2026-08-13T14:52:01.40832Z",
+          "sourceTimestampUtc": "2026-08-13T08:52:42.606Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.7399998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:52:06.421493Z",
+          "receivedAtUtc": "2026-08-13T14:52:06.421493Z",
+          "sourceTimestampUtc": "2026-08-13T08:52:48.141Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.7000008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:52:11.508193Z",
+          "receivedAtUtc": "2026-08-13T14:52:11.508193Z",
+          "sourceTimestampUtc": "2026-08-13T08:52:54.668Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.7000008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:52:16.435387Z",
+          "receivedAtUtc": "2026-08-13T14:52:16.435387Z",
+          "sourceTimestampUtc": "2026-08-13T08:52:59.192Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.7000008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:52:21.435722Z",
+          "receivedAtUtc": "2026-08-13T14:52:21.435722Z",
+          "sourceTimestampUtc": "2026-08-13T08:53:04.711Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.4200001
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:52:26.412587Z",
+          "receivedAtUtc": "2026-08-13T14:52:26.412587Z",
+          "sourceTimestampUtc": "2026-08-13T08:53:09.23Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.4200001
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:52:31.4544Z",
+          "receivedAtUtc": "2026-08-13T14:52:31.4544Z",
+          "sourceTimestampUtc": "2026-08-13T08:53:13.745Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.4200001
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:52:36.483854Z",
+          "receivedAtUtc": "2026-08-13T14:52:36.483854Z",
+          "sourceTimestampUtc": "2026-08-13T08:53:20.268Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.2099991
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:52:41.401579Z",
+          "receivedAtUtc": "2026-08-13T14:52:41.401579Z",
+          "sourceTimestampUtc": "2026-08-13T08:53:24.786Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.2099991
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:52:46.505402Z",
+          "receivedAtUtc": "2026-08-13T14:52:46.505402Z",
+          "sourceTimestampUtc": "2026-08-13T08:53:29.3Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.2099991
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:52:51.420596Z",
+          "receivedAtUtc": "2026-08-13T14:52:51.420596Z",
+          "sourceTimestampUtc": "2026-08-13T08:53:34.824Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.4200001
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:52:56.406858Z",
+          "receivedAtUtc": "2026-08-13T14:52:56.406858Z",
+          "sourceTimestampUtc": "2026-08-13T08:53:37.833Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.4200001
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:53:01.417555Z",
+          "receivedAtUtc": "2026-08-13T14:53:01.417555Z",
+          "sourceTimestampUtc": "2026-08-13T08:53:44.861Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.4200001
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:53:06.407732Z",
+          "receivedAtUtc": "2026-08-13T14:53:06.407732Z",
+          "sourceTimestampUtc": "2026-08-13T08:53:47.371Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.8700008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:53:11.456486Z",
+          "receivedAtUtc": "2026-08-13T14:53:11.456486Z",
+          "sourceTimestampUtc": "2026-08-13T08:53:53.392Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.8700008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:53:16.563527Z",
+          "receivedAtUtc": "2026-08-13T14:53:16.563527Z",
+          "sourceTimestampUtc": "2026-08-13T08:54:00.421Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.8700008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:53:21.4091Z",
+          "receivedAtUtc": "2026-08-13T14:53:21.4091Z",
+          "sourceTimestampUtc": "2026-08-13T08:54:05.941Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.9899998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:53:26.44438Z",
+          "receivedAtUtc": "2026-08-13T14:53:26.44438Z",
+          "sourceTimestampUtc": "2026-08-13T08:54:07.95Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.9899998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:53:31.463893Z",
+          "receivedAtUtc": "2026-08-13T14:53:31.463893Z",
+          "sourceTimestampUtc": "2026-08-13T08:54:14.48Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.9899998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:53:36.467897Z",
+          "receivedAtUtc": "2026-08-13T14:53:36.467897Z",
+          "sourceTimestampUtc": "2026-08-13T08:54:18.489Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.6599998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:53:41.494791Z",
+          "receivedAtUtc": "2026-08-13T14:53:41.494791Z",
+          "sourceTimestampUtc": "2026-08-13T08:54:23.51Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.6599998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:53:46.420345Z",
+          "receivedAtUtc": "2026-08-13T14:53:46.420345Z",
+          "sourceTimestampUtc": "2026-08-13T08:54:30.029Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.6599998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:53:51.420534Z",
+          "receivedAtUtc": "2026-08-13T14:53:51.420534Z",
+          "sourceTimestampUtc": "2026-08-13T08:54:33.543Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.4200001
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:53:56.417862Z",
+          "receivedAtUtc": "2026-08-13T14:53:56.417862Z",
+          "sourceTimestampUtc": "2026-08-13T08:54:39.064Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.4200001
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:54:01.412354Z",
+          "receivedAtUtc": "2026-08-13T14:54:01.412354Z",
+          "sourceTimestampUtc": "2026-08-13T08:54:45.086Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.4200001
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:54:06.401098Z",
+          "receivedAtUtc": "2026-08-13T14:54:06.401098Z",
+          "sourceTimestampUtc": "2026-08-13T08:54:48.097Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.6599998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:54:11.446219Z",
+          "receivedAtUtc": "2026-08-13T14:54:11.446219Z",
+          "sourceTimestampUtc": "2026-08-13T08:54:54.62Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.6599998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:54:16.454818Z",
+          "receivedAtUtc": "2026-08-13T14:54:16.454818Z",
+          "sourceTimestampUtc": "2026-08-13T08:54:59.134Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.6599998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:54:21.475441Z",
+          "receivedAtUtc": "2026-08-13T14:54:21.475441Z",
+          "sourceTimestampUtc": "2026-08-13T08:55:04.153Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.1200008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:54:26.406937Z",
+          "receivedAtUtc": "2026-08-13T14:54:26.406937Z",
+          "sourceTimestampUtc": "2026-08-13T08:55:09.172Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.1200008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:54:31.533934Z",
+          "receivedAtUtc": "2026-08-13T14:54:31.533934Z",
+          "sourceTimestampUtc": "2026-08-13T08:55:11.683Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.1200008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:54:36.404962Z",
+          "receivedAtUtc": "2026-08-13T14:54:36.404962Z",
+          "sourceTimestampUtc": "2026-08-13T08:55:19.21Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.1599998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:54:41.431807Z",
+          "receivedAtUtc": "2026-08-13T14:54:41.431807Z",
+          "sourceTimestampUtc": "2026-08-13T08:55:24.731Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.1599998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:54:46.411569Z",
+          "receivedAtUtc": "2026-08-13T14:54:46.411569Z",
+          "sourceTimestampUtc": "2026-08-13T08:55:27.239Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.1599998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:54:51.431215Z",
+          "receivedAtUtc": "2026-08-13T14:54:51.431215Z",
+          "sourceTimestampUtc": "2026-08-13T08:55:35.274Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.7800007
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:54:56.476619Z",
+          "receivedAtUtc": "2026-08-13T14:54:56.476619Z",
+          "sourceTimestampUtc": "2026-08-13T08:55:38.288Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.7800007
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:55:01.421061Z",
+          "receivedAtUtc": "2026-08-13T14:55:01.421061Z",
+          "sourceTimestampUtc": "2026-08-13T08:55:42.804Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.7800007
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:55:06.499233Z",
+          "receivedAtUtc": "2026-08-13T14:55:06.499233Z",
+          "sourceTimestampUtc": "2026-08-13T08:55:49.336Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.5799999
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:55:11.468675Z",
+          "receivedAtUtc": "2026-08-13T14:55:11.468675Z",
+          "sourceTimestampUtc": "2026-08-13T08:55:53.854Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.5799999
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:55:16.47768Z",
+          "receivedAtUtc": "2026-08-13T14:55:16.47768Z",
+          "sourceTimestampUtc": "2026-08-13T08:55:58.371Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.5799999
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:55:21.423331Z",
+          "receivedAtUtc": "2026-08-13T14:55:21.423331Z",
+          "sourceTimestampUtc": "2026-08-13T08:56:02.389Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.5799999
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:55:26.431827Z",
+          "receivedAtUtc": "2026-08-13T14:55:26.431827Z",
+          "sourceTimestampUtc": "2026-08-13T08:56:10.416Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.9500008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:55:31.412009Z",
+          "receivedAtUtc": "2026-08-13T14:55:31.412009Z",
+          "sourceTimestampUtc": "2026-08-13T08:56:12.928Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.9500008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:55:36.402831Z",
+          "receivedAtUtc": "2026-08-13T14:55:36.402831Z",
+          "sourceTimestampUtc": "2026-08-13T08:56:20.456Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.4500008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:55:41.403678Z",
+          "receivedAtUtc": "2026-08-13T14:55:41.403678Z",
+          "sourceTimestampUtc": "2026-08-13T08:56:23.974Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.4500008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:55:46.399999Z",
+          "receivedAtUtc": "2026-08-13T14:55:46.399999Z",
+          "sourceTimestampUtc": "2026-08-13T08:56:28.496Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.4500008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:55:51.417825Z",
+          "receivedAtUtc": "2026-08-13T14:55:51.417825Z",
+          "sourceTimestampUtc": "2026-08-13T08:56:33.013Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.4500008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:55:56.477241Z",
+          "receivedAtUtc": "2026-08-13T14:55:56.477241Z",
+          "sourceTimestampUtc": "2026-08-13T08:56:39.535Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.2800007
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:56:01.425556Z",
+          "receivedAtUtc": "2026-08-13T14:56:01.425556Z",
+          "sourceTimestampUtc": "2026-08-13T08:56:44.054Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.2800007
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:56:06.416284Z",
+          "receivedAtUtc": "2026-08-13T14:56:06.416284Z",
+          "sourceTimestampUtc": "2026-08-13T08:56:48.067Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.2800007
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:56:11.418672Z",
+          "receivedAtUtc": "2026-08-13T14:56:11.418672Z",
+          "sourceTimestampUtc": "2026-08-13T08:56:54.594Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.8299999
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:56:16.490359Z",
+          "receivedAtUtc": "2026-08-13T14:56:16.490359Z",
+          "sourceTimestampUtc": "2026-08-13T08:56:59.622Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.8299999
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:56:21.427835Z",
+          "receivedAtUtc": "2026-08-13T14:56:21.427835Z",
+          "sourceTimestampUtc": "2026-08-13T08:57:03.634Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.8299999
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:56:26.449193Z",
+          "receivedAtUtc": "2026-08-13T14:56:26.449193Z",
+          "sourceTimestampUtc": "2026-08-13T08:57:09.656Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.8299999
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:56:31.424841Z",
+          "receivedAtUtc": "2026-08-13T14:56:31.424841Z",
+          "sourceTimestampUtc": "2026-08-13T08:57:11.675Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.8299999
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:56:36.445921Z",
+          "receivedAtUtc": "2026-08-13T14:56:36.445921Z",
+          "sourceTimestampUtc": "2026-08-13T08:57:18.711Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.8299999
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:56:41.41512Z",
+          "receivedAtUtc": "2026-08-13T14:56:41.41512Z",
+          "sourceTimestampUtc": "2026-08-13T08:57:24.233Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.4099998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:56:46.489388Z",
+          "receivedAtUtc": "2026-08-13T14:56:46.489388Z",
+          "sourceTimestampUtc": "2026-08-13T08:57:29.754Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.4099998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:56:51.427534Z",
+          "receivedAtUtc": "2026-08-13T14:56:51.427534Z",
+          "sourceTimestampUtc": "2026-08-13T08:57:34.271Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.4099998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:56:56.423827Z",
+          "receivedAtUtc": "2026-08-13T14:56:56.423827Z",
+          "sourceTimestampUtc": "2026-08-13T08:57:39.791Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.6200008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:57:01.442085Z",
+          "receivedAtUtc": "2026-08-13T14:57:01.442085Z",
+          "sourceTimestampUtc": "2026-08-13T08:57:42.8Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.6200008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:57:06.50519Z",
+          "receivedAtUtc": "2026-08-13T14:57:06.50519Z",
+          "sourceTimestampUtc": "2026-08-13T08:57:49.324Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.6200008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:57:11.43265Z",
+          "receivedAtUtc": "2026-08-13T14:57:11.43265Z",
+          "sourceTimestampUtc": "2026-08-13T08:57:53.84Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.2399998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:57:16.408238Z",
+          "receivedAtUtc": "2026-08-13T14:57:16.408238Z",
+          "sourceTimestampUtc": "2026-08-13T08:58:00.867Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.2399998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:57:21.415167Z",
+          "receivedAtUtc": "2026-08-13T14:57:21.415167Z",
+          "sourceTimestampUtc": "2026-08-13T08:58:04.882Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.2399998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:57:26.42578Z",
+          "receivedAtUtc": "2026-08-13T14:57:26.42578Z",
+          "sourceTimestampUtc": "2026-08-13T08:58:09.9Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.9500008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:57:31.443211Z",
+          "receivedAtUtc": "2026-08-13T14:57:31.443211Z",
+          "sourceTimestampUtc": "2026-08-13T08:58:12.912Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.9500008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:57:36.411978Z",
+          "receivedAtUtc": "2026-08-13T14:57:36.411978Z",
+          "sourceTimestampUtc": "2026-08-13T08:58:19.935Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 18.9500008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:57:41.439121Z",
+          "receivedAtUtc": "2026-08-13T14:57:41.439121Z",
+          "sourceTimestampUtc": "2026-08-13T08:58:22.942Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.3299999
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:57:46.402117Z",
+          "receivedAtUtc": "2026-08-13T14:57:46.402117Z",
+          "sourceTimestampUtc": "2026-08-13T08:58:28.465Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.3299999
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:57:51.406148Z",
+          "receivedAtUtc": "2026-08-13T14:57:51.406148Z",
+          "sourceTimestampUtc": "2026-08-13T08:58:34.991Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.3299999
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:57:56.420307Z",
+          "receivedAtUtc": "2026-08-13T14:57:56.420307Z",
+          "sourceTimestampUtc": "2026-08-13T08:58:38.503Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.8799992
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:58:01.422815Z",
+          "receivedAtUtc": "2026-08-13T14:58:01.422815Z",
+          "sourceTimestampUtc": "2026-08-13T08:58:44.023Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.8799992
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:58:06.452742Z",
+          "receivedAtUtc": "2026-08-13T14:58:06.452742Z",
+          "sourceTimestampUtc": "2026-08-13T08:58:49.541Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.8799992
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:58:11.484402Z",
+          "receivedAtUtc": "2026-08-13T14:58:11.484402Z",
+          "sourceTimestampUtc": "2026-08-13T08:58:53.053Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.6599998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:58:16.416083Z",
+          "receivedAtUtc": "2026-08-13T14:58:16.416083Z",
+          "sourceTimestampUtc": "2026-08-13T08:58:57.567Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.6599998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:58:21.422949Z",
+          "receivedAtUtc": "2026-08-13T14:58:21.422949Z",
+          "sourceTimestampUtc": "2026-08-13T08:59:04.094Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.6599998
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:58:26.478034Z",
+          "receivedAtUtc": "2026-08-13T14:58:26.478034Z",
+          "sourceTimestampUtc": "2026-08-13T08:59:08.613Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.2000008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:58:31.444331Z",
+          "receivedAtUtc": "2026-08-13T14:58:31.444331Z",
+          "sourceTimestampUtc": "2026-08-13T08:59:14.131Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.2000008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:58:36.498222Z",
+          "receivedAtUtc": "2026-08-13T14:58:36.498222Z",
+          "sourceTimestampUtc": "2026-08-13T08:59:19.652Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.2000008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:58:41.43285Z",
+          "receivedAtUtc": "2026-08-13T14:58:41.43285Z",
+          "sourceTimestampUtc": "2026-08-13T08:59:24.166Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.3700008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:58:46.427138Z",
+          "receivedAtUtc": "2026-08-13T14:58:46.427138Z",
+          "sourceTimestampUtc": "2026-08-13T08:59:29.69Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.3700008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:58:51.413569Z",
+          "receivedAtUtc": "2026-08-13T14:58:51.413569Z",
+          "sourceTimestampUtc": "2026-08-13T08:59:35.204Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.3700008
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:58:56.421102Z",
+          "receivedAtUtc": "2026-08-13T14:58:56.421102Z",
+          "sourceTimestampUtc": "2026-08-13T08:59:39.73Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.9599991
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:59:01.473658Z",
+          "receivedAtUtc": "2026-08-13T14:59:01.473658Z",
+          "sourceTimestampUtc": "2026-08-13T08:59:43.241Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.9599991
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:59:06.410348Z",
+          "receivedAtUtc": "2026-08-13T14:59:06.410348Z",
+          "sourceTimestampUtc": "2026-08-13T08:59:47.76Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.9599991
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:59:11.438547Z",
+          "receivedAtUtc": "2026-08-13T14:59:11.438547Z",
+          "sourceTimestampUtc": "2026-08-13T08:59:54.286Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.8799992
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:59:16.40475Z",
+          "receivedAtUtc": "2026-08-13T14:59:16.40475Z",
+          "sourceTimestampUtc": "2026-08-13T08:59:57.796Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.8799992
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:59:21.417336Z",
+          "receivedAtUtc": "2026-08-13T14:59:21.417336Z",
+          "sourceTimestampUtc": "2026-08-13T09:00:00.805Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.8799992
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:59:26.411435Z",
+          "receivedAtUtc": "2026-08-13T14:59:26.411435Z",
+          "sourceTimestampUtc": "2026-08-13T09:00:09.846Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.2800007
+        },
+        {
+          "observedAtUtc": "2026-08-13T14:59:31.405941Z",
+          "receivedAtUtc": "2026-08-13T14:59:31.405941Z",
+          "sourceTimestampUtc": "2026-08-13T09:00:15.367Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 19.2800007
+        }
+      ],
+      "deckActiveEvidence": {
+        "seed": null,
+        "changes": []
+      },
+      "qa": "USEFUL",
+      "rationale": "The timestamped trace has at least five observations and a strong same-speed robust deviation."
+    },
+    {
+      "pressKey": "press12",
+      "occurrenceId": "press12:2026-08-13T01:16:47.112Z:49",
+      "startUtc": "2026-08-13T01:16:47.112Z",
+      "exactIdentities": [
+        {
+          "identity": "B\u001f145-2\u001fPoor Print",
+          "eventType": "B",
+          "statusCode": "145-2",
+          "statusDescription": "Poor Print",
+          "durationSeconds": 1688.334,
+          "needsClassification": false
+        }
+      ],
+      "canonicalId": "ink.viscosity.actual",
+      "deckNumber": 7,
+      "current": {
+        "count": 31,
+        "mean": 6.554516080645161,
+        "median": 0,
+        "p05": 0,
+        "p25": 0,
+        "p75": 22.4899998,
+        "p95": 22.6100006,
+        "iqr": 22.4899998,
+        "minimum": 0,
+        "maximum": 22.7299995
+      },
+      "reference": {
+        "count": 2409,
+        "mean": 22.233088422083778,
+        "median": 22.6100006,
+        "p05": 18.4099998,
+        "p25": 22.3600006,
+        "p75": 22.8799992,
+        "p95": 23.1700001,
+        "iqr": 0.519998600000001,
+        "minimum": 17.4699993,
+        "maximum": 23.9099998
+      },
+      "robustDeviation": 19.999999999999996,
+      "trace": [
+        {
+          "observedAtUtc": "2026-08-13T01:13:51.1882Z",
+          "receivedAtUtc": "2026-08-13T01:13:51.1882Z",
+          "sourceTimestampUtc": "2026-08-12T19:14:31.023Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 0
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:13:56.21112Z",
+          "receivedAtUtc": "2026-08-13T01:13:56.21112Z",
+          "sourceTimestampUtc": "2026-08-12T19:14:36.039Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 0
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:14:01.189909Z",
+          "receivedAtUtc": "2026-08-13T01:14:01.189909Z",
+          "sourceTimestampUtc": "2026-08-12T19:14:44.073Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 0
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:14:06.199152Z",
+          "receivedAtUtc": "2026-08-13T01:14:06.199152Z",
+          "sourceTimestampUtc": "2026-08-12T19:14:49.095Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 0
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:14:11.205589Z",
+          "receivedAtUtc": "2026-08-13T01:14:11.205589Z",
+          "sourceTimestampUtc": "2026-08-12T19:14:52.109Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 0
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:14:16.181942Z",
+          "receivedAtUtc": "2026-08-13T01:14:16.181942Z",
+          "sourceTimestampUtc": "2026-08-12T19:14:56.125Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 0
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:14:21.211783Z",
+          "receivedAtUtc": "2026-08-13T01:14:21.211783Z",
+          "sourceTimestampUtc": "2026-08-12T19:15:02.148Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 0
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:14:26.186883Z",
+          "receivedAtUtc": "2026-08-13T01:14:26.186883Z",
+          "sourceTimestampUtc": "2026-08-12T19:15:07.666Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 0
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:14:31.186314Z",
+          "receivedAtUtc": "2026-08-13T01:14:31.186314Z",
+          "sourceTimestampUtc": "2026-08-12T19:15:13.204Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 0
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:14:36.182444Z",
+          "receivedAtUtc": "2026-08-13T01:14:36.182444Z",
+          "sourceTimestampUtc": "2026-08-12T19:15:16.219Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 0
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:14:41.187836Z",
+          "receivedAtUtc": "2026-08-13T01:14:41.187836Z",
+          "sourceTimestampUtc": "2026-08-12T19:15:23.255Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 0
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:14:46.190598Z",
+          "receivedAtUtc": "2026-08-13T01:14:46.190598Z",
+          "sourceTimestampUtc": "2026-08-12T19:15:28.776Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 0
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:14:51.191228Z",
+          "receivedAtUtc": "2026-08-13T01:14:51.191228Z",
+          "sourceTimestampUtc": "2026-08-12T19:15:31.787Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 0
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:14:56.200387Z",
+          "receivedAtUtc": "2026-08-13T01:14:56.200387Z",
+          "sourceTimestampUtc": "2026-08-12T19:15:37.813Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 0
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:15:01.177379Z",
+          "receivedAtUtc": "2026-08-13T01:15:01.177379Z",
+          "sourceTimestampUtc": "2026-08-12T19:15:44.336Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 0
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:15:06.184604Z",
+          "receivedAtUtc": "2026-08-13T01:15:06.184604Z",
+          "sourceTimestampUtc": "2026-08-12T19:15:47.343Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 0
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:15:11.219604Z",
+          "receivedAtUtc": "2026-08-13T01:15:11.219604Z",
+          "sourceTimestampUtc": "2026-08-12T19:15:53.365Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 0
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:15:16.229001Z",
+          "receivedAtUtc": "2026-08-13T01:15:16.229001Z",
+          "sourceTimestampUtc": "2026-08-12T19:15:57.378Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 0
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:15:21.182919Z",
+          "receivedAtUtc": "2026-08-13T01:15:21.182919Z",
+          "sourceTimestampUtc": "2026-08-12T19:16:03.4Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 0
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:15:26.187331Z",
+          "receivedAtUtc": "2026-08-13T01:15:26.187331Z",
+          "sourceTimestampUtc": "2026-08-12T19:16:08.927Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 0
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:15:31.186374Z",
+          "receivedAtUtc": "2026-08-13T01:15:31.186374Z",
+          "sourceTimestampUtc": "2026-08-12T19:16:14.445Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 0
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:15:36.179591Z",
+          "receivedAtUtc": "2026-08-13T01:15:36.179591Z",
+          "sourceTimestampUtc": "2026-08-12T19:16:18.463Z",
+          "qualityState": "good",
+          "valueKind": "integer",
+          "value": 0
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:15:41.182908Z",
+          "receivedAtUtc": "2026-08-13T01:15:41.182908Z",
+          "sourceTimestampUtc": "2026-08-12T19:16:24.482Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 22.4899998
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:15:51.183744Z",
+          "receivedAtUtc": "2026-08-13T01:15:51.183744Z",
+          "sourceTimestampUtc": "2026-08-12T19:16:33.016Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 22.4899998
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:15:56.196947Z",
+          "receivedAtUtc": "2026-08-13T01:15:56.196947Z",
+          "sourceTimestampUtc": "2026-08-12T19:16:39.538Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 22.5499992
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:16:01.190185Z",
+          "receivedAtUtc": "2026-08-13T01:16:01.190185Z",
+          "sourceTimestampUtc": "2026-08-12T19:16:43.052Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 22.5499992
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:16:06.21788Z",
+          "receivedAtUtc": "2026-08-13T01:16:06.21788Z",
+          "sourceTimestampUtc": "2026-08-12T19:16:48.568Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 22.5499992
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:16:11.179931Z",
+          "receivedAtUtc": "2026-08-13T01:16:11.179931Z",
+          "sourceTimestampUtc": "2026-08-12T19:16:54.588Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 22.6100006
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:16:16.183201Z",
+          "receivedAtUtc": "2026-08-13T01:16:16.183201Z",
+          "sourceTimestampUtc": "2026-08-12T19:16:58.604Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 22.6100006
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:16:21.189378Z",
+          "receivedAtUtc": "2026-08-13T01:16:21.189378Z",
+          "sourceTimestampUtc": "2026-08-12T19:17:04.632Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 22.6100006
+        },
+        {
+          "observedAtUtc": "2026-08-13T01:16:26.183386Z",
+          "receivedAtUtc": "2026-08-13T01:16:26.183386Z",
+          "sourceTimestampUtc": "2026-08-12T19:17:09.655Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 22.7299995
+        }
+      ],
+      "deckActiveEvidence": {
+        "seed": null,
+        "changes": []
+      },
+      "qa": "PLAUSIBLE BUT WEAK",
+      "rationale": "The raw zero excursion is real, but deck-state evidence is unavailable, so interpretation remains weak."
+    },
+    {
+      "pressKey": "press13",
+      "occurrenceId": "press13:2026-08-13T13:36:19.575Z:50",
+      "startUtc": "2026-08-13T13:36:19.575Z",
+      "exactIdentities": [
+        {
+          "identity": "B\u001f95\u001fPress Problem / Impression",
+          "eventType": "B",
+          "statusCode": "95",
+          "statusDescription": "Press Problem / Impression",
+          "durationSeconds": 1444.569,
+          "needsClassification": false
+        }
+      ],
+      "canonicalId": "anilox.drive.temperature.actual",
+      "deckNumber": 9,
+      "current": {
+        "count": 44,
+        "mean": 113.0692704090909,
+        "median": 108.700775,
+        "p05": 108.700775,
+        "p25": 108.700775,
+        "p75": 117.853813,
+        "p95": 117.853813,
+        "iqr": 9.15303800000001,
+        "minimum": 108.700775,
+        "maximum": 117.853813
+      },
+      "reference": {
+        "count": 514,
+        "mean": 161.82072594552463,
+        "median": 172.772385,
+        "p05": 117.853813,
+        "p25": 163.619278,
+        "p75": 172.772385,
+        "p95": 181.925476,
+        "iqr": 9.153107000000006,
+        "minimum": 108.700775,
+        "maximum": 181.925476
+      },
+      "robustDeviation": 6.999984813899803,
+      "trace": [
+        {
+          "observedAtUtc": "2026-08-13T13:10:16.375434Z",
+          "receivedAtUtc": "2026-08-13T13:10:16.375434Z",
+          "sourceTimestampUtc": "2026-08-13T08:10:18.193Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.700775
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:10:46.382572Z",
+          "receivedAtUtc": "2026-08-13T13:10:46.382572Z",
+          "sourceTimestampUtc": "2026-08-13T08:10:48.302Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.700775
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:11:16.38267Z",
+          "receivedAtUtc": "2026-08-13T13:11:16.38267Z",
+          "sourceTimestampUtc": "2026-08-13T08:11:18.421Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 117.853813
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:11:46.379185Z",
+          "receivedAtUtc": "2026-08-13T13:11:46.379185Z",
+          "sourceTimestampUtc": "2026-08-13T08:11:48.033Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 117.853813
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:12:16.393278Z",
+          "receivedAtUtc": "2026-08-13T13:12:16.393278Z",
+          "sourceTimestampUtc": "2026-08-13T08:12:18.133Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 117.853813
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:12:46.389757Z",
+          "receivedAtUtc": "2026-08-13T13:12:46.389757Z",
+          "sourceTimestampUtc": "2026-08-13T08:12:48.231Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.700775
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:13:46.381859Z",
+          "receivedAtUtc": "2026-08-13T13:13:46.381859Z",
+          "sourceTimestampUtc": "2026-08-13T08:13:48.427Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.700775
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:14:16.389309Z",
+          "receivedAtUtc": "2026-08-13T13:14:16.389309Z",
+          "sourceTimestampUtc": "2026-08-13T08:14:18.531Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.700775
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:14:46.404128Z",
+          "receivedAtUtc": "2026-08-13T13:14:46.404128Z",
+          "sourceTimestampUtc": "2026-08-13T08:14:48.143Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 117.853813
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:15:16.412807Z",
+          "receivedAtUtc": "2026-08-13T13:15:16.412807Z",
+          "sourceTimestampUtc": "2026-08-13T08:15:18.251Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.700775
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:15:46.415077Z",
+          "receivedAtUtc": "2026-08-13T13:15:46.415077Z",
+          "sourceTimestampUtc": "2026-08-13T08:15:48.358Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 117.853813
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:17:16.374192Z",
+          "receivedAtUtc": "2026-08-13T13:17:16.374192Z",
+          "sourceTimestampUtc": "2026-08-13T08:17:18.168Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 117.853813
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:18:46.381242Z",
+          "receivedAtUtc": "2026-08-13T13:18:46.381242Z",
+          "sourceTimestampUtc": "2026-08-13T08:18:48.485Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 117.853813
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:19:16.380043Z",
+          "receivedAtUtc": "2026-08-13T13:19:16.380043Z",
+          "sourceTimestampUtc": "2026-08-13T08:19:18.582Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.700775
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:19:46.383968Z",
+          "receivedAtUtc": "2026-08-13T13:19:46.383968Z",
+          "sourceTimestampUtc": "2026-08-13T08:19:48.684Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 117.853813
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:20:16.409172Z",
+          "receivedAtUtc": "2026-08-13T13:20:16.409172Z",
+          "sourceTimestampUtc": "2026-08-13T08:20:18.283Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 117.853813
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:20:46.404133Z",
+          "receivedAtUtc": "2026-08-13T13:20:46.404133Z",
+          "sourceTimestampUtc": "2026-08-13T08:20:48.378Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.700775
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:22:16.404747Z",
+          "receivedAtUtc": "2026-08-13T13:22:16.404747Z",
+          "sourceTimestampUtc": "2026-08-13T08:22:18.702Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 117.853813
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:22:46.386368Z",
+          "receivedAtUtc": "2026-08-13T13:22:46.386368Z",
+          "sourceTimestampUtc": "2026-08-13T08:22:48.301Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.700775
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:23:16.384319Z",
+          "receivedAtUtc": "2026-08-13T13:23:16.384319Z",
+          "sourceTimestampUtc": "2026-08-13T08:23:18.415Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 117.853813
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:23:46.385071Z",
+          "receivedAtUtc": "2026-08-13T13:23:46.385071Z",
+          "sourceTimestampUtc": "2026-08-13T08:23:48.521Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.700775
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:24:16.385723Z",
+          "receivedAtUtc": "2026-08-13T13:24:16.385723Z",
+          "sourceTimestampUtc": "2026-08-13T08:24:18.618Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 117.853813
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:24:46.38367Z",
+          "receivedAtUtc": "2026-08-13T13:24:46.38367Z",
+          "sourceTimestampUtc": "2026-08-13T08:24:48.724Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.700775
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:25:16.397724Z",
+          "receivedAtUtc": "2026-08-13T13:25:16.397724Z",
+          "sourceTimestampUtc": "2026-08-13T08:25:18.822Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.700775
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:25:46.38648Z",
+          "receivedAtUtc": "2026-08-13T13:25:46.38648Z",
+          "sourceTimestampUtc": "2026-08-13T08:25:48.433Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 117.853813
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:26:16.376539Z",
+          "receivedAtUtc": "2026-08-13T13:26:16.376539Z",
+          "sourceTimestampUtc": "2026-08-13T08:26:18.534Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.700775
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:26:46.38063Z",
+          "receivedAtUtc": "2026-08-13T13:26:46.38063Z",
+          "sourceTimestampUtc": "2026-08-13T08:26:48.635Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 117.853813
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:27:16.394482Z",
+          "receivedAtUtc": "2026-08-13T13:27:16.394482Z",
+          "sourceTimestampUtc": "2026-08-13T08:27:18.737Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 117.853813
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:27:46.397881Z",
+          "receivedAtUtc": "2026-08-13T13:27:46.397881Z",
+          "sourceTimestampUtc": "2026-08-13T08:27:48.832Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.700775
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:28:16.399397Z",
+          "receivedAtUtc": "2026-08-13T13:28:16.399397Z",
+          "sourceTimestampUtc": "2026-08-13T08:28:18.925Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 117.853813
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:28:46.385679Z",
+          "receivedAtUtc": "2026-08-13T13:28:46.385679Z",
+          "sourceTimestampUtc": "2026-08-13T08:28:48.524Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.700775
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:29:16.383623Z",
+          "receivedAtUtc": "2026-08-13T13:29:16.383623Z",
+          "sourceTimestampUtc": "2026-08-13T08:29:18.637Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.700775
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:30:16.384042Z",
+          "receivedAtUtc": "2026-08-13T13:30:16.384042Z",
+          "sourceTimestampUtc": "2026-08-13T08:30:18.846Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 117.853813
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:30:46.394886Z",
+          "receivedAtUtc": "2026-08-13T13:30:46.394886Z",
+          "sourceTimestampUtc": "2026-08-13T08:30:48.944Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.700775
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:31:16.381455Z",
+          "receivedAtUtc": "2026-08-13T13:31:16.381455Z",
+          "sourceTimestampUtc": "2026-08-13T08:31:18.546Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.700775
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:31:46.385364Z",
+          "receivedAtUtc": "2026-08-13T13:31:46.385364Z",
+          "sourceTimestampUtc": "2026-08-13T08:31:48.648Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.700775
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:32:16.378968Z",
+          "receivedAtUtc": "2026-08-13T13:32:16.378968Z",
+          "sourceTimestampUtc": "2026-08-13T08:32:18.752Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.700775
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:32:46.440203Z",
+          "receivedAtUtc": "2026-08-13T13:32:46.440203Z",
+          "sourceTimestampUtc": "2026-08-13T08:32:48.856Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 117.853813
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:33:16.407274Z",
+          "receivedAtUtc": "2026-08-13T13:33:16.407274Z",
+          "sourceTimestampUtc": "2026-08-13T08:33:18.959Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.700775
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:33:46.391495Z",
+          "receivedAtUtc": "2026-08-13T13:33:46.391495Z",
+          "sourceTimestampUtc": "2026-08-13T08:33:49.063Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 117.853813
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:34:16.399104Z",
+          "receivedAtUtc": "2026-08-13T13:34:16.399104Z",
+          "sourceTimestampUtc": "2026-08-13T08:34:18.669Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 117.853813
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:34:46.40897Z",
+          "receivedAtUtc": "2026-08-13T13:34:46.40897Z",
+          "sourceTimestampUtc": "2026-08-13T08:34:48.771Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 117.853813
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:35:16.386958Z",
+          "receivedAtUtc": "2026-08-13T13:35:16.386958Z",
+          "sourceTimestampUtc": "2026-08-13T08:35:18.882Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.700775
+        },
+        {
+          "observedAtUtc": "2026-08-13T13:35:46.384799Z",
+          "receivedAtUtc": "2026-08-13T13:35:46.384799Z",
+          "sourceTimestampUtc": "2026-08-13T08:35:48.983Z",
+          "qualityState": "good",
+          "valueKind": "numeric",
+          "value": 108.700775
+        }
+      ],
+      "deckActiveEvidence": {
+        "seed": null,
+        "changes": []
+      },
+      "qa": "USEFUL",
+      "rationale": "The timestamped trace has at least five observations and a strong same-speed robust deviation."
+    }
+  ]
+}

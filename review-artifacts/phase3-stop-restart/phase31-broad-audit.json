@@ -1,0 +1,2030 @@
+{
+  "generatedAtUtc": "2026-08-14T00:35:38.558Z",
+  "sourceProduction": "http://10.8.10.97:8088",
+  "candidateServer": "http://127.0.0.1:8091",
+  "policy": {
+    "target": 10,
+    "selected": 10,
+    "strictThresholdsUnchanged": true,
+    "referenceHours": 24,
+    "chunkHours": 2,
+    "broadSet": "all capability-supported continuous identities in the curated Engineering Clue catalog"
+  },
+  "counts": {
+    "events": 10,
+    "broadSignalEventPairs": 817,
+    "currentSupportedSignalEventPairs": 578,
+    "comparableSignalEventPairs": 578,
+    "strongDeviations": 8,
+    "missedByOriginalSelector": 7,
+    "missedByImprovedSelector": 3
+  },
+  "performance": {
+    "requests": 351,
+    "retries": 0,
+    "responseBytes": 1208007637,
+    "aggregateRequestMs": 34734,
+    "wallMs": 55348
+  },
+  "reviewed": [
+    {
+      "pressKey": "press15",
+      "occurrenceId": "press15:2026-08-13T14:07:40.579Z:56",
+      "startUtc": "2026-08-13T14:07:40.579Z",
+      "operationalGroupName": "Maintenance Intervention",
+      "processFamilyName": "Mechanical / Electrical",
+      "exactIdentities": [
+        {
+          "identity": "B\u001f29\u001fElectrical: Press Other",
+          "eventType": "B",
+          "statusCode": "29",
+          "statusDescription": "Electrical: Press Other",
+          "durationSeconds": 60.279,
+          "needsClassification": false
+        }
+      ],
+      "stableRunningBefore": {
+        "supported": true,
+        "fromUtc": "2026-08-13T14:09:01.388785Z",
+        "toUtc": "2026-08-13T14:11:41.379157Z",
+        "durationSeconds": 159.991,
+        "bucket": "HIGH_SPEED_RUNNING",
+        "stats": {
+          "count": 4,
+          "mean": 1225.24049575,
+          "median": 1246.274965,
+          "p05": 956.58149755,
+          "p25": 1149.3950357499998,
+          "p75": 1322.120425,
+          "p95": 1464.451237,
+          "iqr": 172.72538925000026,
+          "minimum": 908.378113,
+          "maximum": 1500.03394
+        },
+        "changing": true,
+        "timeSincePreviousStoppedSeconds": 160.007,
+        "observationCount": 4,
+        "maximumGapSeconds": 140.002,
+        "boundaryGapSeconds": null,
+        "supportReason": "SUPPORTED"
+      },
+      "broadSignalCount": 56,
+      "currentSupportedSignalCount": 32,
+      "comparableSignalCount": 32,
+      "originalSelectorCount": 4,
+      "improvedSelectorCount": 12,
+      "improvedSelector": [
+        {
+          "canonicalId": "plate_cylinder.drive.torque.actual",
+          "deckNumber": 8,
+          "source": "activity"
+        },
+        {
+          "canonicalId": "anilox.drive.temperature.actual",
+          "deckNumber": 8,
+          "source": "activity"
+        },
+        {
+          "canonicalId": "ink.viscosity.actual",
+          "deckNumber": 8,
+          "source": "reserved"
+        },
+        {
+          "canonicalId": "ink.temperature.actual",
+          "deckNumber": 9,
+          "source": "reserved"
+        },
+        {
+          "canonicalId": "ink.viscosity.actual",
+          "deckNumber": 9,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "ink.viscosity.actual",
+          "deckNumber": 6,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.torque.actual",
+          "deckNumber": 9,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "anilox.drive.torque.actual",
+          "deckNumber": 8,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "anilox.drive.torque.actual",
+          "deckNumber": 9,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "anilox.drive.temperature.actual",
+          "deckNumber": 9,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "anilox.drive.torque.actual",
+          "deckNumber": 1,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "anilox.drive.torque.actual",
+          "deckNumber": 3,
+          "source": "condition"
+        }
+      ],
+      "strongDeviations": []
+    },
+    {
+      "pressKey": "press8",
+      "occurrenceId": "press8:2026-08-13T14:03:29.191Z:84",
+      "startUtc": "2026-08-13T14:03:29.191Z",
+      "operationalGroupName": "Fault & Recovery",
+      "processFamilyName": "Substrate",
+      "exactIdentities": [
+        {
+          "identity": "B\u001f125\u001fSubstrate - Other",
+          "eventType": "B",
+          "statusCode": "125",
+          "statusDescription": "Substrate - Other",
+          "durationSeconds": 1025.949,
+          "needsClassification": false
+        },
+        {
+          "identity": "B\u001f99\u001fPlates: Wash",
+          "eventType": "B",
+          "statusCode": "99",
+          "statusDescription": "Plates: Wash",
+          "durationSeconds": 733.893,
+          "needsClassification": false
+        }
+      ],
+      "stableRunningBefore": {
+        "supported": true,
+        "fromUtc": "2026-08-13T13:59:51.471282Z",
+        "toUtc": "2026-08-13T14:02:36.40218Z",
+        "durationSeconds": 164.931,
+        "bucket": "HIGH_SPEED_RUNNING",
+        "stats": {
+          "count": 4,
+          "mean": 1149.6735707500002,
+          "median": 1193.72034,
+          "p05": 938.30249355,
+          "p25": 1046.4975757500001,
+          "p75": 1296.8963350000001,
+          "p95": 1299.379171,
+          "iqr": 250.39875925,
+          "minimum": 911.253723,
+          "maximum": 1299.99988
+        },
+        "changing": true,
+        "timeSincePreviousStoppedSeconds": null,
+        "observationCount": 4,
+        "maximumGapSeconds": 154.921,
+        "boundaryGapSeconds": 300.053,
+        "supportReason": "SUPPORTED"
+      },
+      "broadSignalCount": 85,
+      "currentSupportedSignalCount": 46,
+      "comparableSignalCount": 46,
+      "originalSelectorCount": 12,
+      "improvedSelectorCount": 12,
+      "improvedSelector": [
+        {
+          "canonicalId": "anilox.drive.temperature.actual",
+          "deckNumber": 2,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "anilox.drive.temperature.actual",
+          "deckNumber": 10,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "dryer.tunnel.temperature.actual",
+          "deckNumber": null,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "web_tension.chill_draw.actual",
+          "deckNumber": null,
+          "source": "activity"
+        },
+        {
+          "canonicalId": "production.order.length.actual",
+          "deckNumber": null,
+          "source": "activity"
+        },
+        {
+          "canonicalId": "anilox.drive.torque.actual",
+          "deckNumber": 10,
+          "source": "reserved"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.temperature.actual",
+          "deckNumber": 6,
+          "source": "reserved"
+        },
+        {
+          "canonicalId": "ink.temperature.actual",
+          "deckNumber": 1,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "ink.pump.frequency.return",
+          "deckNumber": 1,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "ink.pump.frequency.return",
+          "deckNumber": 5,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "ink.pump.frequency.return",
+          "deckNumber": 7,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "ink.pump.frequency.supply",
+          "deckNumber": 1,
+          "source": "condition"
+        }
+      ],
+      "strongDeviations": []
+    },
+    {
+      "pressKey": "press13",
+      "occurrenceId": "press13:2026-08-13T13:03:11.276Z:49",
+      "startUtc": "2026-08-13T13:03:11.276Z",
+      "operationalGroupName": "Routine Process",
+      "processFamilyName": "Sleeves / Plates",
+      "exactIdentities": [
+        {
+          "identity": "B\u001f145-5\u001fPlate Up",
+          "eventType": "B",
+          "statusCode": "145-5",
+          "statusDescription": "Plate Up",
+          "durationSeconds": 421.969,
+          "needsClassification": false
+        }
+      ],
+      "stableRunningBefore": {
+        "supported": true,
+        "fromUtc": "2026-08-13T12:59:46.385886Z",
+        "toUtc": "2026-08-13T13:02:41.371531Z",
+        "durationSeconds": 174.986,
+        "bucket": "HIGH_SPEED_RUNNING",
+        "stats": {
+          "count": 5,
+          "mean": 1195.625037,
+          "median": 1222.02173,
+          "p05": 670.2239988,
+          "p25": 916.798462,
+          "p75": 1530.72473,
+          "p95": 1666.1448500000001,
+          "iqr": 613.9262679999999,
+          "minimum": 608.580383,
+          "maximum": 1699.99988
+        },
+        "changing": true,
+        "timeSincePreviousStoppedSeconds": null,
+        "observationCount": 5,
+        "maximumGapSeconds": 159.995,
+        "boundaryGapSeconds": 300.002,
+        "supportReason": "SUPPORTED"
+      },
+      "broadSignalCount": 95,
+      "currentSupportedSignalCount": 84,
+      "comparableSignalCount": 84,
+      "originalSelectorCount": 12,
+      "improvedSelectorCount": 12,
+      "improvedSelector": [
+        {
+          "canonicalId": "dryer.tunnel.temperature.actual",
+          "deckNumber": null,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.temperature.actual",
+          "deckNumber": 7,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.temperature.actual",
+          "deckNumber": 5,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.torque.actual",
+          "deckNumber": 1,
+          "source": "reserved"
+        },
+        {
+          "canonicalId": "rewind.tension.actual",
+          "deckNumber": null,
+          "source": "reserved"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.torque.actual",
+          "deckNumber": 7,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "ink.pump.frequency.supply",
+          "deckNumber": 1,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.torque.actual",
+          "deckNumber": 5,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "anilox.drive.torque.actual",
+          "deckNumber": 2,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.torque.actual",
+          "deckNumber": 10,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "anilox.drive.torque.actual",
+          "deckNumber": 10,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "anilox.drive.torque.actual",
+          "deckNumber": 8,
+          "source": "condition"
+        }
+      ],
+      "strongDeviations": [
+        {
+          "canonicalId": "ink.temperature.actual",
+          "deckNumber": 6,
+          "friendlyName": "Ink Temperature Actual",
+          "category": "temperature",
+          "current": {
+            "count": 36,
+            "mean": 92.34814768611118,
+            "median": 92.3863983,
+            "p05": 92.305397,
+            "p25": 92.305397,
+            "p75": 92.3863983,
+            "p95": 92.3863983,
+            "iqr": 0.08100129999999695,
+            "minimum": 92.305397,
+            "maximum": 92.3863983
+          },
+          "reference": {
+            "count": 5117,
+            "mean": 79.3237342942129,
+            "median": 77.7073975,
+            "p05": 76.6021957,
+            "p25": 76.9189987,
+            "p75": 78.8936005,
+            "p95": 92.1452026,
+            "iqr": 1.974601800000002,
+            "minimum": 76.1287994,
+            "maximum": 92.3863983
+          },
+          "robustDeviation": 3.778018894533174,
+          "direction": "ABOVE",
+          "currentTrace": [
+            {
+              "atUtc": "2026-08-13T12:59:46.385886Z",
+              "value": 92.3863983
+            },
+            {
+              "atUtc": "2026-08-13T12:59:51.373909Z",
+              "value": 92.305397
+            },
+            {
+              "atUtc": "2026-08-13T12:59:56.373011Z",
+              "value": 92.3863983
+            },
+            {
+              "atUtc": "2026-08-13T13:00:01.388619Z",
+              "value": 92.3863983
+            },
+            {
+              "atUtc": "2026-08-13T13:00:06.375432Z",
+              "value": 92.305397
+            },
+            {
+              "atUtc": "2026-08-13T13:00:11.40818Z",
+              "value": 92.305397
+            },
+            {
+              "atUtc": "2026-08-13T13:00:16.368774Z",
+              "value": 92.305397
+            },
+            {
+              "atUtc": "2026-08-13T13:00:21.406508Z",
+              "value": 92.3863983
+            },
+            {
+              "atUtc": "2026-08-13T13:00:26.370271Z",
+              "value": 92.3863983
+            },
+            {
+              "atUtc": "2026-08-13T13:00:31.411124Z",
+              "value": 92.305397
+            },
+            {
+              "atUtc": "2026-08-13T13:00:36.374207Z",
+              "value": 92.3863983
+            },
+            {
+              "atUtc": "2026-08-13T13:00:41.374161Z",
+              "value": 92.3863983
+            },
+            {
+              "atUtc": "2026-08-13T13:00:46.369631Z",
+              "value": 92.3863983
+            },
+            {
+              "atUtc": "2026-08-13T13:00:51.415376Z",
+              "value": 92.3863983
+            },
+            {
+              "atUtc": "2026-08-13T13:00:56.392835Z",
+              "value": 92.305397
+            },
+            {
+              "atUtc": "2026-08-13T13:01:01.378037Z",
+              "value": 92.3863983
+            },
+            {
+              "atUtc": "2026-08-13T13:01:06.374277Z",
+              "value": 92.3863983
+            },
+            {
+              "atUtc": "2026-08-13T13:01:11.420367Z",
+              "value": 92.3863983
+            },
+            {
+              "atUtc": "2026-08-13T13:01:16.36852Z",
+              "value": 92.305397
+            },
+            {
+              "atUtc": "2026-08-13T13:01:21.377821Z",
+              "value": 92.305397
+            },
+            {
+              "atUtc": "2026-08-13T13:01:26.379845Z",
+              "value": 92.305397
+            },
+            {
+              "atUtc": "2026-08-13T13:01:31.415101Z",
+              "value": 92.3863983
+            },
+            {
+              "atUtc": "2026-08-13T13:01:36.38293Z",
+              "value": 92.305397
+            },
+            {
+              "atUtc": "2026-08-13T13:01:41.379991Z",
+              "value": 92.305397
+            },
+            {
+              "atUtc": "2026-08-13T13:01:46.406899Z",
+              "value": 92.305397
+            },
+            {
+              "atUtc": "2026-08-13T13:01:51.367763Z",
+              "value": 92.3863983
+            },
+            {
+              "atUtc": "2026-08-13T13:01:56.377553Z",
+              "value": 92.3863983
+            },
+            {
+              "atUtc": "2026-08-13T13:02:01.382632Z",
+              "value": 92.3863983
+            },
+            {
+              "atUtc": "2026-08-13T13:02:06.390131Z",
+              "value": 92.305397
+            },
+            {
+              "atUtc": "2026-08-13T13:02:11.40528Z",
+              "value": 92.305397
+            },
+            {
+              "atUtc": "2026-08-13T13:02:16.4036Z",
+              "value": 92.3863983
+            },
+            {
+              "atUtc": "2026-08-13T13:02:21.375908Z",
+              "value": 92.305397
+            },
+            {
+              "atUtc": "2026-08-13T13:02:26.380387Z",
+              "value": 92.3863983
+            },
+            {
+              "atUtc": "2026-08-13T13:02:31.391707Z",
+              "value": 92.3863983
+            },
+            {
+              "atUtc": "2026-08-13T13:02:36.381218Z",
+              "value": 92.305397
+            },
+            {
+              "atUtc": "2026-08-13T13:02:41.371531Z",
+              "value": 92.305397
+            }
+          ],
+          "includedByOriginalSelector": false,
+          "includedByImprovedSelector": false,
+          "missReason": "no local clue and not one of four machine priorities"
+        },
+        {
+          "canonicalId": "anilox.drive.torque.actual",
+          "deckNumber": 5,
+          "friendlyName": "Anilox Drive Torque",
+          "category": "torque",
+          "current": {
+            "count": 18,
+            "mean": 7.316725171111112,
+            "median": 6.686664105,
+            "p05": 5.2648989429999995,
+            "p25": 5.9444986575000005,
+            "p75": 8.61052644,
+            "p95": 11.082716949999998,
+            "iqr": 2.6660277824999987,
+            "minimum": 4.91527271,
+            "maximum": 11.4057178
+          },
+          "reference": {
+            "count": 2609,
+            "mean": 15.086837633369116,
+            "median": 15.4499025,
+            "p05": 8.37546349,
+            "p25": 14.6895752,
+            "p75": 16.2222061,
+            "p95": 18.53071748,
+            "iqr": 1.532630900000001,
+            "minimum": 6.35140467,
+            "maximum": 25.3537159
+          },
+          "robustDeviation": 5.717774837372779,
+          "direction": "BELOW",
+          "currentTrace": [
+            {
+              "atUtc": "2026-08-13T12:59:46.385886Z",
+              "value": 6.83777761
+            },
+            {
+              "atUtc": "2026-08-13T12:59:56.373011Z",
+              "value": 5.76907396
+            },
+            {
+              "atUtc": "2026-08-13T13:00:06.375432Z",
+              "value": 6.58521795
+            },
+            {
+              "atUtc": "2026-08-13T13:00:16.368774Z",
+              "value": 5.41876793
+            },
+            {
+              "atUtc": "2026-08-13T13:00:26.370271Z",
+              "value": 7.68918657
+            },
+            {
+              "atUtc": "2026-08-13T13:00:36.374207Z",
+              "value": 8.91763973
+            },
+            {
+              "atUtc": "2026-08-13T13:00:46.369631Z",
+              "value": 10.0145788
+            },
+            {
+              "atUtc": "2026-08-13T13:00:56.392835Z",
+              "value": 11.4057178
+            },
+            {
+              "atUtc": "2026-08-13T13:01:06.374277Z",
+              "value": 11.0257168
+            },
+            {
+              "atUtc": "2026-08-13T13:01:16.36852Z",
+              "value": 9.04977322
+            },
+            {
+              "atUtc": "2026-08-13T13:01:26.379845Z",
+              "value": 6.78811026
+            },
+            {
+              "atUtc": "2026-08-13T13:01:36.38293Z",
+              "value": 6.16396284
+            },
+            {
+              "atUtc": "2026-08-13T13:01:46.406899Z",
+              "value": 5.9375391
+            },
+            {
+              "atUtc": "2026-08-13T13:01:56.377553Z",
+              "value": 5.32659769
+            },
+            {
+              "atUtc": "2026-08-13T13:02:06.390131Z",
+              "value": 6.49418259
+            },
+            {
+              "atUtc": "2026-08-13T13:02:16.4036Z",
+              "value": 5.96537733
+            },
+            {
+              "atUtc": "2026-08-13T13:02:26.380387Z",
+              "value": 7.39656019
+            },
+            {
+              "atUtc": "2026-08-13T13:02:36.381218Z",
+              "value": 4.91527271
+            }
+          ],
+          "includedByOriginalSelector": false,
+          "includedByImprovedSelector": false,
+          "missReason": "no local clue and not one of four machine priorities"
+        },
+        {
+          "canonicalId": "anilox.drive.torque.actual",
+          "deckNumber": 10,
+          "friendlyName": "Anilox Drive Torque",
+          "category": "torque",
+          "current": {
+            "count": 18,
+            "mean": -10.836216388333334,
+            "median": -10.8108258,
+            "p05": -12.33430471,
+            "p25": -11.544549974999999,
+            "p75": -9.8731310275,
+            "p95": -9.464412686,
+            "iqr": 1.6714189474999994,
+            "minimum": -12.4394798,
+            "maximum": -9.45925713
+          },
+          "reference": {
+            "count": 2609,
+            "mean": -21.218456510187817,
+            "median": -21.7639599,
+            "p05": -25.56112744,
+            "p25": -23.0770378,
+            "p75": -20.239603,
+            "p95": -13.24694808,
+            "iqr": 2.8374348000000005,
+            "minimum": -35.3245125,
+            "maximum": -9.81999969
+          },
+          "robustDeviation": 3.8602240657653164,
+          "direction": "ABOVE",
+          "currentTrace": [
+            {
+              "atUtc": "2026-08-13T12:59:46.385886Z",
+              "value": -12.0247402
+            },
+            {
+              "atUtc": "2026-08-13T12:59:56.373011Z",
+              "value": -10.8592424
+            },
+            {
+              "atUtc": "2026-08-13T13:00:06.375432Z",
+              "value": -10.6664524
+            },
+            {
+              "atUtc": "2026-08-13T13:00:16.368774Z",
+              "value": -12.3157444
+            },
+            {
+              "atUtc": "2026-08-13T13:00:26.370271Z",
+              "value": -11.2596979
+            },
+            {
+              "atUtc": "2026-08-13T13:00:36.374207Z",
+              "value": -9.46532249
+            },
+            {
+              "atUtc": "2026-08-13T13:00:46.369631Z",
+              "value": -9.82235527
+            },
+            {
+              "atUtc": "2026-08-13T13:00:56.392835Z",
+              "value": -11.5466862
+            },
+            {
+              "atUtc": "2026-08-13T13:01:06.374277Z",
+              "value": -11.9038877
+            },
+            {
+              "atUtc": "2026-08-13T13:01:16.36852Z",
+              "value": -9.54911232
+            },
+            {
+              "atUtc": "2026-08-13T13:01:26.379845Z",
+              "value": -10.0254583
+            },
+            {
+              "atUtc": "2026-08-13T13:01:36.38293Z",
+              "value": -11.4820938
+            },
+            {
+              "atUtc": "2026-08-13T13:01:46.406899Z",
+              "value": -10.1897745
+            },
+            {
+              "atUtc": "2026-08-13T13:01:56.377553Z",
+              "value": -9.74203968
+            },
+            {
+              "atUtc": "2026-08-13T13:02:06.390131Z",
+              "value": -11.5381413
+            },
+            {
+              "atUtc": "2026-08-13T13:02:16.4036Z",
+              "value": -10.7624092
+            },
+            {
+              "atUtc": "2026-08-13T13:02:26.380387Z",
+              "value": -12.4394798
+            },
+            {
+              "atUtc": "2026-08-13T13:02:36.381218Z",
+              "value": -9.45925713
+            }
+          ],
+          "includedByOriginalSelector": false,
+          "includedByImprovedSelector": true,
+          "missReason": "no local clue and not one of four machine priorities"
+        }
+      ]
+    },
+    {
+      "pressKey": "press8",
+      "occurrenceId": "press8:2026-08-13T08:51:58.001Z:82",
+      "startUtc": "2026-08-13T08:51:58.001Z",
+      "operationalGroupName": "Routine Process",
+      "processFamilyName": "Cleaning / Wash",
+      "exactIdentities": [
+        {
+          "identity": "B\u001f354\u001fHousekeeping",
+          "eventType": "B",
+          "statusCode": "354",
+          "statusDescription": "Housekeeping",
+          "durationSeconds": 1446.429,
+          "needsClassification": false
+        }
+      ],
+      "stableRunningBefore": {
+        "supported": true,
+        "fromUtc": "2026-08-13T08:48:06.325521Z",
+        "toUtc": "2026-08-13T08:50:21.333907Z",
+        "durationSeconds": 135.008,
+        "bucket": "HIGH_SPEED_RUNNING",
+        "stats": {
+          "count": 5,
+          "mean": 1155.9062876,
+          "median": 1223.96057,
+          "p05": 813.995691,
+          "p25": 995.096619,
+          "p75": 1391.75403,
+          "p95": 1398.350614,
+          "iqr": 396.657411,
+          "minimum": 768.720459,
+          "maximum": 1399.99976
+        },
+        "changing": true,
+        "timeSincePreviousStoppedSeconds": 1410.011,
+        "observationCount": 5,
+        "maximumGapSeconds": 119.996,
+        "boundaryGapSeconds": 305.001,
+        "supportReason": "SUPPORTED"
+      },
+      "broadSignalCount": 85,
+      "currentSupportedSignalCount": 48,
+      "comparableSignalCount": 48,
+      "originalSelectorCount": 12,
+      "improvedSelectorCount": 12,
+      "improvedSelector": [
+        {
+          "canonicalId": "anilox.drive.temperature.actual",
+          "deckNumber": 1,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "anilox.drive.temperature.actual",
+          "deckNumber": 2,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "anilox.drive.temperature.actual",
+          "deckNumber": 3,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "ink.pump.frequency.return",
+          "deckNumber": 2,
+          "source": "activity"
+        },
+        {
+          "canonicalId": "anilox.drive.torque.actual",
+          "deckNumber": 10,
+          "source": "reserved"
+        },
+        {
+          "canonicalId": "rewind.tension.actual",
+          "deckNumber": null,
+          "source": "reserved"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.temperature.actual",
+          "deckNumber": 6,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.temperature.actual",
+          "deckNumber": 1,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "anilox.drive.temperature.actual",
+          "deckNumber": 6,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "anilox.drive.temperature.actual",
+          "deckNumber": 4,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.torque.actual",
+          "deckNumber": 1,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "anilox.drive.temperature.actual",
+          "deckNumber": 9,
+          "source": "condition"
+        }
+      ],
+      "strongDeviations": []
+    },
+    {
+      "pressKey": "press13",
+      "occurrenceId": "press13:2026-08-13T08:08:45.267Z:46",
+      "startUtc": "2026-08-13T08:08:45.267Z",
+      "operationalGroupName": "Waiting, Idle & Hold",
+      "processFamilyName": "Unknown",
+      "exactIdentities": [
+        {
+          "identity": "B\u001f450\u001fNon Productive",
+          "eventType": "B",
+          "statusCode": "450",
+          "statusDescription": "Non Productive",
+          "durationSeconds": 603.014,
+          "needsClassification": false
+        }
+      ],
+      "stableRunningBefore": {
+        "supported": true,
+        "fromUtc": "2026-08-13T07:59:56.317668Z",
+        "toUtc": "2026-08-13T08:03:11.301745Z",
+        "durationSeconds": 194.984,
+        "bucket": "HIGH_SPEED_RUNNING",
+        "stats": {
+          "count": 6,
+          "mean": 1320.223205,
+          "median": 1388.1843250000002,
+          "p05": 695.7456055,
+          "p25": 1004.06220925,
+          "p75": 1734.7395625,
+          "p95": 1799.84259,
+          "iqr": 730.6773532499999,
+          "minimum": 618.691101,
+          "maximum": 1800
+        },
+        "changing": true,
+        "timeSincePreviousStoppedSeconds": null,
+        "observationCount": 6,
+        "maximumGapSeconds": 174.997,
+        "boundaryGapSeconds": 300.002,
+        "supportReason": "SUPPORTED"
+      },
+      "broadSignalCount": 95,
+      "currentSupportedSignalCount": 74,
+      "comparableSignalCount": 74,
+      "originalSelectorCount": 12,
+      "improvedSelectorCount": 12,
+      "improvedSelector": [
+        {
+          "canonicalId": "anilox.drive.temperature.actual",
+          "deckNumber": 6,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "anilox.drive.temperature.actual",
+          "deckNumber": 10,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "anilox.drive.temperature.actual",
+          "deckNumber": 3,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.torque.actual",
+          "deckNumber": 1,
+          "source": "reserved"
+        },
+        {
+          "canonicalId": "rewind.tension.actual",
+          "deckNumber": null,
+          "source": "reserved"
+        },
+        {
+          "canonicalId": "ink.viscosity.actual",
+          "deckNumber": 4,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "doctor_blade.pressure",
+          "deckNumber": 3,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "doctor_blade.pressure",
+          "deckNumber": 4,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "doctor_blade.pressure",
+          "deckNumber": 9,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "anilox.drive.temperature.actual",
+          "deckNumber": 4,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.temperature.actual",
+          "deckNumber": 4,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "ink.viscosity.actual",
+          "deckNumber": 1,
+          "source": "condition"
+        }
+      ],
+      "strongDeviations": []
+    },
+    {
+      "pressKey": "press12",
+      "occurrenceId": "press12:2026-08-13T04:19:40.035Z:51",
+      "startUtc": "2026-08-13T04:19:40.035Z",
+      "operationalGroupName": "Adjustment & Quality",
+      "processFamilyName": "Impression / Register / Print Quality",
+      "exactIdentities": [
+        {
+          "identity": "B\u001f145-2\u001fPoor Print",
+          "eventType": "B",
+          "statusCode": "145-2",
+          "statusDescription": "Poor Print",
+          "durationSeconds": 1448.063,
+          "needsClassification": false
+        }
+      ],
+      "stableRunningBefore": {
+        "supported": true,
+        "fromUtc": "2026-08-13T04:14:41.249865Z",
+        "toUtc": "2026-08-13T04:16:46.230824Z",
+        "durationSeconds": 124.981,
+        "bucket": "HIGH_SPEED_RUNNING",
+        "stats": {
+          "count": 5,
+          "mean": 1110.6440188000001,
+          "median": 1125.86438,
+          "p05": 722.7204833999999,
+          "p25": 901.705933,
+          "p75": 1347.67566,
+          "p95": 1469.535132,
+          "iqr": 445.96972700000015,
+          "minimum": 677.974121,
+          "maximum": 1500
+        },
+        "changing": true,
+        "timeSincePreviousStoppedSeconds": null,
+        "observationCount": 5,
+        "maximumGapSeconds": 109.985,
+        "boundaryGapSeconds": 304.99,
+        "supportReason": "SUPPORTED"
+      },
+      "broadSignalCount": 95,
+      "currentSupportedSignalCount": 74,
+      "comparableSignalCount": 74,
+      "originalSelectorCount": 12,
+      "improvedSelectorCount": 12,
+      "improvedSelector": [
+        {
+          "canonicalId": "anilox.drive.temperature.actual",
+          "deckNumber": 4,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "dryer.tunnel.temperature.actual",
+          "deckNumber": null,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.temperature.actual",
+          "deckNumber": 7,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.torque.actual",
+          "deckNumber": 1,
+          "source": "activity"
+        },
+        {
+          "canonicalId": "production.order.length.actual",
+          "deckNumber": null,
+          "source": "activity"
+        },
+        {
+          "canonicalId": "rewind.tension.actual",
+          "deckNumber": null,
+          "source": "reserved"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.temperature.actual",
+          "deckNumber": 1,
+          "source": "reserved"
+        },
+        {
+          "canonicalId": "ink.pump.frequency.supply",
+          "deckNumber": 2,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "ink.pump.frequency.supply",
+          "deckNumber": 9,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "ink.pump.frequency.supply",
+          "deckNumber": 5,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "doctor_blade.pressure",
+          "deckNumber": 3,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.torque.actual",
+          "deckNumber": 3,
+          "source": "condition"
+        }
+      ],
+      "strongDeviations": []
+    },
+    {
+      "pressKey": "press15",
+      "occurrenceId": "press15:2026-08-13T03:07:18.151Z:50",
+      "startUtc": "2026-08-13T03:07:18.151Z",
+      "operationalGroupName": "Routine Process",
+      "processFamilyName": "Cleaning / Wash",
+      "exactIdentities": [
+        {
+          "identity": "B\u001f145-4\u001fPlate Wash",
+          "eventType": "B",
+          "statusCode": "145-4",
+          "statusDescription": "Plate Wash",
+          "durationSeconds": 1327.82,
+          "needsClassification": false
+        }
+      ],
+      "stableRunningBefore": {
+        "supported": true,
+        "fromUtc": "2026-08-13T03:03:11.199096Z",
+        "toUtc": "2026-08-13T03:05:21.19887Z",
+        "durationSeconds": 129.999,
+        "bucket": "HIGH_SPEED_RUNNING",
+        "stats": {
+          "count": 3,
+          "mean": 1221.4516596666667,
+          "median": 1428.97864,
+          "p05": 804.7050421,
+          "p25": 1082.1599745,
+          "p75": 1464.5068350000001,
+          "p95": 1492.929391,
+          "iqr": 382.34686050000005,
+          "minimum": 735.341309,
+          "maximum": 1500.03503
+        },
+        "changing": true,
+        "timeSincePreviousStoppedSeconds": null,
+        "observationCount": 3,
+        "maximumGapSeconds": 120,
+        "boundaryGapSeconds": 300.001,
+        "supportReason": "SUPPORTED"
+      },
+      "broadSignalCount": 56,
+      "currentSupportedSignalCount": 33,
+      "comparableSignalCount": 33,
+      "originalSelectorCount": 12,
+      "improvedSelectorCount": 12,
+      "improvedSelector": [
+        {
+          "canonicalId": "plate_cylinder.drive.temperature.actual",
+          "deckNumber": 3,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.temperature.actual",
+          "deckNumber": 2,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.temperature.actual",
+          "deckNumber": 1,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "ink.viscosity.actual",
+          "deckNumber": 8,
+          "source": "activity"
+        },
+        {
+          "canonicalId": "ink.temperature.actual",
+          "deckNumber": 8,
+          "source": "activity"
+        },
+        {
+          "canonicalId": "anilox.drive.torque.actual",
+          "deckNumber": 8,
+          "source": "reserved"
+        },
+        {
+          "canonicalId": "anilox.drive.temperature.actual",
+          "deckNumber": 9,
+          "source": "reserved"
+        },
+        {
+          "canonicalId": "ink.viscosity.actual",
+          "deckNumber": 9,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "anilox.drive.torque.actual",
+          "deckNumber": 9,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "ink.viscosity.actual",
+          "deckNumber": 6,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.torque.actual",
+          "deckNumber": 8,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.torque.actual",
+          "deckNumber": 9,
+          "source": "condition"
+        }
+      ],
+      "strongDeviations": []
+    },
+    {
+      "pressKey": "press12",
+      "occurrenceId": "press12:2026-08-13T01:16:47.112Z:49",
+      "startUtc": "2026-08-13T01:16:47.112Z",
+      "operationalGroupName": "Adjustment & Quality",
+      "processFamilyName": "Impression / Register / Print Quality",
+      "exactIdentities": [
+        {
+          "identity": "B\u001f145-2\u001fPoor Print",
+          "eventType": "B",
+          "statusCode": "145-2",
+          "statusDescription": "Poor Print",
+          "durationSeconds": 1688.334,
+          "needsClassification": false
+        }
+      ],
+      "stableRunningBefore": {
+        "supported": true,
+        "fromUtc": "2026-08-13T01:13:51.1882Z",
+        "toUtc": "2026-08-13T01:16:26.183386Z",
+        "durationSeconds": 154.995,
+        "bucket": "HIGH_SPEED_RUNNING",
+        "stats": {
+          "count": 11,
+          "mean": 1157.0435357272727,
+          "median": 1210.50928,
+          "p05": 749.527344,
+          "p25": 945.5496224999999,
+          "p75": 1421.9928,
+          "p95": 1499.924685,
+          "iqr": 476.44317750000005,
+          "minimum": 702.493042,
+          "maximum": 1500
+        },
+        "changing": true,
+        "timeSincePreviousStoppedSeconds": 69.988,
+        "observationCount": 11,
+        "maximumGapSeconds": 109.968,
+        "boundaryGapSeconds": null,
+        "supportReason": "SUPPORTED"
+      },
+      "broadSignalCount": 95,
+      "currentSupportedSignalCount": 84,
+      "comparableSignalCount": 84,
+      "originalSelectorCount": 8,
+      "improvedSelectorCount": 12,
+      "improvedSelector": [
+        {
+          "canonicalId": "rewind.tension.actual",
+          "deckNumber": null,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "anilox.drive.temperature.actual",
+          "deckNumber": 10,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "anilox.drive.temperature.actual",
+          "deckNumber": 9,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "anilox.drive.torque.actual",
+          "deckNumber": 5,
+          "source": "activity"
+        },
+        {
+          "canonicalId": "production.order.length.actual",
+          "deckNumber": null,
+          "source": "activity"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.temperature.actual",
+          "deckNumber": 6,
+          "source": "reserved"
+        },
+        {
+          "canonicalId": "ink.viscosity.actual",
+          "deckNumber": 7,
+          "source": "reserved"
+        },
+        {
+          "canonicalId": "ink.pump.frequency.supply",
+          "deckNumber": 9,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "ink.pump.frequency.return",
+          "deckNumber": 8,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "ink.pump.frequency.supply",
+          "deckNumber": 5,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "ink.pump.frequency.return",
+          "deckNumber": 6,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "ink.pump.frequency.supply",
+          "deckNumber": 10,
+          "source": "condition"
+        }
+      ],
+      "strongDeviations": [
+        {
+          "canonicalId": "ink.viscosity.actual",
+          "deckNumber": 7,
+          "friendlyName": "Viscosity Actual",
+          "category": "viscosity",
+          "current": {
+            "count": 31,
+            "mean": 6.554516080645161,
+            "median": 0,
+            "p05": 0,
+            "p25": 0,
+            "p75": 22.4899998,
+            "p95": 22.6100006,
+            "iqr": 22.4899998,
+            "minimum": 0,
+            "maximum": 22.7299995
+          },
+          "reference": {
+            "count": 2409,
+            "mean": 22.233088422083778,
+            "median": 22.6100006,
+            "p05": 18.4099998,
+            "p25": 22.3600006,
+            "p75": 22.8799992,
+            "p95": 23.1700001,
+            "iqr": 0.519998600000001,
+            "minimum": 17.4699993,
+            "maximum": 23.9099998
+          },
+          "robustDeviation": 19.999999999999996,
+          "direction": "BELOW",
+          "currentTrace": [
+            {
+              "atUtc": "2026-08-13T01:13:51.1882Z",
+              "value": 0
+            },
+            {
+              "atUtc": "2026-08-13T01:13:56.21112Z",
+              "value": 0
+            },
+            {
+              "atUtc": "2026-08-13T01:14:01.189909Z",
+              "value": 0
+            },
+            {
+              "atUtc": "2026-08-13T01:14:06.199152Z",
+              "value": 0
+            },
+            {
+              "atUtc": "2026-08-13T01:14:11.205589Z",
+              "value": 0
+            },
+            {
+              "atUtc": "2026-08-13T01:14:16.181942Z",
+              "value": 0
+            },
+            {
+              "atUtc": "2026-08-13T01:14:21.211783Z",
+              "value": 0
+            },
+            {
+              "atUtc": "2026-08-13T01:14:26.186883Z",
+              "value": 0
+            },
+            {
+              "atUtc": "2026-08-13T01:14:31.186314Z",
+              "value": 0
+            },
+            {
+              "atUtc": "2026-08-13T01:14:36.182444Z",
+              "value": 0
+            },
+            {
+              "atUtc": "2026-08-13T01:14:41.187836Z",
+              "value": 0
+            },
+            {
+              "atUtc": "2026-08-13T01:14:46.190598Z",
+              "value": 0
+            },
+            {
+              "atUtc": "2026-08-13T01:14:51.191228Z",
+              "value": 0
+            },
+            {
+              "atUtc": "2026-08-13T01:14:56.200387Z",
+              "value": 0
+            },
+            {
+              "atUtc": "2026-08-13T01:15:01.177379Z",
+              "value": 0
+            },
+            {
+              "atUtc": "2026-08-13T01:15:06.184604Z",
+              "value": 0
+            },
+            {
+              "atUtc": "2026-08-13T01:15:11.219604Z",
+              "value": 0
+            },
+            {
+              "atUtc": "2026-08-13T01:15:16.229001Z",
+              "value": 0
+            },
+            {
+              "atUtc": "2026-08-13T01:15:21.182919Z",
+              "value": 0
+            },
+            {
+              "atUtc": "2026-08-13T01:15:26.187331Z",
+              "value": 0
+            },
+            {
+              "atUtc": "2026-08-13T01:15:31.186374Z",
+              "value": 0
+            },
+            {
+              "atUtc": "2026-08-13T01:15:36.179591Z",
+              "value": 0
+            },
+            {
+              "atUtc": "2026-08-13T01:15:41.182908Z",
+              "value": 22.4899998
+            },
+            {
+              "atUtc": "2026-08-13T01:15:51.183744Z",
+              "value": 22.4899998
+            },
+            {
+              "atUtc": "2026-08-13T01:15:56.196947Z",
+              "value": 22.5499992
+            },
+            {
+              "atUtc": "2026-08-13T01:16:01.190185Z",
+              "value": 22.5499992
+            },
+            {
+              "atUtc": "2026-08-13T01:16:06.21788Z",
+              "value": 22.5499992
+            },
+            {
+              "atUtc": "2026-08-13T01:16:11.179931Z",
+              "value": 22.6100006
+            },
+            {
+              "atUtc": "2026-08-13T01:16:16.183201Z",
+              "value": 22.6100006
+            },
+            {
+              "atUtc": "2026-08-13T01:16:21.189378Z",
+              "value": 22.6100006
+            },
+            {
+              "atUtc": "2026-08-13T01:16:26.183386Z",
+              "value": 22.7299995
+            }
+          ],
+          "includedByOriginalSelector": false,
+          "includedByImprovedSelector": true,
+          "missReason": "no local clue and not one of four machine priorities"
+        }
+      ]
+    },
+    {
+      "pressKey": "press12",
+      "occurrenceId": "press12:2026-08-13T00:29:29.526Z:48",
+      "startUtc": "2026-08-13T00:29:29.526Z",
+      "operationalGroupName": "Routine Process",
+      "processFamilyName": "Cleaning / Wash",
+      "exactIdentities": [
+        {
+          "identity": "B\u001f145-4\u001fPlate Wash",
+          "eventType": "B",
+          "statusCode": "145-4",
+          "statusDescription": "Plate Wash",
+          "durationSeconds": 1087.324,
+          "needsClassification": false
+        },
+        {
+          "identity": "B\u001f145-2\u001fPoor Print",
+          "eventType": "B",
+          "statusCode": "145-2",
+          "statusDescription": "Poor Print",
+          "durationSeconds": 482.411,
+          "needsClassification": false
+        }
+      ],
+      "stableRunningBefore": {
+        "supported": true,
+        "fromUtc": "2026-08-13T00:23:36.250425Z",
+        "toUtc": "2026-08-13T00:26:21.173355Z",
+        "durationSeconds": 164.923,
+        "bucket": "HIGH_SPEED_RUNNING",
+        "stats": {
+          "count": 5,
+          "mean": 1162.8802985999998,
+          "median": 1190.67969,
+          "p05": 789.0719362,
+          "p25": 966.521057,
+          "p75": 1412.49097,
+          "p95": 1482.49829,
+          "iqr": 445.969913,
+          "minimum": 744.709656,
+          "maximum": 1500.00012
+        },
+        "changing": true,
+        "timeSincePreviousStoppedSeconds": null,
+        "observationCount": 5,
+        "maximumGapSeconds": 149.929,
+        "boundaryGapSeconds": 300.052,
+        "supportReason": "SUPPORTED"
+      },
+      "broadSignalCount": 95,
+      "currentSupportedSignalCount": 74,
+      "comparableSignalCount": 74,
+      "originalSelectorCount": 12,
+      "improvedSelectorCount": 12,
+      "improvedSelector": [
+        {
+          "canonicalId": "anilox.drive.temperature.actual",
+          "deckNumber": 10,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "anilox.drive.torque.actual",
+          "deckNumber": 10,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.temperature.actual",
+          "deckNumber": 1,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "ink.pump.frequency.supply",
+          "deckNumber": 9,
+          "source": "activity"
+        },
+        {
+          "canonicalId": "ink.viscosity.actual",
+          "deckNumber": 2,
+          "source": "activity"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.torque.actual",
+          "deckNumber": 1,
+          "source": "reserved"
+        },
+        {
+          "canonicalId": "rewind.tension.actual",
+          "deckNumber": null,
+          "source": "reserved"
+        },
+        {
+          "canonicalId": "ink.pump.frequency.return",
+          "deckNumber": 2,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "ink.pump.frequency.supply",
+          "deckNumber": 10,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "ink.pump.frequency.supply",
+          "deckNumber": 5,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "ink.pump.frequency.return",
+          "deckNumber": 6,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "ink.pump.frequency.return",
+          "deckNumber": 3,
+          "source": "condition"
+        }
+      ],
+      "strongDeviations": []
+    },
+    {
+      "pressKey": "press14",
+      "occurrenceId": "press14:2026-08-12T17:07:22.231Z:44",
+      "startUtc": "2026-08-12T17:07:22.231Z",
+      "operationalGroupName": "Fault & Recovery",
+      "processFamilyName": "Substrate",
+      "exactIdentities": [
+        {
+          "identity": "B\u001f326\u001fProblemas con el  Film",
+          "eventType": "B",
+          "statusCode": "326",
+          "statusDescription": "Problemas con el  Film",
+          "durationSeconds": 15955.637,
+          "needsClassification": false
+        }
+      ],
+      "stableRunningBefore": {
+        "supported": true,
+        "fromUtc": "2026-08-12T17:01:21.071132Z",
+        "toUtc": "2026-08-12T17:04:01.064516Z",
+        "durationSeconds": 159.993,
+        "bucket": "RUNNING",
+        "stats": {
+          "count": 3,
+          "mean": 905.4717003333334,
+          "median": 944.000977,
+          "p05": 789.7478215,
+          "p25": 858.3047795,
+          "p75": 971.9032595,
+          "p95": 994.2250855,
+          "iqr": 113.59848,
+          "minimum": 772.608582,
+          "maximum": 999.805542
+        },
+        "changing": true,
+        "timeSincePreviousStoppedSeconds": 80.001,
+        "observationCount": 3,
+        "maximumGapSeconds": 150.001,
+        "boundaryGapSeconds": null,
+        "supportReason": "SUPPORTED"
+      },
+      "broadSignalCount": 60,
+      "currentSupportedSignalCount": 29,
+      "comparableSignalCount": 29,
+      "originalSelectorCount": 9,
+      "improvedSelectorCount": 12,
+      "improvedSelector": [
+        {
+          "canonicalId": "anilox.drive.temperature.actual",
+          "deckNumber": 4,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "ink.temperature.actual",
+          "deckNumber": 4,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "ink.temperature.actual",
+          "deckNumber": 5,
+          "source": "clue"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.torque.actual",
+          "deckNumber": 1,
+          "source": "reserved"
+        },
+        {
+          "canonicalId": "anilox.drive.temperature.actual",
+          "deckNumber": 2,
+          "source": "reserved"
+        },
+        {
+          "canonicalId": "ink.viscosity.actual",
+          "deckNumber": 5,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "ink.viscosity.actual",
+          "deckNumber": 9,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.torque.actual",
+          "deckNumber": 6,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "ink.temperature.actual",
+          "deckNumber": 9,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "anilox.drive.torque.actual",
+          "deckNumber": 10,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "anilox.drive.torque.actual",
+          "deckNumber": 2,
+          "source": "condition"
+        },
+        {
+          "canonicalId": "anilox.drive.torque.actual",
+          "deckNumber": 6,
+          "source": "condition"
+        }
+      ],
+      "strongDeviations": [
+        {
+          "canonicalId": "ink.viscosity.actual",
+          "deckNumber": 3,
+          "friendlyName": "Viscosity Actual",
+          "category": "viscosity",
+          "current": {
+            "count": 4,
+            "mean": 24.517499925,
+            "median": 24.5200005,
+            "p05": 24.48599965,
+            "p25": 24.510000249999997,
+            "p75": 24.527500175,
+            "p95": 24.545499394999997,
+            "iqr": 0.017499925000002747,
+            "minimum": 24.4799995,
+            "maximum": 24.5499992
+          },
+          "reference": {
+            "count": 24,
+            "mean": 4.940833333333333,
+            "median": 0,
+            "p05": 0,
+            "p25": 0,
+            "p75": 0,
+            "p95": 24.195999455,
+            "iqr": 0,
+            "minimum": 0,
+            "maximum": 24.3500004
+          },
+          "robustDeviation": 24520000499.999996,
+          "direction": "ABOVE",
+          "currentTrace": [
+            {
+              "atUtc": "2026-08-12T17:01:21.071132Z",
+              "value": 24.5200005
+            },
+            {
+              "atUtc": "2026-08-12T17:02:31.045291Z",
+              "value": 24.4799995
+            },
+            {
+              "atUtc": "2026-08-12T17:02:41.084653Z",
+              "value": 24.5200005
+            },
+            {
+              "atUtc": "2026-08-12T17:04:01.064516Z",
+              "value": 24.5499992
+            }
+          ],
+          "includedByOriginalSelector": false,
+          "includedByImprovedSelector": false,
+          "missReason": "no local clue and not one of four machine priorities"
+        },
+        {
+          "canonicalId": "ink.temperature.actual",
+          "deckNumber": 4,
+          "friendlyName": "Ink Temperature Actual",
+          "category": "temperature",
+          "current": {
+            "count": 5,
+            "mean": 91.23079378000001,
+            "median": 91.2624741,
+            "p05": 91.1832733,
+            "p25": 91.1832733,
+            "p75": 91.2624741,
+            "p95": 91.2624741,
+            "iqr": 0.07920080000000951,
+            "minimum": 91.1832733,
+            "maximum": 91.2624741
+          },
+          "reference": {
+            "count": 646,
+            "mean": 78.52425138111433,
+            "median": 78.2521744,
+            "p05": 77.1451874,
+            "p25": 77.8561783,
+            "p75": 78.6481781,
+            "p95": 78.9649734,
+            "iqr": 0.7919997999999993,
+            "minimum": 76.5925903,
+            "maximum": 90.9402771
+          },
+          "robustDeviation": 3.3252238164004306,
+          "direction": "ABOVE",
+          "currentTrace": [
+            {
+              "atUtc": "2026-08-12T17:02:41.084653Z",
+              "value": 91.2624741
+            },
+            {
+              "atUtc": "2026-08-12T17:02:51.0547Z",
+              "value": 91.1832733
+            },
+            {
+              "atUtc": "2026-08-12T17:03:06.050976Z",
+              "value": 91.2624741
+            },
+            {
+              "atUtc": "2026-08-12T17:03:16.083454Z",
+              "value": 91.1832733
+            },
+            {
+              "atUtc": "2026-08-12T17:04:01.064516Z",
+              "value": 91.2624741
+            }
+          ],
+          "includedByOriginalSelector": true,
+          "includedByImprovedSelector": true,
+          "missReason": null
+        },
+        {
+          "canonicalId": "anilox.drive.torque.actual",
+          "deckNumber": 6,
+          "friendlyName": "Anilox Drive Torque",
+          "category": "torque",
+          "current": {
+            "count": 17,
+            "mean": -0.6648474459411764,
+            "median": -0.953722656,
+            "p05": -1.14702907,
+            "p25": -1.05594742,
+            "p75": -0.668506205,
+            "p95": 0.3770199051999977,
+            "iqr": 0.38744121500000006,
+            "minimum": -1.26082635,
+            "maximum": 3.07331967
+          },
+          "reference": {
+            "count": 715,
+            "mean": 2.3897355144223766,
+            "median": 2.60587382,
+            "p05": -0.7183849334999999,
+            "p25": 2.4046310149999996,
+            "p75": 2.81181836,
+            "p95": 3.0589775089999995,
+            "iqr": 0.40718734500000053,
+            "minimum": -2.09552026,
+            "maximum": 4.68513966
+          },
+          "robustDeviation": 8.741913322478121,
+          "direction": "BELOW",
+          "currentTrace": [
+            {
+              "atUtc": "2026-08-12T17:01:21.071132Z",
+              "value": 3.07331967
+            },
+            {
+              "atUtc": "2026-08-12T17:01:31.063069Z",
+              "value": -0.297055036
+            },
+            {
+              "atUtc": "2026-08-12T17:01:41.073665Z",
+              "value": -0.97414577
+            },
+            {
+              "atUtc": "2026-08-12T17:01:51.066743Z",
+              "value": -1.11519337
+            },
+            {
+              "atUtc": "2026-08-12T17:02:01.052283Z",
+              "value": -1.11857975
+            },
+            {
+              "atUtc": "2026-08-12T17:02:11.0721Z",
+              "value": -1.07569122
+            },
+            {
+              "atUtc": "2026-08-12T17:02:21.100323Z",
+              "value": -0.902369618
+            },
+            {
+              "atUtc": "2026-08-12T17:02:31.045291Z",
+              "value": -0.877105713
+            },
+            {
+              "atUtc": "2026-08-12T17:02:41.084653Z",
+              "value": -0.668506205
+            },
+            {
+              "atUtc": "2026-08-12T17:02:51.0547Z",
+              "value": -0.488117337
+            },
+            {
+              "atUtc": "2026-08-12T17:03:01.050517Z",
+              "value": -0.953722656
+            },
+            {
+              "atUtc": "2026-08-12T17:03:16.083454Z",
+              "value": -1.05594742
+            },
+            {
+              "atUtc": "2026-08-12T17:03:26.051781Z",
+              "value": -1.26082635
+            },
+            {
+              "atUtc": "2026-08-12T17:03:36.092077Z",
+              "value": -1.00574207
+            },
+            {
+              "atUtc": "2026-08-12T17:03:41.051021Z",
+              "value": -1.02275896
+            },
+            {
+              "atUtc": "2026-08-12T17:03:51.06343Z",
+              "value": -0.941612542
+            },
+            {
+              "atUtc": "2026-08-12T17:04:01.064516Z",
+              "value": -0.618352234
+            }
+          ],
+          "includedByOriginalSelector": false,
+          "includedByImprovedSelector": true,
+          "missReason": "no local clue and not one of four machine priorities"
+        },
+        {
+          "canonicalId": "plate_cylinder.drive.torque.actual",
+          "deckNumber": 6,
+          "friendlyName": "Plate Cylinder Drive Torque",
+          "category": "torque",
+          "current": {
+            "count": 17,
+            "mean": -29.31595185647059,
+            "median": -30.9357281,
+            "p05": -36.196388240000005,
+            "p25": -31.9921055,
+            "p75": -27.9408817,
+            "p95": -20.409536732000007,
+            "iqr": 4.0512238000000025,
+            "minimum": -36.3340836,
+            "maximum": -9.76984406
+          },
+          "reference": {
+            "count": 715,
+            "mean": -5.033339989062937,
+            "median": -2.95820379,
+            "p05": -28.9932127,
+            "p25": -3.506572605,
+            "p75": -2.396982075,
+            "p95": -1.5596451880000008,
+            "iqr": 1.1095905300000002,
+            "minimum": -63.2186623,
+            "maximum": -0.92760855
+          },
+          "robustDeviation": 25.21427819864324,
+          "direction": "BELOW",
+          "currentTrace": [
+            {
+              "atUtc": "2026-08-12T17:01:21.071132Z",
+              "value": -9.76984406
+            },
+            {
+              "atUtc": "2026-08-12T17:01:31.063069Z",
+              "value": -30.9357281
+            },
+            {
+              "atUtc": "2026-08-12T17:01:41.073665Z",
+              "value": -27.9408817
+            },
+            {
+              "atUtc": "2026-08-12T17:01:51.066743Z",
+              "value": -32.1939774
+            },
+            {
+              "atUtc": "2026-08-12T17:02:01.052283Z",
+              "value": -30.3283577
+            },
+            {
+              "atUtc": "2026-08-12T17:02:11.0721Z",
+              "value": -31.141901
+            },
+            {
+              "atUtc": "2026-08-12T17:02:26.06797Z",
+              "value": -31.9888992
+            },
+            {
+              "atUtc": "2026-08-12T17:02:31.045291Z",
+              "value": -29.1758232
+            },
+            {
+              "atUtc": "2026-08-12T17:02:41.084653Z",
+              "value": -35.1232224
+            },
+            {
+              "atUtc": "2026-08-12T17:02:51.0547Z",
+              "value": -27.8120079
+            },
+            {
+              "atUtc": "2026-08-12T17:03:01.050517Z",
+              "value": -23.0694599
+            },
+            {
+              "atUtc": "2026-08-12T17:03:11.047464Z",
+              "value": -29.2302246
+            },
+            {
+              "atUtc": "2026-08-12T17:03:26.051781Z",
+              "value": -31.9921055
+            },
+            {
+              "atUtc": "2026-08-12T17:03:36.092077Z",
+              "value": -36.1619644
+            },
+            {
+              "atUtc": "2026-08-12T17:03:46.053446Z",
+              "value": -36.3340836
+            },
+            {
+              "atUtc": "2026-08-12T17:03:56.090411Z",
+              "value": -31.7395134
+            },
+            {
+              "atUtc": "2026-08-12T17:04:01.064516Z",
+              "value": -23.4331875
+            }
+          ],
+          "includedByOriginalSelector": false,
+          "includedByImprovedSelector": true,
+          "missReason": "no local clue and not one of four machine priorities"
+        }
+      ]
+    }
+  ]
+}

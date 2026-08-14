@@ -35,6 +35,16 @@ describe('Phase 3 stop/restart client integration', () => {
     assert.match(panel, /data\.noFlagMessage/)
     assert.match(clues, /onView={openInspectorTarget}/)
     assert.match(clues, /onPin={pinState\.pin}/)
+    assert.match(panel, /data\.preStopFlags\.length \? <section/)
+    assert.match(panel, /The Engineering Inspector remains available for direct trace review/)
+  })
+
+  it('distinguishes raw restart excursions from failed-running attempts', () => {
+    assert.match(panel, /Brief low-speed excursion/)
+    assert.match(panel, /Failed running attempt/)
+    assert.match(panel, /Reached ≥600, then returned to STOPPED/)
+    assert.match(panel, /Sustained physical running resumed/)
+    assert.doesNotMatch(panel, /<h3>Restart attempts<\/h3>/)
   })
 
   it('cancels stale stop analysis and keeps existing evidence usable on failure', () => {

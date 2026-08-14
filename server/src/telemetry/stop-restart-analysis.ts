@@ -9,6 +9,7 @@ export const PHYSICAL_SPEED_POLICY = {
   detailedWindowBeforeMs: 30 * 60_000,
   detailedWindowAfterMs: 90 * 60_000,
   sustainedRunningConfirmationMs: 120_000,
+  speedContinuityMaximumGapMs: 330_000,
   speedAlignmentMaximumAgeMs: 180_000,
   stableRunningMinimumObservations: 3,
   stableRunningMinimumDurationMs: 120_000,
@@ -27,6 +28,11 @@ export const PRE_STOP_REFERENCE_POLICY = {
   minimumRelativeShift: 0.1,
 } as const
 
+export const RESTART_EXCURSION_POLICY = {
+  briefLowSpeedMaximumExclusive: 10,
+  briefLowSpeedMaximumDurationMs: 30_000,
+} as const
+
 export type PhysicalSpeedBucket = 'STOPPED' | 'LOW_TRANSITION' | 'RUNNING' | 'HIGH_SPEED_RUNNING'
 export type StopMatchStatus = 'MATCHED' | 'AMBIGUOUS' | 'NO_PHYSICAL_STOP_FOUND' | 'INSUFFICIENT_SPEED_EVIDENCE'
 
@@ -34,9 +40,11 @@ export interface NumericObservation { atUtc: string; value: number }
 export interface DescriptiveStats { count: number; mean: number; median: number; p05: number; p25: number; p75: number; p95: number; iqr: number; minimum: number; maximum: number }
 export interface PhysicalStopCandidate { atUtc: string; observedSpeed: number; previousObservedSpeed: number; radiusOffsetSeconds: number }
 export interface PhysicalStopMatch { status: StopMatchStatus; selected: PhysicalStopCandidate | null; candidates: PhysicalStopCandidate[]; speedObservationCount: number }
-export interface RunningWindow { supported: boolean; fromUtc: string | null; toUtc: string | null; durationSeconds: number | null; bucket: PhysicalSpeedBucket | null; stats: DescriptiveStats | null; changing: boolean | null; timeSincePreviousStoppedSeconds: number | null }
-export interface RestartAttempt { attempt: number; startUtc: string; endUtc: string | null; durationSeconds: number | null; maximumObservedSpeed: number; highestBucket: PhysicalSpeedBucket; returnedToStopped: boolean; sustainedRunning: boolean; sustainedConfirmedAtUtc: string | null }
-export interface StopPhases { stableRunningBefore: RunningWindow; deceleration: { fromUtc: string | null; toUtc: string | null }; stopped: { fromUtc: string; toUtc: string | null; durationSeconds: number | null }; restartAttempts: RestartAttempt[]; sustainedRunningAgain: RunningWindow; sustainedRunningReachedAtUtc: string | null; sustainedRunningConfirmedAtUtc: string | null }
+export type RunningWindowSupportReason = 'SUPPORTED' | 'NO_RUNNING_SAMPLE' | 'INSUFFICIENT_OBSERVATIONS' | 'DURATION_BELOW_MINIMUM' | 'HISTORIAN_GAP_EXCEEDED'
+export interface RunningWindow { supported: boolean; fromUtc: string | null; toUtc: string | null; durationSeconds: number | null; bucket: PhysicalSpeedBucket | null; stats: DescriptiveStats | null; changing: boolean | null; timeSincePreviousStoppedSeconds: number | null; observationCount: number; maximumGapSeconds: number | null; boundaryGapSeconds: number | null; supportReason: RunningWindowSupportReason }
+export type RestartExcursionClassification = 'BRIEF_LOW_SPEED_EXCURSION' | 'RESTART_EXCURSION' | 'FAILED_RUNNING_ATTEMPT' | 'SUSTAINED_PHYSICAL_RUNNING_RESUMED'
+export interface RestartAttempt { attempt: number; startUtc: string; endUtc: string | null; durationSeconds: number | null; maximumObservedSpeed: number; highestBucket: PhysicalSpeedBucket; speedObservationCount: number; reachedRunningAtOrAbove600: boolean; motionSupportsMovement: boolean | null; returnedToStopped: boolean; failedRunningAttempt: boolean; sustainedRunning: boolean; classification: RestartExcursionClassification; sustainedConfirmedAtUtc: string | null }
+export interface StopPhases { stableRunningBefore: RunningWindow; lastRunningSampleBeforeStopUtc: string | null; deceleration: { fromUtc: string | null; toUtc: string | null }; stopped: { fromUtc: string; toUtc: string | null; durationSeconds: number | null }; restartAttempts: RestartAttempt[]; sustainedRunningAgain: RunningWindow; sustainedRunningReachedAtUtc: string | null; sustainedRunningConfirmedAtUtc: string | null }
 export interface SpeedBucketReference { bucket: PhysicalSpeedBucket; stats: DescriptiveStats | null; observationCount: number; observedDurationSeconds: number; sharePercent: number; sustainedSpanCount: number }
 export interface AlignedBucketValues { values: Record<PhysicalSpeedBucket, number[]>; excludedWithoutFreshSpeed: number }
 export interface RadiusTimingObservation { occurrenceId: string; pressKey: string; displayName: string; matchStatus: StopMatchStatus; offsetSeconds: number | null }
@@ -117,12 +125,13 @@ function highestBucket(values: NumericObservation[]): PhysicalSpeedBucket {
 }
 
 function runningWindow(samples: NumericObservation[], startIndex: number, direction: 1 | -1): RunningWindow {
-  if (startIndex < 0 || startIndex >= samples.length) return { supported: false, fromUtc: null, toUtc: null, durationSeconds: null, bucket: null, stats: null, changing: null, timeSincePreviousStoppedSeconds: null }
+  const empty = (): RunningWindow => ({ supported: false, fromUtc: null, toUtc: null, durationSeconds: null, bucket: null, stats: null, changing: null, timeSincePreviousStoppedSeconds: null, observationCount: 0, maximumGapSeconds: null, boundaryGapSeconds: null, supportReason: 'NO_RUNNING_SAMPLE' })
+  if (startIndex < 0 || startIndex >= samples.length) return empty()
   const runningBucket = (value: number) => ['RUNNING', 'HIGH_SPEED_RUNNING'].includes(physicalSpeedBucket(value))
-  if (!runningBucket(samples[startIndex]!.value)) return { supported: false, fromUtc: null, toUtc: null, durationSeconds: null, bucket: null, stats: null, changing: null, timeSincePreviousStoppedSeconds: null }
+  if (!runningBucket(samples[startIndex]!.value)) return empty()
   let low = startIndex; let high = startIndex
-  while (low > 0 && runningBucket(samples[low - 1]!.value) && Date.parse(samples[low]!.atUtc) - Date.parse(samples[low - 1]!.atUtc) <= PHYSICAL_SPEED_POLICY.speedAlignmentMaximumAgeMs) low -= 1
-  while (high < samples.length - 1 && runningBucket(samples[high + 1]!.value) && Date.parse(samples[high + 1]!.atUtc) - Date.parse(samples[high]!.atUtc) <= PHYSICAL_SPEED_POLICY.speedAlignmentMaximumAgeMs) high += 1
+  while (low > 0 && runningBucket(samples[low - 1]!.value) && Date.parse(samples[low]!.atUtc) - Date.parse(samples[low - 1]!.atUtc) <= PHYSICAL_SPEED_POLICY.speedContinuityMaximumGapMs) low -= 1
+  while (high < samples.length - 1 && runningBucket(samples[high + 1]!.value) && Date.parse(samples[high + 1]!.atUtc) - Date.parse(samples[high]!.atUtc) <= PHYSICAL_SPEED_POLICY.speedContinuityMaximumGapMs) high += 1
   if (direction < 0) high = startIndex
   else low = startIndex
   const values = samples.slice(low, high + 1)
@@ -131,7 +140,13 @@ function runningWindow(samples: NumericObservation[], startIndex: number, direct
   const durationSeconds = Math.max(0, (Date.parse(values.at(-1)!.atUtc) - Date.parse(values[0]!.atUtc)) / 1000)
   const stats = descriptiveStats(values.map(({ value }) => value))
   const priorStopped = samples.slice(0, low).reverse().find(({ value }) => physicalSpeedBucket(value) === 'STOPPED')
-  return { supported: values.length >= PHYSICAL_SPEED_POLICY.stableRunningMinimumObservations && durationSeconds * 1000 >= PHYSICAL_SPEED_POLICY.stableRunningMinimumDurationMs, fromUtc: values[0]!.atUtc, toUtc: values.at(-1)!.atUtc, durationSeconds, bucket, stats, changing: stats ? stats.iqr > Math.max(5, Math.abs(stats.median) * .08) : null, timeSincePreviousStoppedSeconds: priorStopped ? (Date.parse(values[0]!.atUtc) - Date.parse(priorStopped.atUtc)) / 1000 : null }
+  const gaps = values.slice(1).map((item, index) => (Date.parse(item.atUtc) - Date.parse(values[index]!.atUtc)) / 1000)
+  const boundary = direction < 0 ? samples[low - 1] : samples[high + 1]
+  const boundaryNeighbor = direction < 0 ? values[0] : values.at(-1)!
+  const boundaryGapSeconds = boundary && runningBucket(boundary.value) ? Math.abs(Date.parse(boundaryNeighbor.atUtc) - Date.parse(boundary.atUtc)) / 1000 : null
+  const supported = values.length >= PHYSICAL_SPEED_POLICY.stableRunningMinimumObservations && durationSeconds * 1000 >= PHYSICAL_SPEED_POLICY.stableRunningMinimumDurationMs
+  const supportReason: RunningWindowSupportReason = supported ? 'SUPPORTED' : boundaryGapSeconds !== null && boundaryGapSeconds * 1000 > PHYSICAL_SPEED_POLICY.speedContinuityMaximumGapMs ? 'HISTORIAN_GAP_EXCEEDED' : values.length < PHYSICAL_SPEED_POLICY.stableRunningMinimumObservations ? 'INSUFFICIENT_OBSERVATIONS' : 'DURATION_BELOW_MINIMUM'
+  return { supported, fromUtc: values[0]!.atUtc, toUtc: values.at(-1)!.atUtc, durationSeconds, bucket, stats, changing: stats ? stats.iqr > Math.max(5, Math.abs(stats.median) * .08) : null, timeSincePreviousStoppedSeconds: priorStopped ? (Date.parse(values[0]!.atUtc) - Date.parse(priorStopped.atUtc)) / 1000 : null, observationCount: values.length, maximumGapSeconds: gaps.length ? Math.max(...gaps) : null, boundaryGapSeconds, supportReason }
 }
 
 export function buildStopPhases(input: NumericObservation[], stop: PhysicalStopCandidate): StopPhases {
@@ -153,21 +168,27 @@ export function buildStopPhases(input: NumericObservation[], stop: PhysicalStopC
     while (end < samples.length && physicalSpeedBucket(samples[end]!.value) !== 'STOPPED') {
       const current = samples[end]!
       if (physicalSpeedBucket(current.value) === 'RUNNING' || physicalSpeedBucket(current.value) === 'HIGH_SPEED_RUNNING') {
-        const confirmed = samples.slice(end).find((candidate) => Date.parse(candidate.atUtc) - Date.parse(current.atUtc) >= PHYSICAL_SPEED_POLICY.sustainedRunningConfirmationMs && Date.parse(candidate.atUtc) - Date.parse(current.atUtc) <= PHYSICAL_SPEED_POLICY.sustainedRunningConfirmationMs + PHYSICAL_SPEED_POLICY.speedAlignmentMaximumAgeMs && samples.slice(end, samples.indexOf(candidate) + 1).every(({ value }) => ['RUNNING', 'HIGH_SPEED_RUNNING'].includes(physicalSpeedBucket(value))))
+        const confirmed = samples.slice(end).find((candidate) => Date.parse(candidate.atUtc) - Date.parse(current.atUtc) >= PHYSICAL_SPEED_POLICY.sustainedRunningConfirmationMs && Date.parse(candidate.atUtc) - Date.parse(current.atUtc) <= PHYSICAL_SPEED_POLICY.sustainedRunningConfirmationMs + PHYSICAL_SPEED_POLICY.speedContinuityMaximumGapMs && samples.slice(end, samples.indexOf(candidate) + 1).every(({ value }) => ['RUNNING', 'HIGH_SPEED_RUNNING'].includes(physicalSpeedBucket(value))))
         if (confirmed) { confirmation = confirmed; sustainedReachedAt = current.atUtc; sustainedConfirmedAt = confirmed.atUtc; break }
       }
       end += 1
     }
     const values = samples.slice(start, confirmation ? samples.indexOf(confirmation) + 1 : Math.min(end + 1, samples.length))
     const returned = !confirmation && end < samples.length && physicalSpeedBucket(samples[end]!.value) === 'STOPPED'
-    attempts.push({ attempt: attempts.length + 1, startUtc: samples[start]!.atUtc, endUtc: confirmation?.atUtc ?? (returned ? samples[end]!.atUtc : values.at(-1)?.atUtc ?? null), durationSeconds: (Date.parse(confirmation?.atUtc ?? (returned ? samples[end]!.atUtc : values.at(-1)?.atUtc ?? samples[start]!.atUtc)) - Date.parse(samples[start]!.atUtc)) / 1000, maximumObservedSpeed: Math.max(...values.map(({ value }) => Math.abs(value))), highestBucket: highestBucket(values), returnedToStopped: returned, sustainedRunning: Boolean(confirmation), sustainedConfirmedAtUtc: confirmation?.atUtc ?? null })
+    const endUtc = confirmation?.atUtc ?? (returned ? samples[end]!.atUtc : values.at(-1)?.atUtc ?? null)
+    const durationSeconds = (Date.parse(endUtc ?? samples[start]!.atUtc) - Date.parse(samples[start]!.atUtc)) / 1000
+    const maximumObservedSpeed = Math.max(...values.map(({ value }) => Math.abs(value)) )
+    const reachedRunningAtOrAbove600 = values.some(({ value }) => Math.abs(value) >= PHYSICAL_SPEED_POLICY.runningAt)
+    const failedRunningAttempt = returned && reachedRunningAtOrAbove600
+    const classification: RestartExcursionClassification = confirmation ? 'SUSTAINED_PHYSICAL_RUNNING_RESUMED' : failedRunningAttempt ? 'FAILED_RUNNING_ATTEMPT' : returned && maximumObservedSpeed < RESTART_EXCURSION_POLICY.briefLowSpeedMaximumExclusive && durationSeconds * 1000 <= RESTART_EXCURSION_POLICY.briefLowSpeedMaximumDurationMs ? 'BRIEF_LOW_SPEED_EXCURSION' : 'RESTART_EXCURSION'
+    attempts.push({ attempt: attempts.length + 1, startUtc: samples[start]!.atUtc, endUtc, durationSeconds, maximumObservedSpeed, highestBucket: highestBucket(values), speedObservationCount: values.length, reachedRunningAtOrAbove600, motionSupportsMovement: null, returnedToStopped: returned, failedRunningAttempt, sustainedRunning: Boolean(confirmation), classification, sustainedConfirmedAtUtc: confirmation?.atUtc ?? null })
     if (confirmation) break
     cursor = Math.max(end + 1, cursor + 1)
   }
   const sustainedIndex = sustainedReachedAt ? samples.findIndex(({ atUtc }) => atUtc === sustainedReachedAt) : -1
   const sustainedRunningAgain = runningWindow(samples, sustainedIndex, 1)
   const stoppedEnd = attempts[0]?.startUtc ?? null
-  return { stableRunningBefore, deceleration: { fromUtc: decelerationStart, toUtc: stop.atUtc }, stopped: { fromUtc: stop.atUtc, toUtc: stoppedEnd, durationSeconds: stoppedEnd ? (Date.parse(stoppedEnd) - Date.parse(stop.atUtc)) / 1000 : null }, restartAttempts: attempts, sustainedRunningAgain, sustainedRunningReachedAtUtc: sustainedReachedAt, sustainedRunningConfirmedAtUtc: sustainedConfirmedAt }
+  return { stableRunningBefore, lastRunningSampleBeforeStopUtc: lastRunning >= 0 ? samples[lastRunning]!.atUtc : null, deceleration: { fromUtc: decelerationStart, toUtc: stop.atUtc }, stopped: { fromUtc: stop.atUtc, toUtc: stoppedEnd, durationSeconds: stoppedEnd ? (Date.parse(stoppedEnd) - Date.parse(stop.atUtc)) / 1000 : null }, restartAttempts: attempts, sustainedRunningAgain, sustainedRunningReachedAtUtc: sustainedReachedAt, sustainedRunningConfirmedAtUtc: sustainedConfirmedAt }
 }
 
 export function alignSignalToSpeed(signal: NumericObservation[], speed: NumericObservation[]): AlignedBucketValues {
@@ -192,7 +213,7 @@ export function speedBucketReferences(speed: NumericObservation[], fromUtc: stri
     for (let index = 0; index < samples.length - 1; index += 1) {
       const same = physicalSpeedBucket(samples[index]!.value) === bucket
       if (same && !active) { spans += 1; active = true } else if (!same) active = false
-      if (same) durationMs += Math.min(PHYSICAL_SPEED_POLICY.speedAlignmentMaximumAgeMs, Math.max(0, Date.parse(samples[index + 1]!.atUtc) - Date.parse(samples[index]!.atUtc)))
+      if (same) durationMs += Math.min(PHYSICAL_SPEED_POLICY.speedContinuityMaximumGapMs, Math.max(0, Date.parse(samples[index + 1]!.atUtc) - Date.parse(samples[index]!.atUtc)))
     }
     return { bucket, stats: descriptiveStats(matching.map(({ value }) => value)), observationCount: matching.length, observedDurationSeconds: durationMs / 1000, sharePercent: durationMs / rangeMs * 100, sustainedSpanCount: spans }
   })

@@ -3,6 +3,13 @@ import { ENGINEERING_CLUE_CATALOG, type EngineeringCategory, type EngineeringSig
 import type { PressSemanticSignalEvidence, TelemetryChange, TelemetrySample, TelemetrySemanticSelector } from './telemetry-contracts.js'
 import { TelemetryFoundationService } from './telemetry-foundation-service.js'
 import {
+  PRE_STOP_CANDIDATE_POLICY,
+  candidateSelectors,
+  currentScreenCandidates,
+  selectHistoricalCandidates,
+  type CandidateIdentity,
+} from './stop-restart-candidate-selection.js'
+import {
   PRE_STOP_REFERENCE_POLICY,
   PHYSICAL_SPEED_POLICY,
   alignSignalToSpeed,
@@ -69,11 +76,10 @@ export interface StopRestartResponse {
   preStopFlags: PreStopFlag[]
   noFlagMessage: string | null
   stopRestartContext: StopRestartContextEvent[]
-  referenceMetadata: { status: 'AVAILABLE' | 'NOT_APPLICABLE' | 'INSUFFICIENT' | 'TEMPORARILY_UNAVAILABLE'; chunkHours: number; requestCount: number; candidateCount: number; excludedObservationsWithoutFreshSpeed: number; automaticCandidateLimit: number; flagLimit: number; cache: 'hit' | 'miss'; message: string }
+  referenceMetadata: { status: 'AVAILABLE' | 'NOT_APPLICABLE' | 'INSUFFICIENT' | 'TEMPORARILY_UNAVAILABLE'; chunkHours: number; requestCount: number; candidateCount: number; currentScreenCandidateCount: number; observedScreenCandidateCount: number; knownInactiveDeckCandidatesExcluded: number; selectionCounts: Record<'clue' | 'pin' | 'priority' | 'activity' | 'reserved' | 'condition', number>; selectedCandidates: Array<{ canonicalId: string; deckNumber: number | null; source: string }>; activityPriorityCategories: EngineeringCategory[]; excludedObservationsWithoutFreshSpeed: number; automaticCandidateLimit: number; flagLimit: number; cache: 'hit' | 'miss'; message: string }
   performance: { upstreamCalls: number; currentSelectors: number; referenceSelectors: number; totalMs: number; responsePayloadBytes: number }
 }
 
-const HIGH_VALUE_MACHINE = ['web_tension.chill_draw.actual', 'unwind.tension.actual', 'rewind.tension.actual', 'dryer.tunnel.temperature.actual']
 const CONTEXT_IDS = ['deck.active', 'deck.print_on', 'deck.print_off', 'ink.pump.status', 'ink.pump.sequence', 'ink.washup.state']
 const REFERENCE_CACHE_MAXIMUM = 32
 const REFERENCE_CACHE_TTL_MS = 5 * 60_000
@@ -88,15 +94,12 @@ const catalogItem = (canonicalId: string) => ENGINEERING_CLUE_CATALOG.find((item
 const sampleAt = (sample: TelemetrySample) => ({ atUtc: sample.observedAtUtc, value: typeof sample.value === 'number' ? sample.value : Number.NaN })
 const within = (samples: NumericObservation[], fromUtc: string | null, toUtc: string | null) => !fromUtc || !toUtc ? [] : samples.filter(({ atUtc }) => Date.parse(atUtc) >= Date.parse(fromUtc) && Date.parse(atUtc) <= Date.parse(toUtc))
 
-function candidates(input: StopRestartCandidateInput[], capabilities: Awaited<ReturnType<TelemetryFoundationService['capabilities']['get']>>['capabilities']): StopRestartCandidateInput[] {
-  const requested = [...input]
-  for (const canonicalId of HIGH_VALUE_MACHINE) requested.push({ canonicalId, source: 'priority' })
-  const unique = requested.filter((item, index, all) => all.findIndex((candidate) => signalKey(candidate) === signalKey(item)) === index)
-  return unique.filter((item) => {
+function supportedRequested(input: StopRestartCandidateInput[], capabilities: Awaited<ReturnType<TelemetryFoundationService['capabilities']['get']>>['capabilities']): StopRestartCandidateInput[] {
+  return input.filter((item, index, all) => all.findIndex((candidate) => signalKey(candidate) === signalKey(item)) === index).filter((item) => {
     const definition = catalogItem(item.canonicalId)
     const capability = capabilities.find(({ canonicalId }) => canonicalId === item.canonicalId)
     return definition?.signalType === 'continuous' && capability?.state === 'SUPPORTED' && capability.historyQueryable && (item.deckNumber === undefined || capability.deckNumbers.includes(item.deckNumber))
-  }).slice(0, PRE_STOP_REFERENCE_POLICY.maximumAutomaticCandidates)
+  })
 }
 
 function contextSelectors(capabilities: Awaited<ReturnType<TelemetryFoundationService['capabilities']['get']>>['capabilities'], decks: number[]): TelemetrySemanticSelector[] {
@@ -117,6 +120,16 @@ function recovery(current: DescriptiveStats, reference: DescriptiveStats, after:
   const beforeDistance = Math.abs(current.median - reference.median); const afterDistance = Math.abs(after.median - reference.median)
   if (after.median >= reference.p05 && after.median <= reference.p95 || afterDistance <= beforeDistance * .5) return 'RETURNED_TOWARD_REFERENCE'
   return 'REMAINED_SHIFTED'
+}
+
+export function deckKnownInactive(signals: PressSemanticSignalEvidence[], deckNumber: number | undefined, atUtc: string | null): boolean {
+  if (deckNumber === undefined || !atUtc) return false
+  const signal = signals.find((item) => item.canonicalId === 'deck.active' && item.deckNumber === deckNumber)
+  if (!signal) return false
+  const at = Date.parse(atUtc)
+  const observations = [...(signal.seed ? [signal.seed] : []), ...signal.changes].filter((item) => Date.parse(item.observedAtUtc) <= at).sort((left, right) => Date.parse(left.observedAtUtc) - Date.parse(right.observedAtUtc))
+  const value = observations.at(-1)?.value
+  return value === false || value === 0 || (typeof value === 'string' && /^(?:0|false|off|inactive)$/i.test(value.trim()))
 }
 
 export class StopRestartAnalysisService {
@@ -146,7 +159,7 @@ export class StopRestartAnalysisService {
     while (this.timingCache.size > TIMING_CACHE_MAXIMUM) this.timingCache.delete(this.timingCache.keys().next().value!)
   }
 
-  private async reference(pressKey: RadiusPressKey, fromUtc: string, toUtc: string, selected: StopRestartCandidateInput[], cacheBucket: PhysicalSpeedBucket | 'ALL_SPEED_BUCKETS', requestId?: string, signal?: AbortSignal): Promise<{ value: ReferenceSummary; cache: 'hit' | 'miss'; upstreamRequestCount: number }> {
+  private async reference(pressKey: RadiusPressKey, fromUtc: string, toUtc: string, selected: CandidateIdentity[], cacheBucket: PhysicalSpeedBucket | 'ALL_SPEED_BUCKETS', requestId?: string, signal?: AbortSignal): Promise<{ value: ReferenceSummary; cache: 'hit' | 'miss'; upstreamRequestCount: number }> {
     const key = `${pressKey}|${fromUtc}|${toUtc}|${cacheBucket}|${selected.map(signalKey).join(',')}`
     const cached = this.cached(key); if (cached) return { value: cached, cache: 'hit', upstreamRequestCount: 0 }
     const speed: NumericObservation[] = []; const signalValues = new Map<string, NumericObservation[]>()
@@ -178,18 +191,31 @@ export class StopRestartAnalysisService {
     const started = this.now(); const occurrence = input.occurrence
     const window = { fromUtc: new Date(Date.parse(occurrence.startUtc) - PHYSICAL_SPEED_POLICY.detailedWindowBeforeMs).toISOString(), toUtc: new Date(Date.parse(occurrence.startUtc) + PHYSICAL_SPEED_POLICY.detailedWindowAfterMs).toISOString() }
     const capabilitySet = await this.telemetry.capabilities.get(occurrence.pressKey, requestId, signal)
-    const selected = candidates(input.candidates, capabilitySet.capabilities)
-    const decks = [...new Set(selected.flatMap(({ deckNumber }) => deckNumber === undefined ? [] : [deckNumber]))].slice(0, 4)
+    const requested = supportedRequested(input.candidates, capabilitySet.capabilities)
+    const automaticScreen = currentScreenCandidates(capabilitySet.capabilities)
+    const screened = [...requested, ...automaticScreen].filter((item, index, all) => all.findIndex((candidate) => signalKey(candidate) === signalKey(item)) === index).slice(0, PRE_STOP_CANDIDATE_POLICY.maximumCurrentScreenSelectors)
+    const decks = [...new Set(screened.flatMap(({ deckNumber }) => deckNumber === undefined ? [] : [deckNumber]))].slice(0, 10)
     const stateSelectors = contextSelectors(capabilitySet.capabilities, decks)
-    const semanticSelectors: TelemetrySemanticSelector[] = [{ canonicalId: 'machine.speed.actual', representation: 'samples' }, ...selected.map(({ canonicalId, deckNumber }) => ({ canonicalId, ...(deckNumber === undefined ? {} : { deckNumber }), representation: 'samples' as const })), ...stateSelectors]
-    const [current, motion] = await Promise.all([
-      this.telemetry.semanticHistory(occurrence.pressKey, { ...window, includeSeed: true, signals: semanticSelectors }, requestId, signal),
+    const coreSelectors: TelemetrySemanticSelector[] = [{ canonicalId: 'machine.speed.actual', representation: 'samples' }, ...stateSelectors]
+    const screenSelectors = candidateSelectors(screened)
+    const screenBatches = Array.from({ length: Math.ceil(screenSelectors.length / PRE_STOP_CANDIDATE_POLICY.maximumCurrentScreenBatchSize) }, (_, index) => screenSelectors.slice(index * PRE_STOP_CANDIDATE_POLICY.maximumCurrentScreenBatchSize, (index + 1) * PRE_STOP_CANDIDATE_POLICY.maximumCurrentScreenBatchSize))
+    const [core, stageA, motion] = await Promise.all([
+      this.telemetry.semanticHistory(occurrence.pressKey, { ...window, includeSeed: true, signals: coreSelectors }, requestId, signal),
+      Promise.all(screenBatches.map((selectors) => this.telemetry.semanticHistory(occurrence.pressKey, { ...window, includeSeed: false, signals: selectors }, requestId, signal))),
       this.telemetry.motion(occurrence.pressKey, window.fromUtc, window.toUtc, requestId, signal).catch(() => undefined),
     ])
+    const current = { ...core, signals: [...core.signals, ...stageA.flatMap(({ signals }) => signals)] }
     const speedSignal = current.signals.find(({ canonicalId }) => canonicalId === 'machine.speed.actual')
     const speed = numericObservations(speedSignal?.samples ?? [])
     const match = matchPhysicalStop(speed, occurrence.startUtc)
     const phases = match.status === 'MATCHED' && match.selected ? buildStopPhases(speed, match.selected) : null
+    if (phases && motion) for (const attempt of phases.restartAttempts) {
+      const from = Date.parse(attempt.startUtc); const to = Date.parse(attempt.endUtc ?? attempt.startUtc)
+      attempt.motionSupportsMovement = motion.segments.some((segment) => Date.parse(segment.toUtc) >= from && Date.parse(segment.fromUtc) <= to && (segment.state === 'RUNNING' || segment.state === 'TRANSITION'))
+    }
+    const eligibleScreen = screened.filter(({ deckNumber }) => !deckKnownInactive(current.signals, deckNumber, phases?.stableRunningBefore.toUtc ?? null))
+    const selection = selectHistoricalCandidates({ requested: requested.filter(({ deckNumber }) => !deckKnownInactive(current.signals, deckNumber, phases?.stableRunningBefore.toUtc ?? null)), screen: eligibleScreen, currentSignals: current.signals, stableRunningBefore: phases?.stableRunningBefore ?? null, operationalGroupName: occurrence.operationalGroupName, processFamilyName: occurrence.processFamilyName })
+    const selected = selection.selected
     let referenceStatus: StopRestartResponse['referenceMetadata']['status'] = phases?.stableRunningBefore.supported ? 'AVAILABLE' : 'NOT_APPLICABLE'
     let referenceCache: 'hit' | 'miss' = 'miss'; let referenceRequests = 0; let samePressBuckets: SpeedBucketReference[] = []; let excluded = 0; const flags: PreStopFlag[] = []
     const referenceTo = new Date(Date.parse(window.fromUtc)).toISOString(); const referenceFrom = new Date(Date.parse(referenceTo) - PRE_STOP_REFERENCE_POLICY.referenceHours * 60 * 60_000).toISOString()
@@ -223,14 +249,14 @@ export class StopRestartAnalysisService {
     context.push({ atUtc: occurrence.startUtc, kind: 'RADIUS', label: `Radius recorded ${occurrence.exactIdentities.map(({ eventType, statusCode, statusDescription }) => `${eventType} / ${statusCode ?? '—'} / ${statusDescription}`).join('; ')}.` })
     for (const item of current.signals.filter(({ representation }) => representation === 'changes')) context.push(...item.changes.map((change) => contextChange(change, item)))
     if (motion) for (const segment of motion.segments.slice(1)) context.push({ atUtc: segment.fromUtc, kind: 'MOTION', label: `Physical Motion ${segment.state} observed.` })
-    for (const attempt of phases?.restartAttempts ?? []) context.push({ atUtc: attempt.startUtc, kind: 'SPEED', label: attempt.sustainedRunning ? `Restart attempt ${attempt.attempt} reached physical running; sustained running was confirmed at ${attempt.sustainedConfirmedAtUtc}.` : `Restart attempt ${attempt.attempt} reached ${attempt.maximumObservedSpeed.toFixed(1)} (${attempt.highestBucket})${attempt.returnedToStopped ? ' and returned to STOPPED' : ''}.` })
+    for (const attempt of phases?.restartAttempts ?? []) context.push({ atUtc: attempt.startUtc, kind: 'SPEED', label: attempt.sustainedRunning ? `Restart excursion ${attempt.attempt} reached physical running; sustained running was confirmed at ${attempt.sustainedConfirmedAtUtc}.` : attempt.failedRunningAttempt ? `Failed running attempt ${attempt.attempt} reached ${attempt.maximumObservedSpeed.toFixed(1)} and returned to STOPPED without sustained physical running.` : attempt.classification === 'BRIEF_LOW_SPEED_EXCURSION' ? `Brief low-speed excursion ${attempt.attempt} reached ${attempt.maximumObservedSpeed.toFixed(1)} and returned to STOPPED.` : `Restart excursion ${attempt.attempt} reached ${attempt.maximumObservedSpeed.toFixed(1)} (${attempt.highestBucket})${attempt.returnedToStopped ? ' and returned to STOPPED' : ''}.` })
     context.sort((left, right) => Date.parse(left.atUtc) - Date.parse(right.atUtc)); context.splice(120)
     const bucket = phases?.stableRunningBefore.bucket ?? null
     const referenceBucketValues = bucket && samePressBuckets.length ? samePressBuckets.find((item) => item.bucket === bucket) : undefined
     const currentMedian = phases?.stableRunningBefore.stats?.median
     const currentPercentile = currentMedian !== undefined && referenceBucketValues?.stats ? currentMedian <= referenceBucketValues.stats.p25 ? 25 : currentMedian >= referenceBucketValues.stats.p95 ? 95 : currentMedian >= referenceBucketValues.stats.p75 ? 75 : 50 : null
     const completed = this.now()
-    const response: StopRestartResponse = { occurrence, analysisWindow: window, physicalStopMatch: match, phases, radiusTiming: { offsetSeconds: selectedOffset === null ? null : -selectedOffset, wording: offsetText }, speedContext: { preStopBucket: bucket, currentPercentile, referencePeriod: { fromUtc: referenceFrom, toUtc: referenceTo, hours: PRE_STOP_REFERENCE_POLICY.referenceHours }, samePressBuckets }, preStopFlags: flags, noFlagMessage: match.status === 'MATCHED' && !flags.length ? 'No strong pre-stop deviation was identified against the available comparable-speed reference.' : null, stopRestartContext: context, referenceMetadata: { status: referenceStatus, chunkHours: PRE_STOP_REFERENCE_POLICY.chunkHours, requestCount: referenceRequests, candidateCount: selected.length, excludedObservationsWithoutFreshSpeed: excluded, automaticCandidateLimit: PRE_STOP_REFERENCE_POLICY.maximumAutomaticCandidates, flagLimit: PRE_STOP_REFERENCE_POLICY.maximumFlags, cache: referenceCache, message: `Same-press reference uses the preceding ${PRE_STOP_REFERENCE_POLICY.referenceHours} hours in sequential ${PRE_STOP_REFERENCE_POLICY.chunkHours}-hour chunks. It is not a lifetime normal or an engineering limit.` }, performance: { upstreamCalls: 3 + referenceRequests, currentSelectors: semanticSelectors.length, referenceSelectors: selected.length + 1, totalMs: completed - started, responsePayloadBytes: 0 } }
+    const response: StopRestartResponse = { occurrence, analysisWindow: window, physicalStopMatch: match, phases, radiusTiming: { offsetSeconds: selectedOffset === null ? null : -selectedOffset, wording: offsetText }, speedContext: { preStopBucket: bucket, currentPercentile, referencePeriod: { fromUtc: referenceFrom, toUtc: referenceTo, hours: PRE_STOP_REFERENCE_POLICY.referenceHours }, samePressBuckets }, preStopFlags: flags, noFlagMessage: match.status === 'MATCHED' && !flags.length ? 'No strong pre-stop engineering deviation was identified against the available same-press comparable-speed reference.' : null, stopRestartContext: context, referenceMetadata: { status: referenceStatus, chunkHours: PRE_STOP_REFERENCE_POLICY.chunkHours, requestCount: referenceRequests, candidateCount: selected.length, currentScreenCandidateCount: selection.screenedIdentityCount, observedScreenCandidateCount: selection.observedScreenedIdentityCount, knownInactiveDeckCandidatesExcluded: screened.length - eligibleScreen.length, selectionCounts: selection.counts, selectedCandidates: selected.map(({ canonicalId, deckNumber, source }) => ({ canonicalId, deckNumber: deckNumber ?? null, source })), activityPriorityCategories: selection.activityPriorityCategories, excludedObservationsWithoutFreshSpeed: excluded, automaticCandidateLimit: PRE_STOP_REFERENCE_POLICY.maximumAutomaticCandidates, flagLimit: PRE_STOP_REFERENCE_POLICY.maximumFlags, cache: referenceCache, message: `A bounded current-window screen reserves historical slots for pins, local clues, activity-prioritized families, and unrelated engineering coverage. Known-inactive decks are excluded when explicit deck-state evidence is available; unknown state remains unknown. Same-press reference uses the preceding ${PRE_STOP_REFERENCE_POLICY.referenceHours} hours in sequential ${PRE_STOP_REFERENCE_POLICY.chunkHours}-hour chunks. It is not a lifetime normal or an engineering limit.` }, performance: { upstreamCalls: 3 + screenBatches.length + referenceRequests, currentSelectors: coreSelectors.length + screenSelectors.length, referenceSelectors: selected.length + 1, totalMs: completed - started, responsePayloadBytes: 0 } }
     response.performance.responsePayloadBytes = Buffer.byteLength(JSON.stringify(response), 'utf8')
     return response
   }

@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 import type { CapabilityAssessment, PressSemanticSignalEvidence, TelemetrySample, TelemetrySemanticHistoryQuery } from '../src/telemetry/telemetry-contracts.js'
 import type { TelemetryFoundationService } from '../src/telemetry/telemetry-foundation-service.js'
 import { PRE_STOP_REFERENCE_POLICY } from '../src/telemetry/stop-restart-analysis.js'
-import { StopRestartAnalysisService, type StopRestartAnalysisInput } from '../src/telemetry/stop-restart-analysis-service.js'
+import { StopRestartAnalysisService, deckKnownInactive, type StopRestartAnalysisInput } from '../src/telemetry/stop-restart-analysis-service.js'
 
 const occurrenceStart = '2026-08-13T12:00:00.000Z'
 const analysisFrom = '2026-08-13T11:30:00.000Z'
@@ -53,6 +53,14 @@ function fixture(currentValues: number[], referenceValue = 100) {
 }
 
 describe('stop/restart service policy', () => {
+  it('excludes only explicitly inactive deck evidence and preserves unknown state', () => {
+    const inactive = numericSignal('deck.active', 5, [])
+    inactive.representation = 'changes'
+    inactive.seed = { ...sample('2026-08-13T11:00:00.000Z', 0), valueKind: 'integer' }
+    assert.equal(deckKnownInactive([inactive], 5, '2026-08-13T12:00:00.000Z'), true)
+    assert.equal(deckKnownInactive([], 5, '2026-08-13T12:00:00.000Z'), false)
+    assert.equal(deckKnownInactive([inactive], 6, '2026-08-13T12:00:00.000Z'), false)
+  })
   it('preserves exact Radius identity, neutral lag, bounded references, recovery, and compact summaries', async () => {
     const { service, calls } = fixture([130, 132, 131, 130])
     const result = await service.analyze(input)
@@ -71,18 +79,18 @@ describe('stop/restart service policy', () => {
     assert.equal(result.referenceMetadata.flagLimit, 5)
     assert.equal(result.performance.referenceSelectors, 2)
     assert.equal(result.performance.responsePayloadBytes, Buffer.byteLength(JSON.stringify({ ...result, performance: { ...result.performance, responsePayloadBytes: 0 } }), 'utf8'))
-    assert.equal(calls(), 13)
+    assert.equal(calls(), 14)
 
     const cached = await service.analyze(input)
     assert.equal(cached.referenceMetadata.cache, 'hit')
     assert.equal(cached.referenceMetadata.requestCount, 0)
-    assert.equal(calls(), 14, 'only the current two-hour history is repeated; compact reference is reused')
+    assert.equal(calls(), 16, 'only the two bounded current-window requests are repeated; compact reference is reused')
   })
 
   it('does not turn a stable non-zero signal or a post-stop drop into a pre-stop flag', async () => {
     const stable = await fixture([100, 100, 100, 100]).service.analyze(input)
     assert.equal(stable.preStopFlags.length, 0)
-    assert.equal(stable.noFlagMessage, 'No strong pre-stop deviation was identified against the available comparable-speed reference.')
+    assert.equal(stable.noFlagMessage, 'No strong pre-stop engineering deviation was identified against the available same-press comparable-speed reference.')
 
     const afterOnly = await fixture([]).service.analyze(input)
     assert.equal(afterOnly.preStopFlags.length, 0)

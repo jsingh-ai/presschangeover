@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 import {
   PHYSICAL_SPEED_POLICY,
   PRE_STOP_REFERENCE_POLICY,
+  RESTART_EXCURSION_POLICY,
   alignSignalToSpeed,
   buildStopPhases,
   descriptiveStats,
@@ -96,8 +97,18 @@ describe('physical stop and restart analysis', () => {
       { returnedToStopped: true, sustainedRunning: false, maximumObservedSpeed: 510 },
     ])
     assert.equal(phases.restartAttempts[2]?.sustainedRunning, true)
+    assert.deepEqual(phases.restartAttempts.map(({ classification }) => classification), ['RESTART_EXCURSION', 'RESTART_EXCURSION', 'SUSTAINED_PHYSICAL_RUNNING_RESUMED'])
     assert.equal(phases.sustainedRunningReachedAtUtc, at(330))
     assert.equal(phases.sustainedRunningConfirmedAtUtc, at(450))
+  })
+
+  it('retains near-zero jitter as raw evidence without inflating failed-running attempts', () => {
+    const phases = buildStopPhases(points([[-240, 800], [-120, 800], [0, 0], [10, 2], [15, 0], [60, 300], [100, 0], [180, 600], [250, 0]]), { atUtc: at(0), observedSpeed: 0, previousObservedSpeed: 800, radiusOffsetSeconds: 0 })
+    assert.equal(RESTART_EXCURSION_POLICY.briefLowSpeedMaximumExclusive, 10)
+    assert.deepEqual(phases.restartAttempts.map(({ classification }) => classification), ['BRIEF_LOW_SPEED_EXCURSION', 'RESTART_EXCURSION', 'FAILED_RUNNING_ATTEMPT'])
+    assert.equal(phases.restartAttempts[0]?.failedRunningAttempt, false)
+    assert.equal(phases.restartAttempts[2]?.failedRunningAttempt, true)
+    assert.equal(phases.restartAttempts.length, 3, 'all observed physical excursions remain available')
   })
 
   it('does not call an unconfirmed restart sustained physical running', () => {
@@ -106,6 +117,17 @@ describe('physical stop and restart analysis', () => {
     assert.equal(phases.sustainedRunningConfirmedAtUtc, null)
     assert.equal(phases.restartAttempts[0]?.sustainedRunning, false)
     assert.equal(phases.sustainedRunningAgain.supported, false)
+  })
+
+  it('supports bounded five-minute historian heartbeats but never forward-fills beyond 330 seconds', () => {
+    const supported = buildStopPhases(points([[-900, 800], [-600, 800], [-300, 800], [0, 0]]), { atUtc: at(0), observedSpeed: 0, previousObservedSpeed: 800, radiusOffsetSeconds: 0 })
+    assert.equal(supported.stableRunningBefore.supported, true)
+    assert.equal(supported.stableRunningBefore.maximumGapSeconds, 300)
+    const bounded = buildStopPhases(points([[-931, 800], [-600, 800], [-300, 800], [0, 0]]), { atUtc: at(0), observedSpeed: 0, previousObservedSpeed: 800, radiusOffsetSeconds: 0 })
+    assert.equal(bounded.stableRunningBefore.fromUtc, at(-600))
+    assert.equal(bounded.stableRunningBefore.boundaryGapSeconds, 331)
+    assert.equal(PHYSICAL_SPEED_POLICY.speedContinuityMaximumGapMs, 330_000)
+    assert.equal(PHYSICAL_SPEED_POLICY.speedAlignmentMaximumAgeMs, 180_000)
   })
 
   it('aligns signal samples only to fresh earlier observed speed and keeps buckets separate', () => {

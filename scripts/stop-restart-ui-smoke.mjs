@@ -6,17 +6,20 @@ const applicationUrl = process.argv[3] ?? 'http://127.0.0.1:8100'
 const screenshotDirectory = process.argv[4] ?? 'review-artifacts/phase3-stop-restart/screenshots'
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
 const targets = {
-  mechanical: { pressKey: 'press5', occurrenceStartUtc: '2026-08-13T14:58:05.829Z' },
-  failedRestart: { pressKey: 'press13', occurrenceStartUtc: '2026-08-13T08:32:52.058Z' },
+  flag: { pressKey: 'press5', occurrenceStartUtc: '2026-08-13T16:56:43.166Z' },
+  briefExcursion: { pressKey: 'press5', occurrenceStartUtc: '2026-08-13T15:28:25.063Z' },
+  failedRestart: { pressKey: 'press5', occurrenceStartUtc: '2026-08-13T11:05:35.012Z' },
+  sustainedRestart: { pressKey: 'press5', occurrenceStartUtc: '2026-08-13T16:56:43.166Z' },
+  startup: { pressKey: 'press5', occurrenceStartUtc: '2026-08-13T14:58:05.829Z' },
   highSpeed: { pressKey: 'press15', occurrenceStartUtc: '2026-08-13T14:07:40.579Z' },
-  noStop: { pressKey: 'press15', occurrenceStartUtc: '2026-08-13T16:54:41.883Z' },
+  noStop: { pressKey: 'press14', occurrenceStartUtc: '2026-08-13T03:51:32.018Z' },
   radiusTiming: { pressKey: 'press5', occurrenceStartUtc: '2026-08-13T15:28:25.063Z' },
 }
 const fromUtc = '2026-08-12T17:00:00.000Z'; const toUtc = '2026-08-13T17:00:00.000Z'
 
 async function targetPage() {
   for (let attempt = 0; attempt < 40; attempt += 1) {
-    try { const pages = await fetch(`${debuggerUrl}/json/list`).then((response) => response.json()); const page = pages.find(({ type }) => type === 'page'); if (page) return page } catch {}
+    try { const pages = await fetch(`${debuggerUrl}/json/list`).then((response) => response.json()); const page = pages.find(({ type, url }) => type === 'page' && url.startsWith(applicationUrl)); if (page) return page } catch {}
     await delay(250)
   }
   throw new Error('Browser debugger page unavailable')
@@ -33,18 +36,21 @@ async function theme(value) { if (await evaluate('document.documentElement.datas
 
 async function selectOccurrence({ pressKey, occurrenceStartUtc }) {
   const query = new URLSearchParams({ preset: 'custom', fromUtc, toUtc, press: pressKey, activityLevel: 'radius_state', activityKey: 'B' })
-  await command('Page.navigate', { url: `${applicationUrl}/operational-analysis?${query}` })
-  await waitFor(`document.querySelectorAll('.activity-evidence tbody tr').length > 0`, `${pressKey} occurrences`)
+  const url = `${applicationUrl}/operational-analysis?${query}`
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await command('Page.navigate', { url })
+    try { await waitFor(`document.querySelectorAll('.activity-evidence tbody tr').length > 0`, `${pressKey} occurrences`, 120); break } catch (error) { if (attempt === 2) throw error }
+  }
   const index = await evaluate(`fetch('/api/radius/activity-analysis?${new URLSearchParams({ fromUtc, toUtc, pressKey, level: 'radius_state', key: 'B', evidenceOffset: '0' })}').then(r=>r.json()).then(v=>v.occurrences.findIndex(x=>x.startUtc===${JSON.stringify(occurrenceStartUtc)}))`)
   if (index < 0) throw new Error(`Occurrence at ${occurrenceStartUtc} was not loaded`)
   await evaluate(`document.querySelectorAll('.activity-evidence tbody tr')[${index}]?.click()`)
   await waitFor(`Boolean(document.querySelector('.stop-restart-analysis[data-stop-match]'))`, occurrenceStartUtc)
-  return evaluate(`({ match: document.querySelector('.stop-restart-analysis')?.dataset.stopMatch, title: document.querySelector('.focused-occurrence-facts')?.textContent, flags: document.querySelectorAll('.prestop-flag-grid > article').length, attempts: document.querySelectorAll('.restart-attempts > li').length, highSpeed: document.querySelector('.stop-speed-current')?.textContent.includes('HIGH-SPEED RUNNING'), radiusTiming: Boolean(document.querySelector('.radius-timing-context')) })`)
+  return evaluate(`({ match: document.querySelector('.stop-restart-analysis')?.dataset.stopMatch, title: document.querySelector('.focused-occurrence-facts')?.textContent, flags: document.querySelectorAll('.prestop-flag-grid > article').length, excursions: document.querySelectorAll('.restart-attempts > li').length, sequenceText: document.querySelector('.restart-attempts')?.textContent ?? '', highSpeed: document.querySelector('.stop-speed-current')?.textContent.includes('HIGH-SPEED RUNNING'), compactNoFlag: Boolean(document.querySelector('.no-prestop-flag')), genericCluesOpen: Boolean(document.querySelector('.other-telemetry-changes[open]')), radiusTiming: Boolean(document.querySelector('.radius-timing-context')) })`)
 }
 
 await command('Page.enable'); await command('Runtime.enable'); await mkdir(screenshotDirectory, { recursive: true })
 const report = { responsive: {}, scenarios: {}, interaction: {}, consoleErrors }
-report.scenarios.mechanical = await selectOccurrence(targets.mechanical)
+report.scenarios.flag = await selectOccurrence(targets.flag)
 for (const { width, height } of [{ width: 1600, height: 1050 }, { width: 1440, height: 1000 }, { width: 1200, height: 900 }, { width: 768, height: 1024 }, { width: 390, height: 844 }]) {
   report.responsive[width] = {}
   await command('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: width === 390 })
@@ -57,12 +63,16 @@ for (const { width, height } of [{ width: 1600, height: 1050 }, { width: 1440, h
 }
 
 await command('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false }); await theme('light')
-report.scenarios.failedRestart = await selectOccurrence(targets.failedRestart); await evaluate(`document.querySelector('.restart-attempts')?.scrollIntoView({block:'center'})`); await delay(100); await capture('failed-restart-attempts')
+report.scenarios.briefExcursion = await selectOccurrence(targets.briefExcursion); await evaluate(`document.querySelector('.restart-attempts')?.scrollIntoView({block:'center'})`); await delay(100); await capture('brief-low-speed-excursion')
+report.scenarios.failedRestart = await selectOccurrence(targets.failedRestart); await evaluate(`document.querySelector('.restart-attempts')?.scrollIntoView({block:'center'})`); await delay(100); await capture('failed-running-attempt')
+report.scenarios.sustainedRestart = await selectOccurrence(targets.sustainedRestart)
 report.scenarios.highSpeed = await selectOccurrence(targets.highSpeed); await evaluate(`document.querySelector('.stop-speed-current')?.scrollIntoView({block:'center'})`); await delay(100); await capture('high-speed-context')
+report.scenarios.startup = await selectOccurrence(targets.startup); await evaluate(`document.querySelector('.stop-speed-current')?.scrollIntoView({block:'center'})`); await delay(100); await capture('startup-low-speed-stop')
 report.scenarios.noStop = await selectOccurrence(targets.noStop); await evaluate(`document.querySelector('.stop-restart-analysis')?.scrollIntoView({block:'start'})`); await delay(100); await capture('no-physical-stop-match')
 report.scenarios.radiusTiming = await selectOccurrence(targets.radiusTiming); await waitFor(`!document.querySelector('.radius-timing-context .scope-progress')`, 'Radius aggregate timing'); await evaluate(`document.querySelector('.radius-timing-context')?.scrollIntoView({block:'center'})`); await delay(100); await capture('radius-timing-context')
 report.interaction.keyboard = await evaluate(`(() => { const target=document.querySelector('.stop-restart-analysis .synchronized-timeline [tabindex="0"]') ?? document.querySelector('.stop-restart-analysis button'); target?.focus(); return { focused: Boolean(target && document.activeElement===target), label: target?.getAttribute('aria-label') ?? target?.textContent?.trim() } })()`)
 report.interaction.previousNext = await evaluate(`({ previous: !document.querySelector('.occurrence-navigation button:first-child')?.disabled, next: !document.querySelector('.occurrence-navigation button:last-child')?.disabled })`)
-if (!report.interaction.keyboard.focused || consoleErrors.length) throw new Error(`Browser interaction or console failure: ${JSON.stringify({ interaction: report.interaction, consoleErrors })}`)
+await selectOccurrence(targets.flag); await evaluate(`[...document.querySelectorAll('.prestop-flag-grid button')].find(button=>button.textContent.includes('View Trace'))?.click()`); await waitFor(`Boolean(document.querySelector('.engineering-signal-list article.is-highlighted'))`, 'Engineering Inspector deep link'); report.interaction.viewTrace = await evaluate(`({ highlighted: document.querySelector('.engineering-signal-list article.is-highlighted')?.textContent, inspectorVisible: Boolean(document.querySelector('.engineering-inspector')) })`)
+if (!report.scenarios.briefExcursion.sequenceText.includes('Brief low-speed excursion') || !report.scenarios.failedRestart.sequenceText.includes('Failed running attempt') || !report.scenarios.sustainedRestart.sequenceText.includes('Sustained physical running resumed') || !report.scenarios.noStop.genericCluesOpen || !report.interaction.keyboard.focused || !report.interaction.viewTrace.inspectorVisible || consoleErrors.length) throw new Error(`Browser interaction or scenario failure: ${JSON.stringify({ scenarios: report.scenarios, interaction: report.interaction, consoleErrors })}`)
 await writeFile(join(screenshotDirectory, 'browser-validation.json'), `${JSON.stringify(report, null, 2)}\n`)
 socket.close(); console.log(JSON.stringify(report))
