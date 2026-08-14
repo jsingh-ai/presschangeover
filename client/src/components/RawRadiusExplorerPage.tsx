@@ -279,6 +279,10 @@ export function investigationTrackKeys(pinnedKeys: string[], previewKey: string 
   return [...pinnedKeys, ...(previewKey && !pinnedKeys.includes(previewKey) ? [previewKey] : [])]
 }
 
+function RawPinButton({ pinned, plotting, onPin }: { pinned: boolean; plotting: boolean; onPin: () => void }) {
+  return <button type="button" className={`secondary-action raw-pin-action${pinned ? ' is-active' : ''}`} disabled={plotting} aria-pressed={pinned} onClick={(event) => { event.stopPropagation(); onPin() }}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4h6l-1 5 3 3v1H7v-1l3-3-1-5Zm3 9v7" /></svg><span>{plotting ? 'Loading…' : pinned ? 'Unpin' : 'Pin'}</span></button>
+}
+
 function CanonicalSignalRow({ signal, selected, pinned, plotting, onPreview, onPin }: { signal: RawExplorerChangedSignal; selected: boolean; pinned: boolean; plotting: boolean; onPreview: () => void; onPin: () => void }) {
   const alreadyShown = signal.canonicalId === CURRENT_ROLL_LENGTH_CANONICAL_ID && signal.deckNumber === null
   const summary = signal.summary
@@ -286,7 +290,7 @@ function CanonicalSignalRow({ signal, selected, pinned, plotting, onPreview, onP
   const state = summary.kind === 'state' ? rawExplorerStatePresentation(summary) : undefined
   return <div className={`raw-change-row raw-browser-row ${selected ? 'is-previewed' : ''} ${pinned ? 'is-pinned' : ''}`.trim()} data-canonical-id={signal.canonicalId} data-signal-type={signal.signalType} role="button" tabIndex={0} aria-pressed={selected} onClick={onPreview} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onPreview() } }}>
     <div><div className="raw-signal-heading"><strong>{signal.friendlyName}</strong>{selected && <span>{alreadyShown ? 'Selected' : 'Preview'}</span>}{pinned && <span>Pinned</span>}</div><small>{signal.canonicalId}</small>{numeric && <div className="raw-numeric-summary"><span>Started <b>{numeric.started}</b></span><span>Ended <b>{numeric.ended}</b></span><strong>{numeric.overall}</strong><span>Lowest <b>{numeric.lowest}</b></span><span>Highest <b>{numeric.highest}</b></span><span>Biggest move <b>{numeric.biggestMove}</b></span></div>}{state && <div className="raw-state-summary"><span>Changed</span><strong>{state.sequence}</strong><small>{state.changes} {state.changes === 1 ? 'change' : 'changes'}</small></div>}</div>
-    <div className="raw-row-actions">{alreadyShown ? <span className="raw-row-status">Already shown</span> : <button type="button" className={pinned ? 'secondary-action is-active' : 'secondary-action'} disabled={plotting} onClick={(event) => { event.stopPropagation(); onPin() }}>{plotting ? 'Loading…' : pinned ? 'Unpin' : '+ Pin'}</button>}</div>
+    <div className="raw-row-actions">{alreadyShown ? <span className="raw-row-status">Already shown</span> : <RawPinButton pinned={pinned} plotting={plotting} onPin={onPin} />}</div>
   </div>
 }
 
@@ -301,8 +305,8 @@ function RawUnmappedSignalRow({ signal, selected, pinned, plotting, reviewing, o
       {signal.dataKind === 'container' ? <div className="raw-state-summary"><span>Container changed</span><strong>Not yet expanded</strong>{signal.knownShape && <small>{signal.knownShape}</small>}</div> : numeric ? <div className="raw-numeric-summary"><span>Started <b>{formatRawExplorerNumber(signal.firstValue as number)}</b></span><span>Ended <b>{formatRawExplorerNumber(signal.lastValue as number)}</b></span><strong>{(signal.lastValue as number) === (signal.firstValue as number) ? 'No overall change' : `${(signal.lastValue as number) > (signal.firstValue as number) ? '↑' : '↓'} ${formatRawExplorerNumber(Math.abs((signal.lastValue as number) - (signal.firstValue as number)))} overall`}</strong><span>Lowest <b>{signal.minimum === null ? 'Unavailable' : formatRawExplorerNumber(signal.minimum)}</b></span><span>Highest <b>{signal.maximum === null ? 'Unavailable' : formatRawExplorerNumber(signal.maximum)}</b></span><span>Biggest move <b>{signal.largestAbsoluteStep === null ? 'Unavailable' : `${biggestDirection} ${formatRawExplorerNumber(signal.largestAbsoluteStep)}`}</b></span></div> : <div className="raw-state-summary"><span>Changed</span><strong>{stateSequence.map((value) => rawValueLabel(value)).join(' → ')}{signal.transitionSequenceTruncated ? ' → …' : ''}</strong><small>{signal.changeCount} {signal.changeCount === 1 ? 'change' : 'changes'}</small></div>}
       <details className="raw-identity-detail"><summary>Exact raw identity</summary><code>{signal.rawIdentity}</code></details>
     </div>
-    <div className="raw-row-actions">{signal.plottable && signal.dataKind !== 'container' && <button type="button" className={pinned ? 'secondary-action is-active' : 'secondary-action'} disabled={plotting} onClick={(event) => { event.stopPropagation(); onPin() }}>{plotting ? 'Loading…' : pinned ? 'Unpin' : '+ Pin'}</button>}
-      <label onClick={(event) => event.stopPropagation()}>Review<select aria-label={`Review ${signal.displayName}`} value={signal.reviewStatus} disabled={reviewing} onClick={(event) => event.stopPropagation()} onChange={(event) => { event.stopPropagation(); onReview(event.target.value as RawTelemetryReviewStatus) }}><option value="UNREVIEWED">Unreviewed</option><option value="USEFUL">Useful</option><option value="NEEDS_MAPPING">Needs Mapping</option><option value="IGNORE">Ignore</option></select></label>
+    <div className="raw-row-actions"><label onClick={(event) => event.stopPropagation()}>Review<select aria-label={`Review ${signal.displayName}`} value={signal.reviewStatus} disabled={reviewing} onClick={(event) => event.stopPropagation()} onChange={(event) => { event.stopPropagation(); onReview(event.target.value as RawTelemetryReviewStatus) }}><option value="UNREVIEWED">Unreviewed</option><option value="USEFUL">Useful</option><option value="NEEDS_MAPPING">Needs Mapping</option><option value="IGNORE">Ignore</option></select></label>
+      {signal.plottable && signal.dataKind !== 'container' && <RawPinButton pinned={pinned} plotting={plotting} onPin={onPin} />}
     </div>
   </div>
 }

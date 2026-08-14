@@ -139,7 +139,7 @@ describe('Raw Radius Code Explorer client', () => {
     assert.match(pageSource, /className="raw-change-scope"/)
     assert.match(pageSource, /className="raw-change-categories"/)
     assert.match(pageSource, /pinnedKeys/)
-    assert.match(pageSource, /\+ Pin/)
+    assert.match(pageSource, /RawPinButton/)
   })
 
   it('keeps draft settings unapplied, loads cards incrementally, and caches per-card plots in insertion order', () => {
@@ -247,5 +247,14 @@ describe('Raw Radius Code Explorer client', () => {
     assert.match(pageSource, /raw-explorer-actions/)
     assert.match(stylesSource, /\.raw-explorer-actions \{[^}]*justify-content: flex-end/)
     assert.match(stylesSource, /\.raw-explorer-setup\.is-collapsed/)
+  })
+
+  it('uses one polished Pin control and anchors raw Pin below its separate review control', () => {
+    assert.match(pageSource, /function RawPinButton/)
+    assert.match(pageSource, /raw-pin-action/)
+    assert.match(pageSource, /aria-pressed=\{pinned\}/)
+    assert.match(stylesSource, /\.raw-unmapped-row > \.raw-row-actions \{[^}]*flex-direction: column;[^}]*align-items: flex-end;[^}]*justify-content: space-between/)
+    assert.match(stylesSource, /\.raw-pin-action \{[^}]*border-radius: 999px/)
+    assert.match(stylesSource, /\.raw-pin-action\.is-active/)
   })
 })
