@@ -12,6 +12,10 @@ import {
 import type {
   TelemetryCapabilitiesResponse,
   TelemetryMachineSpeedHistory,
+  RawTelemetryChangesQuery,
+  RawTelemetryChangesResponse,
+  RawTelemetryHistoryQuery,
+  RawTelemetryHistoryResponse,
   TelemetrySemanticHistoryQuery,
   TelemetrySemanticHistoryResponse,
 } from './telemetry-contracts.js'
@@ -28,6 +32,8 @@ export interface TelemetryClient {
   getCapabilities?(sourceId: number, requestId?: string, signal?: AbortSignal): Promise<TelemetryCapabilitiesResponse>
   getMachineSpeedHistory?(sourceId: number, fromUtc: string, toUtc: string, requestId?: string, signal?: AbortSignal): Promise<TelemetryMachineSpeedHistory>
   querySemanticHistory?(sourceId: number, query: TelemetrySemanticHistoryQuery, requestId?: string, signal?: AbortSignal): Promise<TelemetrySemanticHistoryResponse>
+  getRawTelemetryChanges?(query: RawTelemetryChangesQuery, requestId?: string, signal?: AbortSignal): Promise<RawTelemetryChangesResponse>
+  getRawTelemetryHistory?(query: RawTelemetryHistoryQuery, requestId?: string, signal?: AbortSignal): Promise<RawTelemetryHistoryResponse>
   getPhysicalState(
     sourceId: number,
     fromUtc: string,
@@ -136,6 +142,76 @@ function parseSources(value: unknown): TelemetrySource[] {
   }
 
   return candidate.map(parseSource)
+}
+
+function requireBoolean(record: JsonRecord, key: string): boolean {
+  if (typeof record[key] !== 'boolean') throw new TelemetryApiError('invalid_response')
+  return record[key] as boolean
+}
+
+function nullableString(record: JsonRecord, key: string): string | null {
+  const value = record[key]
+  if (value !== null && typeof value !== 'string') throw new TelemetryApiError('invalid_response')
+  return value as string | null
+}
+
+function nullableNumber(record: JsonRecord, key: string): number | null {
+  const value = record[key]
+  if (value !== null && (typeof value !== 'number' || !Number.isFinite(value))) throw new TelemetryApiError('invalid_response')
+  return value as number | null
+}
+
+function requireJson(record: JsonRecord, key: string) {
+  const value = record[key]
+  if (!isJsonValue(value)) throw new TelemetryApiError('invalid_response')
+  return value
+}
+
+function requireStrings(record: JsonRecord, key: string): string[] {
+  const value = record[key]
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) throw new TelemetryApiError('invalid_response')
+  return value
+}
+
+function parseRawChangedSignal(value: unknown): RawTelemetryChangesResponse['signals'][number] {
+  const record = requireRecord(value)
+  const transitions = record.transitionSequence
+  if (!Array.isArray(transitions) || !transitions.every(isJsonValue)) throw new TelemetryApiError('invalid_response')
+  return {
+    rawIdentity: requireString(record, 'rawIdentity'), displayName: requireString(record, 'displayName'),
+    dataType: requireString(record, 'dataType'), dataKind: requireString(record, 'dataKind'), sourceUnit: nullableString(record, 'sourceUnit'),
+    discoveryCategory: requireString(record, 'discoveryCategory'), plottable: requireBoolean(record, 'plottable'),
+    usableObservationCount: requireNumber(record, 'usableObservationCount'), unavailableObservationCount: requireNumber(record, 'unavailableObservationCount'),
+    firstValue: requireJson(record, 'firstValue'), lastValue: requireJson(record, 'lastValue'), minimum: nullableNumber(record, 'minimum'), maximum: nullableNumber(record, 'maximum'),
+    changeCount: requireNumber(record, 'changeCount'), largestAbsoluteStep: nullableNumber(record, 'largestAbsoluteStep'),
+    positiveMovementPresent: requireBoolean(record, 'positiveMovementPresent'), negativeMovementPresent: requireBoolean(record, 'negativeMovementPresent'),
+    transitionSequence: transitions, transitionSequenceTruncated: requireBoolean(record, 'transitionSequenceTruncated'), knownShape: nullableString(record, 'knownShape'),
+    alternateRepresentationCount: requireNumber(record, 'alternateRepresentationCount'), alternateRawIdentities: requireStrings(record, 'alternateRawIdentities'),
+  }
+}
+
+function parseRawChanges(value: unknown): RawTelemetryChangesResponse {
+  const record = requireRecord(value)
+  if (!Array.isArray(record.signals)) throw new TelemetryApiError('invalid_response')
+  return {
+    press: requireString(record, 'press') as RawTelemetryChangesResponse['press'], displayName: requireString(record, 'displayName'),
+    fromUtc: requireString(record, 'fromUtc'), toUtc: requireString(record, 'toUtc'),
+    rawCatalogIdentityCount: requireNumber(record, 'rawCatalogIdentityCount'), canonicallyRepresentedIdentityCount: requireNumber(record, 'canonicallyRepresentedIdentityCount'),
+    unmappedIdentityCount: requireNumber(record, 'unmappedIdentityCount'), usableIdentityCount: requireNumber(record, 'usableIdentityCount'), changedIdentityCount: requireNumber(record, 'changedIdentityCount'),
+    framesRead: requireNumber(record, 'framesRead'), historianReadCount: requireNumber(record, 'historianReadCount'), signals: record.signals.map(parseRawChangedSignal),
+  }
+}
+
+function parseRawHistory(value: unknown): RawTelemetryHistoryResponse {
+  const record = requireRecord(value)
+  if (!Array.isArray(record.observations)) throw new TelemetryApiError('invalid_response')
+  return {
+    press: requireString(record, 'press') as RawTelemetryHistoryResponse['press'], displayName: requireString(record, 'displayName'),
+    rawIdentity: requireString(record, 'rawIdentity'), signalDisplayName: requireString(record, 'signalDisplayName'), dataType: requireString(record, 'dataType'), dataKind: requireString(record, 'dataKind'),
+    sourceUnit: nullableString(record, 'sourceUnit'), plottable: requireBoolean(record, 'plottable'), fromUtc: requireString(record, 'fromUtc'), toUtc: requireString(record, 'toUtc'),
+    historianReadCount: requireNumber(record, 'historianReadCount'), alternateRepresentationCount: requireNumber(record, 'alternateRepresentationCount'), alternateRawIdentities: requireStrings(record, 'alternateRawIdentities'),
+    observations: record.observations.map((item) => { const observation = requireRecord(item); return { timestampUtc: requireString(observation, 'timestampUtc'), receivedAtUtc: requireString(observation, 'receivedAtUtc'), sourceTimestampUtc: requireString(observation, 'sourceTimestampUtc'), qualityState: requireString(observation, 'qualityState'), dataType: requireString(observation, 'dataType'), rawValue: requireJson(observation, 'rawValue') } }),
+  }
 }
 
 function parseState(value: unknown): PhysicalState {
@@ -345,6 +421,14 @@ export class TelemetryApiClient implements TelemetryClient {
     const rangeMs = Date.parse(query.toUtc) - Date.parse(query.fromUtc)
     if (!Number.isFinite(rangeMs) || rangeMs <= 0 || rangeMs > 2 * 60 * 60 * 1_000 || query.signals.length < 1 || query.signals.length > 50 || query.signals.some(({ canonicalId, deckNumber, representation }) => !canonicalId || canonicalId.length > 200 || (deckNumber !== undefined && (!Number.isSafeInteger(deckNumber) || deckNumber < 1)) || (representation !== 'samples' && representation !== 'changes'))) throw new TelemetryApiError('request_invalid', 400)
     return parseSemanticHistoryResponse(await this.request(`/api/telemetry/sources/${sourceId}/semantic-history/query`, undefined, requestId, 'POST', query, signal))
+  }
+
+  async getRawTelemetryChanges(query: RawTelemetryChangesQuery, requestId?: string, signal?: AbortSignal): Promise<RawTelemetryChangesResponse> {
+    return parseRawChanges(await this.request('/api/raw-telemetry/changes', undefined, requestId, 'POST', query, signal))
+  }
+
+  async getRawTelemetryHistory(query: RawTelemetryHistoryQuery, requestId?: string, signal?: AbortSignal): Promise<RawTelemetryHistoryResponse> {
+    return parseRawHistory(await this.request('/api/raw-telemetry/history', undefined, requestId, 'POST', query, signal))
   }
 
   async getPhysicalState(

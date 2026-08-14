@@ -26,6 +26,7 @@ import { PHYSICAL_EVIDENCE_CATEGORIES, TELEMETRY_REPRESENTATIONS, type CuratedPh
 import { EngineeringClueAnalysisService, type ClueOccurrenceInput } from './telemetry/engineering-clue-analysis.js'
 import { StopRestartAnalysisService, type FleetSpeedContextInput, type RadiusTimingAnalysisInput, type StopRestartAnalysisInput } from './telemetry/stop-restart-analysis-service.js'
 import { RAW_EXPLORER_MAX_WINDOW_MINUTES, RawRadiusExplorerService, type RawExplorerOccurrence, type RawExplorerSetup, type RawExplorerSignalIdentity } from './raw-radius-explorer/raw-radius-explorer-service.js'
+import { RAW_TELEMETRY_REVIEW_STATUSES, type RawTelemetryReviewService, type RawTelemetryReviewStatus } from './raw-radius-explorer/raw-telemetry-review-service.js'
 
 const MAX_PHYSICAL_STATE_RANGE_MS = 2 * 60 * 60 * 1_000
 const MAX_RADIUS_RANGE_MS = 31 * 24 * 60 * 60 * 1_000
@@ -80,6 +81,7 @@ export interface CreateAppOptions {
   logger?: Logger | false
   classificationService?: ClassificationService
   classificationAuthorizer?: ClassificationAuthorizer
+  rawTelemetryReviewService?: RawTelemetryReviewService
 }
 
 class RequestValidationError extends Error {
@@ -314,6 +316,16 @@ function parseRawExplorerSignal(value: unknown): RawExplorerSignalIdentity {
   return { canonicalId: raw.canonicalId, deckNumber: raw.deckNumber === null ? null : Number(raw.deckNumber), friendlyName: raw.friendlyName, signalType: raw.signalType as RawExplorerSignalIdentity['signalType'], category: raw.category as RawExplorerSignalIdentity['category'], scope: raw.scope }
 }
 
+function parseRawIdentity(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim() || value.length > 2_000) throw new RequestValidationError('invalid_raw_telemetry_identity')
+  return value
+}
+
+function parseRawReviewStatus(value: unknown): RawTelemetryReviewStatus {
+  if (typeof value !== 'string' || !RAW_TELEMETRY_REVIEW_STATUSES.includes(value as RawTelemetryReviewStatus)) throw new RequestValidationError('invalid_raw_telemetry_review_status')
+  return value as RawTelemetryReviewStatus
+}
+
 function cancellationSignal(request: Request, response: Response): AbortSignal {
   const controller = new AbortController()
   request.once('aborted', () => controller.abort())
@@ -366,12 +378,13 @@ export function createApp({
   logger = console,
   classificationService,
   classificationAuthorizer = () => ({ id: 'anonymous', canEdit: false }),
+  rawTelemetryReviewService,
 }: CreateAppOptions) {
   const app = express()
   const telemetry = new TelemetryFoundationService(telemetryClient)
   const engineeringClues = new EngineeringClueAnalysisService(telemetry)
   const stopRestart = new StopRestartAnalysisService(telemetry)
-  const rawRadiusExplorer = new RawRadiusExplorerService(radiusService, telemetry)
+  const rawRadiusExplorer = new RawRadiusExplorerService(radiusService, telemetry, rawTelemetryReviewService)
   const observedIdentityCache = new ObservedIdentityCache(
     () => radiusService.getObservedIdentities?.() ?? Promise.resolve([]),
     { onRefreshError: () => { if (logger) logger.error('classification_observed_identity_refresh_unavailable') } },
@@ -550,6 +563,18 @@ export function createApp({
     if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)) throw new RequestValidationError('invalid_raw_explorer_request')
     const raw = request.body as Record<string, unknown>
     response.status(200).json(await rawRadiusExplorer.plot({ occurrence: parseRawExplorerOccurrence(raw.occurrence), signal: parseRawExplorerSignal(raw.signal) }, String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.post('/api/radius/raw-explorer/raw-plot', asyncRoute(async (request, response) => {
+    if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)) throw new RequestValidationError('invalid_raw_explorer_request')
+    const raw = request.body as Record<string, unknown>
+    response.status(200).json(await rawRadiusExplorer.rawPlot({ occurrence: parseRawExplorerOccurrence(raw.occurrence), rawIdentity: parseRawIdentity(raw.rawIdentity) }, String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.patch('/api/radius/raw-explorer/raw-review', asyncRoute(async (request, response) => {
+    if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)) throw new RequestValidationError('invalid_raw_explorer_request')
+    const raw = request.body as Record<string, unknown>
+    response.status(200).json(await rawRadiusExplorer.review(parsePressKey(String(raw.pressKey ?? '')), parseRawIdentity(raw.rawIdentity), parseRawReviewStatus(raw.reviewStatus)))
   }))
 
   app.get(

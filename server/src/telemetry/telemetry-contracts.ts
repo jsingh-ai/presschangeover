@@ -7,6 +7,86 @@ export type TelemetryRepresentation = (typeof TELEMETRY_REPRESENTATIONS)[number]
 export const TELEMETRY_VALUE_KINDS = ['numeric', 'integer', 'boolean', 'string', 'text'] as const
 export type TelemetryValueKind = (typeof TELEMETRY_VALUE_KINDS)[number]
 export type TelemetryScalarValue = number | boolean | string
+export type RawTelemetryValue = TelemetryScalarValue | null | RawTelemetryValue[] | { [key: string]: RawTelemetryValue }
+
+export interface RawTelemetryChangesQuery {
+  press: RadiusPressKey
+  fromUtc: string
+  toUtc: string
+}
+
+export interface RawTelemetryChangedSignal {
+  rawIdentity: string
+  displayName: string
+  dataType: string
+  dataKind: string
+  sourceUnit: string | null
+  discoveryCategory: string
+  plottable: boolean
+  usableObservationCount: number
+  unavailableObservationCount: number
+  firstValue: RawTelemetryValue
+  lastValue: RawTelemetryValue
+  minimum: number | null
+  maximum: number | null
+  changeCount: number
+  largestAbsoluteStep: number | null
+  positiveMovementPresent: boolean
+  negativeMovementPresent: boolean
+  transitionSequence: RawTelemetryValue[]
+  transitionSequenceTruncated: boolean
+  knownShape: string | null
+  alternateRepresentationCount: number
+  alternateRawIdentities: string[]
+}
+
+export interface RawTelemetryChangesResponse {
+  press: RadiusPressKey
+  displayName: string
+  fromUtc: string
+  toUtc: string
+  rawCatalogIdentityCount: number
+  canonicallyRepresentedIdentityCount: number
+  unmappedIdentityCount: number
+  usableIdentityCount: number
+  changedIdentityCount: number
+  framesRead: number
+  historianReadCount: number
+  signals: RawTelemetryChangedSignal[]
+}
+
+export interface RawTelemetryHistoryQuery {
+  press: RadiusPressKey
+  rawIdentity: string
+  fromUtc: string
+  toUtc: string
+}
+
+export interface RawTelemetryObservation {
+  timestampUtc: string
+  receivedAtUtc: string
+  sourceTimestampUtc: string
+  qualityState: string
+  dataType: string
+  rawValue: RawTelemetryValue
+}
+
+export interface RawTelemetryHistoryResponse {
+  press: RadiusPressKey
+  displayName: string
+  rawIdentity: string
+  signalDisplayName: string
+  dataType: string
+  dataKind: string
+  sourceUnit: string | null
+  plottable: boolean
+  fromUtc: string
+  toUtc: string
+  historianReadCount: number
+  alternateRepresentationCount: number
+  alternateRawIdentities: string[]
+  observations: RawTelemetryObservation[]
+}
 
 export interface TelemetrySample {
   observedAtUtc: string

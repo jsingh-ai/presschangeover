@@ -28,6 +28,9 @@ import type {
   RawExplorerResult,
   RawExplorerSetup,
   RawExplorerSignalIdentity,
+  RawTelemetryReview,
+  RawTelemetryReviewStatus,
+  RawUnmappedPlotResult,
 } from '../types/api'
 import type {
   CuratedPhysicalEvidence,
@@ -171,6 +174,14 @@ export function getRawRadiusOccurrenceDetail(occurrence: RawExplorerOccurrence, 
 
 export function plotRawRadiusSignal(occurrence: RawExplorerOccurrence, plottedSignal: RawExplorerSignalIdentity, signal?: AbortSignal) {
   return sendJson<RawExplorerPlotResult>('/api/radius/raw-explorer/plot', 'POST', { occurrence, signal: plottedSignal }, signal)
+}
+
+export function plotRawUnmappedSignal(occurrence: RawExplorerOccurrence, rawIdentity: string, signal?: AbortSignal) {
+  return sendJson<RawUnmappedPlotResult>('/api/radius/raw-explorer/raw-plot', 'POST', { occurrence, rawIdentity }, signal)
+}
+
+export function setRawTelemetryReview(pressKey: RadiusPressKey, rawIdentity: string, reviewStatus: RawTelemetryReviewStatus, signal?: AbortSignal) {
+  return sendJson<RawTelemetryReview>('/api/radius/raw-explorer/raw-review', 'PATCH', { pressKey, rawIdentity, reviewStatus }, signal)
 }
 
 export function getActivityAnalysis(fromUtc: string, toUtc: string, selection?: ActivitySelection, pressKey?: RadiusPressKey, signal?: AbortSignal, evidenceOffset = 0) {

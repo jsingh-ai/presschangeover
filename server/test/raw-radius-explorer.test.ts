@@ -6,6 +6,7 @@ import { ENGINEERING_CLUE_CATALOG } from '../src/telemetry/engineering-clue-anal
 import type { CapabilityAssessment, PressSemanticSignalEvidence, TelemetryChange, TelemetrySample, TelemetrySemanticSelector } from '../src/telemetry/telemetry-contracts.js'
 import type { TelemetryFoundationService } from '../src/telemetry/telemetry-foundation-service.js'
 import { CURRENT_ROLL_LENGTH_CANONICAL_ID, normalizeHistorianNumber, numericSummary, RawRadiusExplorerService, RAW_EXPLORER_LENGTH_CATALOG, RAW_EXPLORER_MAX_WINDOW_MINUTES, samplesWithSeed, stateSummary, type RawExplorerOccurrence } from '../src/raw-radius-explorer/raw-radius-explorer-service.js'
+import { InMemoryRawTelemetryReviewRepository, RawTelemetryReviewService } from '../src/raw-radius-explorer/raw-telemetry-review-service.js'
 
 const startUtc = '2026-08-13T12:00:00.000Z'
 const endUtc = '2026-08-13T12:10:00.000Z'
@@ -171,5 +172,58 @@ describe('Raw Radius Code Explorer', () => {
     assert.deepEqual(numericSummary(spike, Date.parse('2026-08-13T11:45:00.000Z'), Date.parse(startUtc)), { kind: 'numeric', firstValue: 10, lastValue: 10, netDelta: 0, minimum: 10, maximum: 20, largestPositiveExcursion: 10, largestNegativeExcursion: 0, largestAbsoluteExcursion: 10, observationCount: 3 })
     assert.equal(numericSummary(evidence(selector, sample('2026-08-13T11:44:00.000Z', 10), [], [sample('2026-08-13T11:50:00.000Z', 10)]), Date.parse('2026-08-13T11:45:00.000Z'), Date.parse(startUtc)), null)
     assert.equal(numericSummary(evidence(selector, null, [], [sample('2026-08-13T11:50:00.000Z', 10)]), Date.parse('2026-08-13T11:45:00.000Z'), Date.parse(startUtc)), null)
+  })
+
+  it('keeps raw discovery separate, uses the exact half-open lookback, plots one exact identity, and persists reviews per press', async () => {
+    const rawCalls: Array<{ pressKey: string; fromUtc: string; toUtc: string }> = []
+    const historyCalls: Array<{ pressKey: string; rawIdentity: string; fromUtc: string; toUtc: string }> = []
+    const telemetry = {
+      capabilities: { get: async () => ({ capabilities: [] }) },
+      semanticHistory: async (_pressKey: string, query: { signals: TelemetrySemanticSelector[] }) => ({ signals: query.signals.map((selector) => evidence(selector)) }),
+      rawChanges: async (pressKey: string, fromUtc: string, toUtc: string) => {
+        rawCalls.push({ pressKey, fromUtc, toUtc })
+        return { press: pressKey, displayName: 'Press 3', fromUtc, toUtc, rawCatalogIdentityCount: 3, canonicallyRepresentedIdentityCount: 1, unmappedIdentityCount: 2, usableIdentityCount: 2, changedIdentityCount: 2, framesRead: 10, historianReadCount: 1, signals: [
+          { rawIdentity: 'Press3.unique.numeric', displayName: 'unique numeric', dataType: 'numeric', dataKind: 'numeric', sourceUnit: null, discoveryCategory: 'Other', plottable: true, usableObservationCount: 2, unavailableObservationCount: 0, firstValue: 14.8, lastValue: 24, minimum: 14.1, maximum: 24.6, changeCount: 1, largestAbsoluteStep: 9.2, positiveMovementPresent: true, negativeMovementPresent: false, transitionSequence: [], transitionSequenceTruncated: false, knownShape: null, alternateRepresentationCount: 0, alternateRawIdentities: [] },
+          { rawIdentity: 'Press3.unique.container', displayName: 'deck.print_on', dataType: 'container', dataKind: 'container', sourceUnit: null, discoveryCategory: 'Containers / Arrays', plottable: false, usableObservationCount: 2, unavailableObservationCount: 0, firstValue: [0], lastValue: [1], minimum: null, maximum: null, changeCount: 1, largestAbsoluteStep: null, positiveMovementPresent: false, negativeMovementPresent: false, transitionSequence: [], transitionSequenceTruncated: false, knownShape: 'array[13]', alternateRepresentationCount: 0, alternateRawIdentities: [] },
+        ] }
+      },
+      rawHistory: async (pressKey: string, rawIdentity: string, fromUtc: string, toUtc: string) => {
+        historyCalls.push({ pressKey, rawIdentity, fromUtc, toUtc })
+        return { press: pressKey, displayName: 'Press 3', rawIdentity, signalDisplayName: 'unique numeric', dataType: 'numeric', dataKind: 'numeric', sourceUnit: null, plottable: true, fromUtc, toUtc, historianReadCount: 1, alternateRepresentationCount: 0, alternateRawIdentities: [], observations: [{ timestampUtc: fromUtc, receivedAtUtc: fromUtc, sourceTimestampUtc: fromUtc, qualityState: 'GOOD', dataType: 'numeric', rawValue: 14.8 }] }
+      },
+    } as unknown as TelemetryFoundationService
+    const reviews = new RawTelemetryReviewService(new InMemoryRawTelemetryReviewRepository())
+    await reviews.initialize()
+    const explorer = new RawRadiusExplorerService(radiusService(), telemetry, reviews)
+    const detail = await explorer.detail({ occurrence, changeLookbackMinutes: 15 })
+    assert.deepEqual(rawCalls, [{ pressKey: 'press3', fromUtc: '2026-08-13T11:45:00.000Z', toUtc: startUtc }])
+    assert.equal(detail.rawTelemetry.status, 'available')
+    assert.deepEqual(detail.rawTelemetry.signals.map(({ rawIdentity, dataKind, reviewStatus }) => ({ rawIdentity, dataKind, reviewStatus })), [
+      { rawIdentity: 'Press3.unique.numeric', dataKind: 'numeric', reviewStatus: 'UNREVIEWED' },
+      { rawIdentity: 'Press3.unique.container', dataKind: 'container', reviewStatus: 'UNREVIEWED' },
+    ])
+    await explorer.review('press3', 'Press3.unique.numeric', 'USEFUL')
+    assert.equal((await explorer.detail({ occurrence, changeLookbackMinutes: 15 })).rawTelemetry.signals[0]?.reviewStatus, 'USEFUL')
+    await explorer.review('press3', 'Press3.unique.numeric', 'NEEDS_MAPPING')
+    assert.equal((await explorer.detail({ occurrence, changeLookbackMinutes: 15 })).rawTelemetry.signals[0]?.reviewStatus, 'NEEDS_MAPPING')
+    await explorer.review('press3', 'Press3.unique.numeric', 'IGNORE')
+    assert.equal((await explorer.detail({ occurrence, changeLookbackMinutes: 15 })).rawTelemetry.signals[0]?.reviewStatus, 'IGNORE')
+    assert.equal((await reviews.list('press5', ['Press3.unique.numeric'])).length, 0)
+    const plotted = await explorer.rawPlot({ occurrence, rawIdentity: 'Press3.unique.numeric' })
+    assert.equal(plotted.signal.rawIdentity, 'Press3.unique.numeric')
+    assert.deepEqual(historyCalls.at(-1), { pressKey: 'press3', rawIdentity: 'Press3.unique.numeric', fromUtc: occurrence.chartFromUtc, toUtc: occurrence.chartToUtc })
+  })
+
+  it('treats raw discovery failure as supplemental and preserves canonical evidence', async () => {
+    const telemetry = {
+      capabilities: { get: async () => ({ capabilities: [] }) },
+      semanticHistory: async (_pressKey: string, query: { signals: TelemetrySemanticSelector[] }) => ({ signals: query.signals.map((selector) => evidence(selector)) }),
+      rawChanges: async () => { throw new Error('supplemental unavailable') },
+    } as unknown as TelemetryFoundationService
+    const detail = await new RawRadiusExplorerService(radiusService(), telemetry).detail({ occurrence, changeLookbackMinutes: 15 })
+    assert.equal(detail.rawTelemetry.status, 'unavailable')
+    assert.ok(Array.isArray(detail.radiusSegments))
+    assert.ok(Array.isArray(detail.speed.samples))
+    assert.ok(Array.isArray(detail.changedSignals))
   })
 })

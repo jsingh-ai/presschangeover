@@ -4,9 +4,9 @@ import { describe, it } from 'node:test'
 import React, { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { areaFromPathname, areaPath } from '../src/navigation'
-import { DEFAULT_RAW_EXPLORER_CONTEXT_MINUTES, DEFAULT_RAW_EXPLORER_LOOKBACK_MINUTES, filterRawExplorerIdentities, formatRawExplorerNumber, groupRawExplorerSignals, latestNumericAtOrBefore, RawExplorerInspectionTooltip, rawExplorerNumberSamples, rawExplorerNumericPresentation, rawExplorerStateIntervals, rawExplorerStatePresentation, validateRawExplorerWindow } from '../src/components/RawRadiusExplorerPage'
+import { DEFAULT_RAW_EXPLORER_CONTEXT_MINUTES, DEFAULT_RAW_EXPLORER_LOOKBACK_MINUTES, filterRawExplorerIdentities, formatRawExplorerNumber, groupRawExplorerSignals, groupRawUnmappedSignals, latestNumericAtOrBefore, RawExplorerInspectionTooltip, rawExplorerNumberSamples, rawExplorerNumericPresentation, rawExplorerStateIntervals, rawExplorerStatePresentation, rawUnmappedNumberSamples, rawUnmappedStateIntervals, validateRawExplorerWindow } from '../src/components/RawRadiusExplorerPage'
 import { numericPaths, positionInspectionTooltip } from '../src/components/SynchronizedTimeline'
-import type { RawExplorerChangedSignal, RawExplorerDetail, RawExplorerOccurrence, RawExplorerSignalHistory, RawTelemetryChange, RawTelemetrySample } from '../src/types/api'
+import type { RawExplorerChangedSignal, RawExplorerDetail, RawExplorerOccurrence, RawExplorerSignalHistory, RawTelemetryChange, RawTelemetrySample, RawUnmappedChangedSignal, RawUnmappedHistory } from '../src/types/api'
 
 const pageSource = readFileSync(new URL('../src/components/RawRadiusExplorerPage.tsx', import.meta.url), 'utf8')
 const apiSource = readFileSync(new URL('../src/api/process-intelligence-api.ts', import.meta.url), 'utf8')
@@ -161,6 +161,34 @@ describe('Raw Radius Code Explorer client', () => {
     assert.match(apiSource, /raw-explorer\/identities/)
     assert.match(apiSource, /raw-explorer\/detail/)
     assert.match(apiSource, /raw-explorer\/plot/)
+    assert.match(apiSource, /raw-explorer\/raw-plot/)
+    assert.match(apiSource, /raw-explorer\/raw-review/)
     assert.doesNotMatch(pageSource, /operational group|process family|classified as|root cause|safety state/i)
+  })
+
+  it('organizes changed raw telemetry separately by discovery category and keeps ignored evidence recoverable', () => {
+    const raw = (rawIdentity: string, discoveryCategory: string, reviewStatus: RawUnmappedChangedSignal['reviewStatus'], dataKind = 'numeric'): RawUnmappedChangedSignal => ({ rawIdentity, displayName: rawIdentity.split('.').at(-1)!, dataType: dataKind, dataKind, sourceUnit: null, discoveryCategory, plottable: dataKind !== 'container', usableObservationCount: 2, unavailableObservationCount: 0, firstValue: dataKind === 'container' ? [0] : 1, lastValue: dataKind === 'container' ? [1] : 2, minimum: dataKind === 'numeric' ? 1 : null, maximum: dataKind === 'numeric' ? 2 : null, changeCount: 1, largestAbsoluteStep: dataKind === 'numeric' ? 1 : null, positiveMovementPresent: dataKind === 'numeric', negativeMovementPresent: false, transitionSequence: dataKind === 'state' ? [0, 1, 0] : [], transitionSequenceTruncated: false, knownShape: dataKind === 'container' ? 'array[13]' : null, alternateRepresentationCount: 0, alternateRawIdentities: [], reviewStatus })
+    const grouped = groupRawUnmappedSignals([raw('Press12.roll', 'Production / Roll', 'UNREVIEWED'), raw('Press12.state', 'State / Event', 'NEEDS_MAPPING', 'state'), raw('Press12.deck.print_on', 'Containers / Arrays', 'USEFUL', 'container'), raw('Press12.ignore', 'Other', 'IGNORE')])
+    assert.deepEqual(grouped.categories.map(({ category }) => category), ['Production / Roll', 'State / Event', 'Containers / Arrays'])
+    assert.deepEqual(grouped.ignored.map(({ rawIdentity }) => rawIdentity), ['Press12.ignore'])
+    assert.match(pageSource, /CANONICAL TELEMETRY/)
+    assert.match(pageSource, /RAW \/ UNMAPPED TELEMETRY/)
+    assert.match(pageSource, /Container changed/)
+    assert.match(pageSource, /Not yet expanded/)
+    assert.match(pageSource, /Needs Mapping/)
+    assert.match(pageSource, /raw-ignored/)
+  })
+
+  it('plots raw numeric and state observations on the shared timeline without synthetic timestamps', () => {
+    const base: RawUnmappedHistory = { press: 'press12', displayName: 'Press 12', rawIdentity: 'Press12.unique', signalDisplayName: 'unique', dataType: 'numeric', dataKind: 'numeric', sourceUnit: null, plottable: true, fromUtc: occurrence.chartFromUtc, toUtc: occurrence.chartToUtc, historianReadCount: 1, alternateRepresentationCount: 0, alternateRawIdentities: [], reviewStatus: 'UNREVIEWED', observations: [] }
+    const numeric: RawUnmappedHistory = { ...base, observations: [{ timestampUtc: '2026-08-13T11:40:00.000Z', receivedAtUtc: '2026-08-13T11:40:01.000Z', sourceTimestampUtc: '2026-08-13T11:40:00.000Z', qualityState: 'GOOD', dataType: 'numeric', rawValue: 14.8 }, { timestampUtc: '2026-08-13T12:05:00.000Z', receivedAtUtc: '2026-08-13T12:05:01.000Z', sourceTimestampUtc: '2026-08-13T12:05:00.000Z', qualityState: 'GOOD', dataType: 'numeric', rawValue: 24 }] }
+    assert.deepEqual(rawUnmappedNumberSamples(numeric).map(({ observedAtUtc, value }) => ({ observedAtUtc, value })), [{ observedAtUtc: '2026-08-13T11:40:00.000Z', value: 14.8 }, { observedAtUtc: '2026-08-13T12:05:00.000Z', value: 24 }])
+    const state: RawUnmappedHistory = { ...base, dataType: 'boolean', dataKind: 'boolean', observations: [{ timestampUtc: '2026-08-13T11:45:00.000Z', receivedAtUtc: '2026-08-13T11:45:00.000Z', sourceTimestampUtc: '2026-08-13T11:45:00.000Z', qualityState: 'GOOD', dataType: 'boolean', rawValue: false }, { timestampUtc: '2026-08-13T12:03:00.000Z', receivedAtUtc: '2026-08-13T12:03:00.000Z', sourceTimestampUtc: '2026-08-13T12:03:00.000Z', qualityState: 'GOOD', dataType: 'boolean', rawValue: true }] }
+    assert.deepEqual(rawUnmappedStateIntervals(state, occurrence).map(({ startUtc, endUtc, label }) => ({ startUtc, endUtc, label })), [{ startUtc: '2026-08-13T11:45:00.000Z', endUtc: '2026-08-13T12:03:00.000Z', label: 'false' }, { startUtc: '2026-08-13T12:03:00.000Z', endUtc: occurrence.chartToUtc, label: 'true' }])
+    assert.match(pageSource, /rawHistories=/)
+    assert.match(pageSource, /RAW ·/)
+    assert.match(pageSource, /Supporting observation:/)
+    assert.match(pageSource, /connectObservedGaps: true/)
+    assert.match(pageSource, /holdLastObservation: true/)
   })
 })

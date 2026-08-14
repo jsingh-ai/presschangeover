@@ -16,6 +16,8 @@ import {
   type ProductionContextEvidence,
   type ProductionContextField,
   type ProductionContextFieldEvidence,
+  type RawTelemetryChangesResponse,
+  type RawTelemetryHistoryResponse,
   type TelemetrySemanticHistoryQuery,
   type TelemetrySemanticSignalHistory,
 } from './telemetry-contracts.js'
@@ -73,6 +75,20 @@ export class TelemetryFoundationService {
       includeSeed: upstream.includeSeed,
       signals: upstream.signals.map((item) => signalEvidence(item, capabilitySet?.capabilities.find(({ canonicalId }) => canonicalId === item.canonicalId))),
     }
+  }
+
+  async rawChanges(pressKey: RadiusPressKey, fromUtc: string, toUtc: string, requestId?: string, signal?: AbortSignal): Promise<RawTelemetryChangesResponse> {
+    if (!this.client.getRawTelemetryChanges) throw new TelemetryApiError('unavailable')
+    const response = await this.client.getRawTelemetryChanges({ press: pressKey, fromUtc, toUtc }, requestId, signal)
+    if (response.press.toLowerCase() !== pressKey) throw new TelemetryApiError('invalid_response')
+    return response
+  }
+
+  async rawHistory(pressKey: RadiusPressKey, rawIdentity: string, fromUtc: string, toUtc: string, requestId?: string, signal?: AbortSignal): Promise<RawTelemetryHistoryResponse> {
+    if (!this.client.getRawTelemetryHistory) throw new TelemetryApiError('unavailable')
+    const response = await this.client.getRawTelemetryHistory({ press: pressKey, rawIdentity, fromUtc, toUtc }, requestId, signal)
+    if (response.press.toLowerCase() !== pressKey || response.rawIdentity !== rawIdentity) throw new TelemetryApiError('invalid_response')
+    return response
   }
 
   async context(pressKey: RadiusPressKey, fromUtc: string, toUtc: string, requestId?: string, signal?: AbortSignal): Promise<ProductionContextEvidence> {

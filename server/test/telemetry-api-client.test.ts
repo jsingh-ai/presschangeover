@@ -224,3 +224,32 @@ test('external AbortSignal cancellation is distinct from timeout', async () => {
   controller.abort()
   await assert.rejects(pending, (error: unknown) => error instanceof TelemetryApiError && error.kind === 'cancelled')
 })
+
+test('raw telemetry changes uses the deployed press contract and preserves unique scalar and container evidence', async () => {
+  let requestedUrl = ''; let body: Record<string, unknown> = {}
+  const client = new TelemetryApiClient({ baseUrl: 'http://telemetry.internal:5080', timeoutMs: 500 }, async (input, init) => {
+    requestedUrl = input.toString(); body = JSON.parse(String(init?.body))
+    return jsonResponse({ press: 'press12', displayName: 'Press 12', fromUtc: '2026-08-14T15:00:00.000Z', toUtc: '2026-08-14T16:59:00.000Z', rawCatalogIdentityCount: 601, canonicallyRepresentedIdentityCount: 85, unmappedIdentityCount: 516, usableIdentityCount: 516, changedIdentityCount: 2, framesRead: 1428, historianReadCount: 1, signals: [
+      { rawIdentity: 'Press12.unique.analog_in3', displayName: 'analog_in3', dataType: 'numeric', dataKind: 'numeric', sourceUnit: null, discoveryCategory: 'Other', plottable: true, usableObservationCount: 10, unavailableObservationCount: 0, firstValue: 14.8, lastValue: 24, minimum: 14.1, maximum: 24.6, changeCount: 3, largestAbsoluteStep: 3.7, positiveMovementPresent: true, negativeMovementPresent: false, transitionSequence: [], transitionSequenceTruncated: false, knownShape: null, alternateRepresentationCount: 0, alternateRawIdentities: [] },
+      { rawIdentity: 'Press12.unique.deck.print_on', displayName: 'deck.print_on', dataType: 'container', dataKind: 'container', sourceUnit: null, discoveryCategory: 'Containers / Arrays', plottable: false, usableObservationCount: 4, unavailableObservationCount: 0, firstValue: [0, 0], lastValue: [0, 1], minimum: null, maximum: null, changeCount: 1, largestAbsoluteStep: null, positiveMovementPresent: false, negativeMovementPresent: false, transitionSequence: [], transitionSequenceTruncated: false, knownShape: 'array[13]', alternateRepresentationCount: 0, alternateRawIdentities: [] },
+    ] })
+  })
+  const result = await client.getRawTelemetryChanges({ press: 'press12', fromUtc: '2026-08-14T15:00:00.000Z', toUtc: '2026-08-14T16:59:00.000Z' })
+  assert.equal(requestedUrl, 'http://telemetry.internal:5080/api/raw-telemetry/changes')
+  assert.deepEqual(body, { press: 'press12', fromUtc: '2026-08-14T15:00:00.000Z', toUtc: '2026-08-14T16:59:00.000Z' })
+  assert.equal(result.signals[0]?.rawIdentity, 'Press12.unique.analog_in3')
+  assert.equal(result.signals[1]?.knownShape, 'array[13]')
+  assert.equal(result.signals[1]?.plottable, false)
+})
+
+test('raw telemetry history requests one exact raw identity and preserves supporting timestamps and raw state values', async () => {
+  let body: Record<string, unknown> = {}
+  const client = new TelemetryApiClient({ baseUrl: 'http://telemetry.internal:5080', timeoutMs: 500 }, async (_input, init) => {
+    body = JSON.parse(String(init?.body))
+    return jsonResponse({ press: 'press12', displayName: 'Press 12', rawIdentity: 'Press12.unique.state', signalDisplayName: 'state', dataType: 'integer', dataKind: 'state', sourceUnit: null, plottable: true, fromUtc: '2026-08-14T16:45:00.000Z', toUtc: '2026-08-14T16:55:00.000Z', historianReadCount: 1, alternateRepresentationCount: 0, alternateRawIdentities: [], observations: [{ timestampUtc: '2026-08-14T16:46:00.000Z', receivedAtUtc: '2026-08-14T16:46:01.000Z', sourceTimestampUtc: '2026-08-14T16:46:00.000Z', qualityState: 'GOOD', dataType: 'integer', rawValue: 10 }] })
+  })
+  const result = await client.getRawTelemetryHistory({ press: 'press12', rawIdentity: 'Press12.unique.state', fromUtc: '2026-08-14T16:45:00.000Z', toUtc: '2026-08-14T16:55:00.000Z' })
+  assert.deepEqual(body, { press: 'press12', rawIdentity: 'Press12.unique.state', fromUtc: '2026-08-14T16:45:00.000Z', toUtc: '2026-08-14T16:55:00.000Z' })
+  assert.equal(result.observations[0]?.timestampUtc, '2026-08-14T16:46:00.000Z')
+  assert.equal(result.observations[0]?.rawValue, 10)
+})

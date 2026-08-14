@@ -601,6 +601,69 @@ export type RawRadiusPhase = 'G' | 'B' | 'M' | 'S'
 export type RawExplorerSignalType = 'continuous' | 'step_reference' | 'state_event'
 export type RawExplorerCategory = 'speed' | 'web_tension' | 'dryer' | 'ink' | 'viscosity' | 'temperature' | 'pump' | 'wash' | 'register' | 'impression' | 'torque' | 'drive_temperature' | 'doctor_blade' | 'repeat_other' | 'motion'
 export type RawTelemetryScalar = string | number | boolean | null
+export type RawTelemetryValue = RawTelemetryScalar | RawTelemetryValue[] | { [key: string]: RawTelemetryValue }
+export type RawTelemetryReviewStatus = 'UNREVIEWED' | 'USEFUL' | 'NEEDS_MAPPING' | 'IGNORE'
+
+export interface RawUnmappedChangedSignal {
+  rawIdentity: string
+  displayName: string
+  dataType: string
+  dataKind: string
+  sourceUnit: string | null
+  discoveryCategory: string
+  plottable: boolean
+  usableObservationCount: number
+  unavailableObservationCount: number
+  firstValue: RawTelemetryValue
+  lastValue: RawTelemetryValue
+  minimum: number | null
+  maximum: number | null
+  changeCount: number
+  largestAbsoluteStep: number | null
+  positiveMovementPresent: boolean
+  negativeMovementPresent: boolean
+  transitionSequence: RawTelemetryValue[]
+  transitionSequenceTruncated: boolean
+  knownShape: string | null
+  alternateRepresentationCount: number
+  alternateRawIdentities: string[]
+  reviewStatus: RawTelemetryReviewStatus
+}
+
+export interface RawUnmappedObservation {
+  timestampUtc: string
+  receivedAtUtc: string
+  sourceTimestampUtc: string
+  qualityState: string
+  dataType: string
+  rawValue: RawTelemetryValue
+}
+
+export interface RawUnmappedHistory {
+  press: RadiusPressKey
+  displayName: string
+  rawIdentity: string
+  signalDisplayName: string
+  dataType: string
+  dataKind: string
+  sourceUnit: string | null
+  plottable: boolean
+  fromUtc: string
+  toUtc: string
+  historianReadCount: number
+  alternateRepresentationCount: number
+  alternateRawIdentities: string[]
+  observations: RawUnmappedObservation[]
+  reviewStatus: RawTelemetryReviewStatus
+}
+
+export interface RawTelemetryReview {
+  press: RadiusPressKey
+  rawIdentity: string
+  reviewStatus: RawTelemetryReviewStatus
+  createdAt: string
+  updatedAt: string
+}
 
 export interface RawExplorerIdentity {
   identity: string
@@ -707,6 +770,12 @@ export interface RawExplorerDetail {
   currentRollLength: RawExplorerSignalHistory | null
   speed: { sourceUnit: string | null; canonicalUnitStatus: string | null; samples: RawTelemetrySample[] }
   changedSignals: RawExplorerChangedSignal[]
+  rawTelemetry: {
+    status: 'available' | 'unavailable'
+    signals: RawUnmappedChangedSignal[]
+    counts: null | { rawCatalogIdentityCount: number; canonicallyRepresentedIdentityCount: number; unmappedIdentityCount: number; usableIdentityCount: number; changedIdentityCount: number }
+    historianReadCount: number
+  }
   performance: { totalMs: number; selectorCount: number; semanticHistoryRequests: number; speedHistoryMs: number; payloadBytes: number }
 }
 
@@ -722,4 +791,9 @@ export interface RawExplorerSignalHistory extends RawExplorerSignalIdentity {
 export interface RawExplorerPlotResult {
   signal: RawExplorerSignalHistory
   performance: { totalMs: number; semanticHistoryRequests: number; payloadBytes: number }
+}
+
+export interface RawUnmappedPlotResult {
+  signal: RawUnmappedHistory
+  performance: { totalMs: number; historianReadCount: number; payloadBytes: number }
 }
