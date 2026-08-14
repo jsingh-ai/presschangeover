@@ -253,19 +253,56 @@ export function groupRawUnmappedSignals(signals: RawUnmappedChangedSignal[]) {
   return { categories, ignored: signals.filter(({ reviewStatus }) => reviewStatus === 'IGNORE') }
 }
 
-function RawUnmappedSignalRow({ signal, active, plotting, reviewing, onPlot, onReview }: { signal: RawUnmappedChangedSignal; active: boolean; plotting: boolean; reviewing: boolean; onPlot: () => void; onReview: (status: RawTelemetryReviewStatus) => void }) {
+export type RawExplorerSidebarTab = 'all' | 'canonical' | 'raw'
+export interface RawExplorerBrowserItem {
+  key: string
+  kind: 'canonical' | 'raw'
+  label: string
+  plottable: boolean
+  searchText: string
+}
+
+export function filterRawExplorerBrowserItems(items: RawExplorerBrowserItem[], tab: RawExplorerSidebarTab, search: string) {
+  const query = search.trim().toLowerCase()
+  return items.filter((item) => (tab === 'all' || item.kind === tab) && (!query || item.searchText.toLowerCase().includes(query)))
+}
+
+export function adjacentPreviewKey(items: RawExplorerBrowserItem[], currentKey: string | undefined, direction: -1 | 1) {
+  const plottable = items.filter(({ plottable }) => plottable)
+  if (!plottable.length) return undefined
+  const currentIndex = plottable.findIndex(({ key }) => key === currentKey)
+  const nextIndex = currentIndex < 0 ? (direction > 0 ? 0 : plottable.length - 1) : (currentIndex + direction + plottable.length) % plottable.length
+  return plottable[nextIndex]?.key
+}
+
+export function investigationTrackKeys(pinnedKeys: string[], previewKey: string | undefined) {
+  return [...pinnedKeys, ...(previewKey && !pinnedKeys.includes(previewKey) ? [previewKey] : [])]
+}
+
+function CanonicalSignalRow({ signal, selected, pinned, plotting, onPreview, onPin }: { signal: RawExplorerChangedSignal; selected: boolean; pinned: boolean; plotting: boolean; onPreview: () => void; onPin: () => void }) {
+  const alreadyShown = signal.canonicalId === CURRENT_ROLL_LENGTH_CANONICAL_ID && signal.deckNumber === null
+  const summary = signal.summary
+  const numeric = summary.kind === 'numeric' ? rawExplorerNumericPresentation(summary) : undefined
+  const state = summary.kind === 'state' ? rawExplorerStatePresentation(summary) : undefined
+  return <div className={`raw-change-row raw-browser-row ${selected ? 'is-previewed' : ''} ${pinned ? 'is-pinned' : ''}`.trim()} data-canonical-id={signal.canonicalId} data-signal-type={signal.signalType} role="button" tabIndex={0} aria-pressed={selected} onClick={onPreview} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onPreview() } }}>
+    <div><div className="raw-signal-heading"><strong>{signal.friendlyName}</strong>{selected && <span>{alreadyShown ? 'Selected' : 'Preview'}</span>}{pinned && <span>Pinned</span>}</div><small>{signal.canonicalId}</small>{numeric && <div className="raw-numeric-summary"><span>Started <b>{numeric.started}</b></span><span>Ended <b>{numeric.ended}</b></span><strong>{numeric.overall}</strong><span>Lowest <b>{numeric.lowest}</b></span><span>Highest <b>{numeric.highest}</b></span><span>Biggest move <b>{numeric.biggestMove}</b></span></div>}{state && <div className="raw-state-summary"><span>Changed</span><strong>{state.sequence}</strong><small>{state.changes} {state.changes === 1 ? 'change' : 'changes'}</small></div>}</div>
+    <div className="raw-row-actions">{alreadyShown ? <span className="raw-row-status">Already shown</span> : <button type="button" className={pinned ? 'secondary-action is-active' : 'secondary-action'} disabled={plotting} onClick={(event) => { event.stopPropagation(); onPin() }}>{plotting ? 'Loading…' : pinned ? 'Unpin' : '+ Pin'}</button>}</div>
+  </div>
+}
+
+function RawUnmappedSignalRow({ signal, selected, pinned, plotting, reviewing, onPreview, onPin, onReview }: { signal: RawUnmappedChangedSignal; selected: boolean; pinned: boolean; plotting: boolean; reviewing: boolean; onPreview: () => void; onPin: () => void; onReview: (status: RawTelemetryReviewStatus) => void }) {
   const numeric = typeof signal.firstValue === 'number' && typeof signal.lastValue === 'number'
   const stateSequence = signal.transitionSequence.length ? signal.transitionSequence : [signal.firstValue, signal.lastValue]
   const unit = safeEngineeringSourceUnit({ sourceUnit: signal.sourceUnit })
   const biggestDirection = signal.positiveMovementPresent && signal.negativeMovementPresent ? '↕' : signal.positiveMovementPresent ? '↑' : signal.negativeMovementPresent ? '↓' : '—'
-  return <div className="raw-change-row raw-unmapped-row" data-raw-identity={signal.rawIdentity} data-data-kind={signal.dataKind}>
-    <div><div className="raw-signal-heading"><strong>{signal.displayName}</strong><span>RAW / UNMAPPED</span></div>
+  return <div className={`raw-change-row raw-unmapped-row raw-browser-row ${selected ? 'is-previewed' : ''} ${pinned ? 'is-pinned' : ''}`.trim()} data-raw-identity={signal.rawIdentity} data-data-kind={signal.dataKind} role="button" tabIndex={0} aria-pressed={selected} onClick={onPreview} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onPreview() } }}>
+    <div><div className="raw-signal-heading"><strong>{signal.displayName}</strong><span>RAW / UNMAPPED</span>{selected && <span>{signal.plottable && signal.dataKind !== 'container' ? 'Preview' : 'Selected'}</span>}{pinned && <span>Pinned</span>}</div>
       <small>{signal.discoveryCategory}{unit ? ` · ${unit} (raw / unverified)` : ' · Unit unverified'}</small>
       {signal.dataKind === 'container' ? <div className="raw-state-summary"><span>Container changed</span><strong>Not yet expanded</strong>{signal.knownShape && <small>{signal.knownShape}</small>}</div> : numeric ? <div className="raw-numeric-summary"><span>Started <b>{formatRawExplorerNumber(signal.firstValue as number)}</b></span><span>Ended <b>{formatRawExplorerNumber(signal.lastValue as number)}</b></span><strong>{(signal.lastValue as number) === (signal.firstValue as number) ? 'No overall change' : `${(signal.lastValue as number) > (signal.firstValue as number) ? '↑' : '↓'} ${formatRawExplorerNumber(Math.abs((signal.lastValue as number) - (signal.firstValue as number)))} overall`}</strong><span>Lowest <b>{signal.minimum === null ? 'Unavailable' : formatRawExplorerNumber(signal.minimum)}</b></span><span>Highest <b>{signal.maximum === null ? 'Unavailable' : formatRawExplorerNumber(signal.maximum)}</b></span><span>Biggest move <b>{signal.largestAbsoluteStep === null ? 'Unavailable' : `${biggestDirection} ${formatRawExplorerNumber(signal.largestAbsoluteStep)}`}</b></span></div> : <div className="raw-state-summary"><span>Changed</span><strong>{stateSequence.map((value) => rawValueLabel(value)).join(' → ')}{signal.transitionSequenceTruncated ? ' → …' : ''}</strong><small>{signal.changeCount} {signal.changeCount === 1 ? 'change' : 'changes'}</small></div>}
       <details className="raw-identity-detail"><summary>Exact raw identity</summary><code>{signal.rawIdentity}</code></details>
     </div>
-    <div className="raw-row-actions">{signal.plottable && signal.dataKind !== 'container' && <button type="button" className={active ? 'secondary-action is-active' : 'secondary-action'} disabled={plotting} onClick={onPlot}>{plotting ? 'Loading…' : active ? 'Remove plot' : 'Plot'}</button>}
-      <label>Review<select aria-label={`Review ${signal.displayName}`} value={signal.reviewStatus} disabled={reviewing} onChange={(event) => onReview(event.target.value as RawTelemetryReviewStatus)}><option value="UNREVIEWED">Unreviewed</option><option value="USEFUL">Useful</option><option value="NEEDS_MAPPING">Needs Mapping</option><option value="IGNORE">Ignore</option></select></label>
+    <div className="raw-row-actions">{signal.plottable && signal.dataKind !== 'container' && <button type="button" className={pinned ? 'secondary-action is-active' : 'secondary-action'} disabled={plotting} onClick={(event) => { event.stopPropagation(); onPin() }}>{plotting ? 'Loading…' : pinned ? 'Unpin' : '+ Pin'}</button>}
+      <label onClick={(event) => event.stopPropagation()}>Review<select aria-label={`Review ${signal.displayName}`} value={signal.reviewStatus} disabled={reviewing} onClick={(event) => event.stopPropagation()} onChange={(event) => { event.stopPropagation(); onReview(event.target.value as RawTelemetryReviewStatus) }}><option value="UNREVIEWED">Unreviewed</option><option value="USEFUL">Useful</option><option value="NEEDS_MAPPING">Needs Mapping</option><option value="IGNORE">Ignore</option></select></label>
     </div>
   </div>
 }
@@ -279,12 +316,18 @@ function OccurrenceCard({ occurrence, lookbackMinutes, contextMinutes }: { occur
   const detailRequested = useRef(false)
   const [plotError, setPlotError] = useState<string>()
   const [plotting, setPlotting] = useState<Set<string>>(new Set())
-  const [activePlots, setActivePlots] = useState<string[]>([])
   const cache = useRef(new Map<string, RawExplorerPlotResult>())
-  const [activeRawPlots, setActiveRawPlots] = useState<string[]>([])
   const [rawPlotting, setRawPlotting] = useState<Set<string>>(new Set())
   const rawCache = useRef(new Map<string, RawUnmappedPlotResult>())
   const [reviewing, setReviewing] = useState<Set<string>>(new Set())
+  const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [sidebarTab, setSidebarTab] = useState<RawExplorerSidebarTab>('all')
+  const [telemetrySearch, setTelemetrySearch] = useState('')
+  const [selectedBrowserKey, setSelectedBrowserKey] = useState<string>()
+  const [previewKey, setPreviewKey] = useState<string>()
+  const [pinnedKeys, setPinnedKeys] = useState<string[]>([])
+  const sidebarRef = useRef<HTMLElement>(null)
+  const sidebarScrollTop = useRef(0)
 
   useEffect(() => {
     const element = cardRef.current
@@ -304,31 +347,32 @@ function OccurrenceCard({ occurrence, lookbackMinutes, contextMinutes }: { occur
     return () => controller.abort()
   }, [nearViewport, occurrence, lookbackMinutes])
 
-  async function togglePlot(signal: RawExplorerChangedSignal) {
-    if (signal.canonicalId === CURRENT_ROLL_LENGTH_CANONICAL_ID && signal.deckNumber === null) return
+  async function ensureCanonicalHistory(signal: RawExplorerChangedSignal): Promise<boolean> {
     const key = signalKey(signal)
-    if (activePlots.includes(key)) { setActivePlots((current) => current.filter((item) => item !== key)); return }
-    if (cache.current.has(key)) { setActivePlots((current) => [...current, key]); return }
+    if (cache.current.has(key)) return true
     setPlotError(undefined)
     setPlotting((current) => new Set(current).add(key))
     try {
       const response = await plotQueue.run(() => plotRawRadiusSignal(occurrence, signal))
       cache.current.set(key, response)
-      setActivePlots((current) => current.includes(key) ? current : [...current, key])
+      return true
     } catch { setPlotError(`${signalLabel(signal)} could not be plotted. Existing tracks remain available.`) }
     finally { setPlotting((current) => { const next = new Set(current); next.delete(key); return next }) }
+    return false
   }
 
-  async function toggleRawPlot(signal: RawUnmappedChangedSignal) {
+  async function ensureRawHistory(signal: RawUnmappedChangedSignal): Promise<boolean> {
     const key = rawSignalKey(signal)
-    if (activeRawPlots.includes(key)) { setActiveRawPlots((current) => current.filter((item) => item !== key)); return }
-    if (rawCache.current.has(key)) { setActiveRawPlots((current) => [...current, key]); return }
+    if (!signal.plottable || signal.dataKind === 'container') return false
+    if (rawCache.current.has(key)) return true
     setPlotError(undefined); setRawPlotting((current) => new Set(current).add(key))
     try {
       const response = await plotQueue.run(() => plotRawUnmappedSignal(occurrence, signal.rawIdentity))
-      rawCache.current.set(key, response); setActiveRawPlots((current) => current.includes(key) ? current : [...current, key])
+      rawCache.current.set(key, response)
+      return true
     } catch { setPlotError(`${rawSignalLabel(signal)} could not be plotted. Existing tracks remain available.`) }
     finally { setRawPlotting((current) => { const next = new Set(current); next.delete(key); return next }) }
+    return false
   }
 
   async function updateReview(signal: RawUnmappedChangedSignal, reviewStatus: RawTelemetryReviewStatus) {
@@ -342,38 +386,101 @@ function OccurrenceCard({ occurrence, lookbackMinutes, contextMinutes }: { occur
     finally { setReviewing((current) => { const next = new Set(current); next.delete(key); return next }) }
   }
 
-  const histories = activePlots.flatMap((key) => cache.current.get(key)?.signal ?? [])
-  const rawHistories = activeRawPlots.flatMap((key) => rawCache.current.get(key)?.signal ?? [])
+  const canonicalSignals = detail?.changedSignals ?? []
+  const rawSignals = detail?.rawTelemetry.signals ?? []
+  const browserItems: RawExplorerBrowserItem[] = [
+    ...canonicalSignals.map((signal) => ({ key: signalKey(signal), kind: 'canonical' as const, label: signalLabel(signal), plottable: !(signal.canonicalId === CURRENT_ROLL_LENGTH_CANONICAL_ID && signal.deckNumber === null), searchText: [signal.friendlyName, signal.canonicalId, signal.category, signal.scope, signal.deckNumber === null ? 'Machine' : `Deck ${signal.deckNumber}`].join(' ') })),
+    ...rawSignals.map((signal) => ({ key: rawSignalKey(signal), kind: 'raw' as const, label: rawSignalLabel(signal), plottable: signal.plottable && signal.dataKind !== 'container', searchText: [signal.displayName, signal.rawIdentity, signal.discoveryCategory, signal.dataKind].join(' ') }))
+  ]
+  const filteredBrowserItems = filterRawExplorerBrowserItems(browserItems, sidebarTab, telemetrySearch)
+  const filteredKeys = new Set(filteredBrowserItems.map((item) => item.key))
+  const filteredCanonicalSignals = canonicalSignals.filter((signal) => filteredKeys.has(signalKey(signal)))
+  const filteredRawSignals = rawSignals.filter((signal) => filteredKeys.has(rawSignalKey(signal)))
+  const groups = groupRawExplorerSignals(filteredCanonicalSignals)
+  const rawGroups = groupRawUnmappedSignals(filteredRawSignals)
+  const investigationKeys = investigationTrackKeys(pinnedKeys, previewKey)
+  const histories = investigationKeys.flatMap((key) => cache.current.get(key)?.signal ?? [])
+  const rawHistories = investigationKeys.flatMap((key) => rawCache.current.get(key)?.signal ?? [])
+  const previewCandidates = filteredBrowserItems.filter((item) => item.plottable)
+  const previewIndex = previewCandidates.findIndex((item) => item.key === previewKey)
+
+  function browserItemFor(key: string) { return browserItems.find((item) => item.key === key) }
+  function canonicalSignalFor(key: string) { return canonicalSignals.find((signal) => signalKey(signal) === key) }
+  function rawSignalFor(key: string) { return rawSignals.find((signal) => rawSignalKey(signal) === key) }
+
+  async function previewBrowserItem(item: RawExplorerBrowserItem) {
+    setSelectedBrowserKey(item.key)
+    if (!item.plottable) { setPreviewKey(undefined); return }
+    const loaded = item.kind === 'canonical'
+      ? await ensureCanonicalHistory(canonicalSignalFor(item.key)!)
+      : await ensureRawHistory(rawSignalFor(item.key)!)
+    if (loaded) setPreviewKey(item.key)
+  }
+
+  async function togglePinnedItem(item: RawExplorerBrowserItem) {
+    if (!item.plottable) return
+    if (pinnedKeys.includes(item.key)) { setPinnedKeys((current) => current.filter((key) => key !== item.key)); return }
+    const loaded = item.kind === 'canonical'
+      ? await ensureCanonicalHistory(canonicalSignalFor(item.key)!)
+      : await ensureRawHistory(rawSignalFor(item.key)!)
+    if (loaded) setPinnedKeys((current) => current.includes(item.key) ? current : [...current, item.key])
+  }
+
+  function movePreview(direction: -1 | 1) {
+    const key = adjacentPreviewKey(filteredBrowserItems, previewKey, direction)
+    const item = key ? browserItemFor(key) : undefined
+    if (item) void previewBrowserItem(item)
+  }
+
+  function hideSidebar() {
+    sidebarScrollTop.current = sidebarRef.current?.scrollTop ?? 0
+    setSidebarOpen(false)
+  }
+
+  function showSidebar() {
+    setSidebarOpen(true)
+    requestAnimationFrame(() => { if (sidebarRef.current) sidebarRef.current.scrollTop = sidebarScrollTop.current })
+  }
+
+  const canonicalLabel = (history: RawExplorerSignalHistory) => `${previewKey === signalKey(history) && !pinnedKeys.includes(previewKey) ? 'PREVIEW · ' : ''}${signalLabel(history)}`
+  const rawLabel = (history: RawUnmappedHistory) => `${previewKey === rawSignalKey(history) && !pinnedKeys.includes(previewKey) ? 'PREVIEW · ' : ''}${rawSignalLabel(history)}`
   const radiusTrack: TimelineIntervalTrack = { id: 'raw-radius', label: 'Raw Radius context', intervals: (detail?.radiusSegments ?? []).map((segment) => ({ id: `${segment.pressKey}:${segment.startUtc}`, startUtc: segment.startUtc, endUtc: segment.endUtc, label: segment.kind === 'offline' ? 'Offline / unavailable' : `${segment.eventType} / ${segment.statusCode ?? '—'}`, details: segment.kind === 'offline' ? 'Radius data unavailable' : `${segment.eventType} / ${segment.statusCode ?? '—'} · ${segment.statusDescription}`, unavailable: segment.kind === 'offline', style: segment.kind === 'radius' ? { background: timelineHue(`${segment.eventType}|${segment.statusCode}|${segment.statusDescription}`) } : undefined })) }
-  const intervalTracks: TimelineIntervalTrack[] = [radiusTrack, ...histories.filter((item) => item.signalType === 'state_event').map((history) => ({ id: signalKey(history), label: signalLabel(history), intervals: rawExplorerStateIntervals(history, occurrence) })), ...rawHistories.filter((item) => item.dataKind !== 'numeric').map((history) => ({ id: rawSignalKey(history), label: rawSignalLabel(history), intervals: rawUnmappedStateIntervals(history, occurrence) }))]
+  const intervalTracks: TimelineIntervalTrack[] = [radiusTrack, ...histories.filter((item) => item.signalType === 'state_event').map((history) => ({ id: signalKey(history), label: canonicalLabel(history), intervals: rawExplorerStateIntervals(history, occurrence) })), ...rawHistories.filter((item) => item.dataKind !== 'numeric').map((history) => ({ id: rawSignalKey(history), label: rawLabel(history), intervals: rawUnmappedStateIntervals(history, occurrence) }))]
   const speedSamples = (detail?.speed.samples ?? []).flatMap((sample): TimedNumericSample[] => typeof sample.value === 'number' ? [{ ...sample, valueKind: Number.isInteger(sample.value) ? 'integer' : 'numeric', value: sample.value }] : [])
   const currentRollSamples = detail?.currentRollLength ? rawExplorerNumberSamples(detail.currentRollLength) : []
-  const numericTracks: TimelineNumericTrack[] = [{ id: 'current-roll-length', label: 'Current Roll Length', unit: 'Unit unverified', samples: currentRollSamples, interpolation: 'step', connectObservedGaps: true, holdLastObservation: true, unavailableLabel: 'Current Roll Length unavailable' }, { id: 'actual-speed', label: 'Actual speed', unit: evidenceUnit(detail?.speed.sourceUnit ?? null), samples: speedSamples, interpolation: 'step', connectObservedGaps: true, holdLastObservation: true, unavailableLabel: 'No actual-speed observation is available for this chart context' }, ...histories.filter((item) => item.signalType !== 'state_event').map((history) => ({ id: signalKey(history), label: signalLabel(history), unit: rawExplorerEvidenceUnit(history), samples: rawExplorerNumberSamples(history), interpolation: 'step' as const, connectObservedGaps: true, holdLastObservation: true, unavailableLabel: 'No observed value is available for this chart context' })), ...rawHistories.filter((item) => item.dataKind === 'numeric').map((history) => ({ id: rawSignalKey(history), label: rawSignalLabel(history), unit: evidenceUnit(history.sourceUnit), samples: rawUnmappedNumberSamples(history), interpolation: 'step' as const, connectObservedGaps: true, holdLastObservation: true, unavailableLabel: 'No observed raw value is available for this chart context' }))]
+  const numericTracks: TimelineNumericTrack[] = [{ id: 'current-roll-length', label: 'Current Roll Length', unit: 'Unit unverified', samples: currentRollSamples, interpolation: 'step', connectObservedGaps: true, holdLastObservation: true, unavailableLabel: 'Current Roll Length unavailable' }, { id: 'actual-speed', label: 'Actual speed', unit: evidenceUnit(detail?.speed.sourceUnit ?? null), samples: speedSamples, interpolation: 'step', connectObservedGaps: true, holdLastObservation: true, unavailableLabel: 'No actual-speed observation is available for this chart context' }, ...histories.filter((item) => item.signalType !== 'state_event').map((history) => ({ id: signalKey(history), label: canonicalLabel(history), unit: rawExplorerEvidenceUnit(history), samples: rawExplorerNumberSamples(history), interpolation: 'step' as const, connectObservedGaps: true, holdLastObservation: true, unavailableLabel: 'No observed value is available for this chart context' })), ...rawHistories.filter((item) => item.dataKind === 'numeric').map((history) => ({ id: rawSignalKey(history), label: rawLabel(history), unit: evidenceUnit(history.sourceUnit), samples: rawUnmappedNumberSamples(history), interpolation: 'step' as const, connectObservedGaps: true, holdLastObservation: true, unavailableLabel: 'No observed raw value is available for this chart context' }))]
   const trackOrder = ['numeric:current-roll-length', 'interval:raw-radius', 'numeric:actual-speed', ...histories.map((history) => `${history.signalType === 'state_event' ? 'interval' : 'numeric'}:${signalKey(history)}`), ...rawHistories.map((history) => `${history.dataKind === 'numeric' ? 'numeric' : 'interval'}:${rawSignalKey(history)}`)]
   const selectedRadiusId = detail?.radiusSegments.find((segment) => segment.kind === 'radius' && segment.startUtc === occurrence.startUtc && segment.endUtc === occurrence.endUtc) ? `${occurrence.pressKey}:${occurrence.startUtc}` : undefined
-  const groups = useMemo(() => groupRawExplorerSignals(detail?.changedSignals ?? []), [detail])
-  const rawGroups = useMemo(() => groupRawUnmappedSignals(detail?.rawTelemetry.signals ?? []), [detail])
-
   return <article ref={cardRef} className="raw-occurrence-card">
     <header className="raw-occurrence-card__header"><div><span>{occurrence.displayName} · occurrence {occurrence.pressOccurrenceIndex} of {occurrence.pressOccurrenceCount}</span><h3>{occurrence.eventType} / {occurrence.statusCode} / {occurrence.statusDescription}</h3><small>Change Lookback {lookbackMinutes}m · Chart Context {contextMinutes}m before and after</small></div><div><strong>{durationLabel(occurrence.durationSeconds)}</strong><small>{formatPlantDateTime(occurrence.startUtc)}–{formatPlantDateTime(occurrence.endUtc)} CT</small></div></header>
     {!nearViewport && <div className="raw-occurrence-placeholder">Telemetry loads as this card approaches the viewport.</div>}
     {detailLoading && <div className="raw-occurrence-placeholder" role="status">Loading synchronized Radius and telemetry evidence…</div>}
     {detailError && <div className="scope-progress scope-progress--error" role="alert">{detailError}</div>}
     {detail && <>
-      <SynchronizedTimeline fromUtc={occurrence.chartFromUtc} toUtc={occurrence.chartToUtc} intervalTracks={intervalTracks} numericTracks={numericTracks} trackOrder={trackOrder} selectedId={selectedRadiusId} highlightedRange={{ fromUtc: occurrence.startUtc, toUtc: occurrence.endUtc, label: 'Selected raw Radius occurrence' }} renderInspectionTooltip={(atUtc) => <RawExplorerInspectionTooltip atUtc={atUtc} detail={detail} histories={histories} rawHistories={rawHistories} />} ariaLabel={`${occurrence.displayName} raw Radius occurrence and telemetry`} />
-      <section className="raw-change-discovery"><header><div><h4>Changed Before Radius Entry</h4><p>Strict half-open window: {formatPlantDateTime(detail.lookback.fromUtc)} through, but not including, {formatPlantDateTime(detail.lookback.toUtc)} CT.</p></div><strong>{detail.changedSignals.length + detail.rawTelemetry.signals.length} changed signals</strong></header>
-        {plotError && <div className="scope-progress scope-progress--error" role="alert">{plotError}</div>}
-        <section className="raw-evidence-section"><header><div><span className="eyebrow">Mapped evidence</span><h5>CANONICAL TELEMETRY</h5></div><strong>{detail.changedSignals.length}</strong></header>
-          {!detail.changedSignals.length && <p className="raw-empty">No mapped, capability-supported signal changed in the selected lookback window.</p>}
-          <div className="raw-change-groups">{groups.map((group) => <section className="raw-change-scope" data-scope={group.key} key={group.key}><header><strong>{group.label}</strong><span>{group.signalCount} changed {group.signalCount === 1 ? 'signal' : 'signals'}</span></header><div className="raw-change-categories">{group.categories.map((category) => <section className="raw-change-category" key={category.label}><h5>{category.label}</h5>{category.signals.map((signal) => { const id = signalKey(signal); const alreadyShown = signal.canonicalId === CURRENT_ROLL_LENGTH_CANONICAL_ID && signal.deckNumber === null; const summary = signal.summary; const numeric = summary.kind === 'numeric' ? rawExplorerNumericPresentation(summary) : undefined; const state = summary.kind === 'state' ? rawExplorerStatePresentation(summary) : undefined; return <div className="raw-change-row" data-canonical-id={signal.canonicalId} data-signal-type={signal.signalType} key={id}><div><strong>{signal.friendlyName}</strong>{numeric && <div className="raw-numeric-summary"><span>Started <b>{numeric.started}</b></span><span>Ended <b>{numeric.ended}</b></span><strong>{numeric.overall}</strong><span>Lowest <b>{numeric.lowest}</b></span><span>Highest <b>{numeric.highest}</b></span><span>Biggest move <b>{numeric.biggestMove}</b></span></div>}{state && <div className="raw-state-summary"><span>Changed</span><strong>{state.sequence}</strong><small>{state.changes} {state.changes === 1 ? 'change' : 'changes'}</small></div>}</div><button type="button" className={activePlots.includes(id) ? 'secondary-action is-active' : 'secondary-action'} disabled={alreadyShown || plotting.has(id)} onClick={() => void togglePlot(signal)}>{alreadyShown ? 'Already shown' : plotting.has(id) ? 'Loading…' : activePlots.includes(id) ? 'Remove plot' : 'Plot'}</button></div> })}</section>)}</div></section>)}</div>
+      <div className={`raw-investigation-workspace${sidebarOpen ? '' : ' is-sidebar-collapsed'}`}>
+        <section className="raw-chart-workspace">
+          <div className="raw-chart-workspace__sticky">
+            <div className="raw-pinned-strip"><strong>Pinned</strong>{!pinnedKeys.length && <span>Pin signals from the telemetry browser to compare them here.</span>}{pinnedKeys.map((key) => { const item = browserItemFor(key); return item && <button type="button" key={key} onClick={() => void togglePinnedItem(item)}>{item.label}<span aria-hidden="true">×</span></button> })}</div>
+            <div className="raw-preview-navigator"><div><span className="eyebrow">Temporary trace</span><strong>{previewKey ? browserItemFor(previewKey)?.label : 'Select a telemetry row to preview it'}</strong></div><div><span>{previewIndex >= 0 ? `${previewIndex + 1} of ${previewCandidates.length}` : `${previewCandidates.length} available`}</span><button type="button" aria-label="Previous filtered telemetry signal" disabled={!previewCandidates.length} onClick={() => movePreview(-1)}>‹</button><button type="button" aria-label="Next filtered telemetry signal" disabled={!previewCandidates.length} onClick={() => movePreview(1)}>›</button></div></div>
+            <SynchronizedTimeline fromUtc={occurrence.chartFromUtc} toUtc={occurrence.chartToUtc} intervalTracks={intervalTracks} numericTracks={numericTracks} trackOrder={trackOrder} selectedId={selectedRadiusId} highlightedRange={{ fromUtc: occurrence.startUtc, toUtc: occurrence.endUtc, label: 'Selected raw Radius occurrence' }} renderInspectionTooltip={(atUtc) => <RawExplorerInspectionTooltip atUtc={atUtc} detail={detail} histories={histories} rawHistories={rawHistories} />} ariaLabel={`${occurrence.displayName} raw Radius occurrence and telemetry`} />
+            {plotError && <div className="scope-progress scope-progress--error" role="alert">{plotError}</div>}
+          </div>
         </section>
-        <section className="raw-evidence-section raw-unmapped-section"><header><div><span className="eyebrow">Press-specific discovery</span><h5>RAW / UNMAPPED TELEMETRY</h5></div><strong>{detail.rawTelemetry.signals.length}</strong></header>
-          {detail.rawTelemetry.status === 'unavailable' && <p className="raw-empty">Temporarily unavailable. Canonical evidence remains available.</p>}
-          {detail.rawTelemetry.status === 'available' && !detail.rawTelemetry.signals.length && <p className="raw-empty">No unmapped telemetry changes observed in this lookback.</p>}
-          {rawGroups.categories.map(({ category, signals }) => <details className="raw-unmapped-category" open key={category}><summary><strong>{category}</strong><span>{signals.length} changed</span></summary>{signals.map((signal) => { const key = rawSignalKey(signal); return <RawUnmappedSignalRow key={key} signal={signal} active={activeRawPlots.includes(key)} plotting={rawPlotting.has(key)} reviewing={reviewing.has(key)} onPlot={() => void toggleRawPlot(signal)} onReview={(status) => void updateReview(signal, status)} /> })}</details>)}
-          {!!rawGroups.ignored.length && <details className="raw-unmapped-category raw-ignored"><summary><strong>Ignored</strong><span>{rawGroups.ignored.length} recoverable</span></summary>{rawGroups.ignored.map((signal) => { const key = rawSignalKey(signal); return <RawUnmappedSignalRow key={key} signal={signal} active={activeRawPlots.includes(key)} plotting={rawPlotting.has(key)} reviewing={reviewing.has(key)} onPlot={() => void toggleRawPlot(signal)} onReview={(status) => void updateReview(signal, status)} /> })}</details>}
-        </section>
-      </section>
+        <aside ref={sidebarRef} className="raw-telemetry-browser" aria-hidden={!sidebarOpen} onScroll={(event) => { sidebarScrollTop.current = event.currentTarget.scrollTop }}>
+          <div className="raw-telemetry-browser__toolbar"><div><span className="eyebrow">Changed Before Radius Entry</span><strong>{filteredBrowserItems.length} of {browserItems.length} signals</strong><small>Strict half-open window · {formatPlantDateTime(detail.lookback.fromUtc)} to {formatPlantDateTime(detail.lookback.toUtc)} CT</small></div><button type="button" className="secondary-action" onClick={hideSidebar}>Hide</button>
+            <div className="raw-browser-tabs" role="tablist" aria-label="Telemetry source"><button type="button" role="tab" aria-selected={sidebarTab === 'all'} onClick={() => setSidebarTab('all')}>All <span>{browserItems.length}</span></button><button type="button" role="tab" aria-selected={sidebarTab === 'canonical'} onClick={() => setSidebarTab('canonical')}>Canonical <span>{canonicalSignals.length}</span></button><button type="button" role="tab" aria-selected={sidebarTab === 'raw'} onClick={() => setSidebarTab('raw')}>Raw <span>{rawSignals.length}</span></button></div>
+            <input type="search" aria-label="Search telemetry" value={telemetrySearch} onChange={(event) => setTelemetrySearch(event.target.value)} placeholder="Search name, ID, category, or deck" />
+          </div>
+          {!filteredBrowserItems.length && <p className="raw-empty">No telemetry matches this tab and search.</p>}
+          {sidebarTab !== 'raw' && groups.map((group) => <details className="raw-change-scope" data-scope={group.key} key={group.key}><summary><strong>{group.label}</strong><span>{group.signalCount} changed</span></summary><div className="raw-change-categories">{group.categories.map((category) => <details className="raw-change-category" key={category.label}><summary><strong>{category.label}</strong><span>{category.signals.length}</span></summary>{category.signals.map((signal) => { const id = signalKey(signal); return <CanonicalSignalRow key={id} signal={signal} selected={selectedBrowserKey === id} pinned={pinnedKeys.includes(id)} plotting={plotting.has(id)} onPreview={() => void previewBrowserItem(browserItemFor(id)!)} onPin={() => void togglePinnedItem(browserItemFor(id)!)} /> })}</details>)}</div></details>)}
+          {sidebarTab !== 'canonical' && <section className="raw-unmapped-section">
+            {detail.rawTelemetry.status === 'unavailable' && <p className="raw-empty">Raw telemetry is temporarily unavailable. Canonical evidence remains available.</p>}
+            {rawGroups.categories.map(({ category, signals }) => <details className="raw-unmapped-category" key={category}><summary><strong>{category}</strong><span>{signals.length} changed</span></summary>{signals.map((signal) => { const key = rawSignalKey(signal); return <RawUnmappedSignalRow key={key} signal={signal} selected={selectedBrowserKey === key} pinned={pinnedKeys.includes(key)} plotting={rawPlotting.has(key)} reviewing={reviewing.has(key)} onPreview={() => void previewBrowserItem(browserItemFor(key)!)} onPin={() => void togglePinnedItem(browserItemFor(key)!)} onReview={(status) => void updateReview(signal, status)} /> })}</details>)}
+            {!!rawGroups.ignored.length && <details className="raw-unmapped-category raw-ignored"><summary><strong>Ignored</strong><span>{rawGroups.ignored.length} recoverable</span></summary>{rawGroups.ignored.map((signal) => { const key = rawSignalKey(signal); return <RawUnmappedSignalRow key={key} signal={signal} selected={selectedBrowserKey === key} pinned={pinnedKeys.includes(key)} plotting={rawPlotting.has(key)} reviewing={reviewing.has(key)} onPreview={() => void previewBrowserItem(browserItemFor(key)!)} onPin={() => void togglePinnedItem(browserItemFor(key)!)} onReview={(status) => void updateReview(signal, status)} /> })}</details>}
+          </section>}
+        </aside>
+        {!sidebarOpen && <button type="button" className="raw-telemetry-reopen" onClick={showSidebar}>‹ Telemetry <span>{filteredBrowserItems.length}</span></button>}
+      </div>
       <details className="raw-card-diagnostics"><summary>Request diagnostics</summary><p>{detail.performance.selectorCount} discovery selectors · {detail.performance.semanticHistoryRequests} bounded history requests · {detail.performance.payloadBytes.toLocaleString()} response bytes · {Math.round(detail.performance.totalMs)} ms server time</p></details>
     </>}
   </article>

@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 import React, { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { areaFromPathname, areaPath } from '../src/navigation'
-import { DEFAULT_RAW_EXPLORER_CONTEXT_MINUTES, DEFAULT_RAW_EXPLORER_LOOKBACK_MINUTES, filterRawExplorerIdentities, formatRawExplorerNumber, groupRawExplorerSignals, groupRawUnmappedSignals, latestNumericAtOrBefore, RawExplorerInspectionTooltip, rawExplorerNumberSamples, rawExplorerNumericPresentation, rawExplorerStateIntervals, rawExplorerStatePresentation, rawUnmappedNumberSamples, rawUnmappedStateIntervals, validateRawExplorerWindow } from '../src/components/RawRadiusExplorerPage'
+import { adjacentPreviewKey, DEFAULT_RAW_EXPLORER_CONTEXT_MINUTES, DEFAULT_RAW_EXPLORER_LOOKBACK_MINUTES, filterRawExplorerBrowserItems, filterRawExplorerIdentities, formatRawExplorerNumber, groupRawExplorerSignals, groupRawUnmappedSignals, investigationTrackKeys, latestNumericAtOrBefore, RawExplorerInspectionTooltip, rawExplorerNumberSamples, rawExplorerNumericPresentation, rawExplorerStateIntervals, rawExplorerStatePresentation, rawUnmappedNumberSamples, rawUnmappedStateIntervals, validateRawExplorerWindow, type RawExplorerBrowserItem } from '../src/components/RawRadiusExplorerPage'
 import { numericPaths, positionInspectionTooltip } from '../src/components/SynchronizedTimeline'
 import type { RawExplorerChangedSignal, RawExplorerDetail, RawExplorerOccurrence, RawExplorerSignalHistory, RawTelemetryChange, RawTelemetrySample, RawUnmappedChangedSignal, RawUnmappedHistory } from '../src/types/api'
 
@@ -12,6 +12,7 @@ const pageSource = readFileSync(new URL('../src/components/RawRadiusExplorerPage
 const apiSource = readFileSync(new URL('../src/api/process-intelligence-api.ts', import.meta.url), 'utf8')
 const shellSource = readFileSync(new URL('../src/components/ApplicationShell.tsx', import.meta.url), 'utf8')
 const timelineSource = readFileSync(new URL('../src/components/SynchronizedTimeline.tsx', import.meta.url), 'utf8')
+const stylesSource = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
 
 Object.assign(globalThis, { React })
 
@@ -108,7 +109,7 @@ describe('Raw Radius Code Explorer client', () => {
     assert.deepEqual(positionInspectionTooltip({ x: 950, y: 50 }, { width: 200, height: 100 }, { width: 1_000, height: 800 }), { left: 726, top: 74 })
     assert.match(pageSource, /\['numeric:current-roll-length', 'interval:raw-radius', 'numeric:actual-speed'/)
     assert.match(pageSource, /Current Roll Length unavailable/)
-    assert.match(pageSource, /alreadyShown \? 'Already shown'/)
+    assert.match(pageSource, /Already shown/)
     assert.match(pageSource, /unit: 'Unit unverified'/)
     assert.doesNotMatch(pageSource, /raw-crosshair-readout/)
   })
@@ -137,7 +138,8 @@ describe('Raw Radius Code Explorer client', () => {
     assert.equal(groups.some(({ label }) => label === 'Deck 1'), false)
     assert.match(pageSource, /className="raw-change-scope"/)
     assert.match(pageSource, /className="raw-change-categories"/)
-    assert.match(pageSource, /Remove plot/)
+    assert.match(pageSource, /pinnedKeys/)
+    assert.match(pageSource, /\+ Pin/)
   })
 
   it('keeps draft settings unapplied, loads cards incrementally, and caches per-card plots in insertion order', () => {
@@ -148,7 +150,7 @@ describe('Raw Radius Code Explorer client', () => {
     assert.match(pageSource, /new RequestQueue\(2\)/)
     assert.match(pageSource, /detailRequested\.current/)
     assert.match(pageSource, /cache\.current\.has\(key\)/)
-    assert.match(pageSource, /setActivePlots\(\(current\) => \[\.\.\.current, key\]\)/)
+    assert.match(pageSource, /setPinnedKeys\(\(current\) => current\.includes/)
   })
 
   it('uses exact raw identity, synchronized speed, half-open discovery, and no classification language', () => {
@@ -171,8 +173,8 @@ describe('Raw Radius Code Explorer client', () => {
     const grouped = groupRawUnmappedSignals([raw('Press12.roll', 'Production / Roll', 'UNREVIEWED'), raw('Press12.state', 'State / Event', 'NEEDS_MAPPING', 'state'), raw('Press12.deck.print_on', 'Containers / Arrays', 'USEFUL', 'container'), raw('Press12.ignore', 'Other', 'IGNORE')])
     assert.deepEqual(grouped.categories.map(({ category }) => category), ['Production / Roll', 'State / Event', 'Containers / Arrays'])
     assert.deepEqual(grouped.ignored.map(({ rawIdentity }) => rawIdentity), ['Press12.ignore'])
-    assert.match(pageSource, /CANONICAL TELEMETRY/)
-    assert.match(pageSource, /RAW \/ UNMAPPED TELEMETRY/)
+    assert.match(pageSource, />Canonical /)
+    assert.match(pageSource, />Raw /)
     assert.match(pageSource, /Container changed/)
     assert.match(pageSource, /Not yet expanded/)
     assert.match(pageSource, /Needs Mapping/)
@@ -190,5 +192,50 @@ describe('Raw Radius Code Explorer client', () => {
     assert.match(pageSource, /Supporting observation:/)
     assert.match(pageSource, /connectObservedGaps: true/)
     assert.match(pageSource, /holdLastObservation: true/)
+  })
+
+  it('filters the telemetry browser locally across All, Canonical, and Raw tabs', () => {
+    const items: RawExplorerBrowserItem[] = [
+      { key: 'ink.viscosity.actual:4', kind: 'canonical', label: 'Deck 4 · Viscosity', plottable: true, searchText: 'Viscosity ink.viscosity.actual Deck 4' },
+      { key: 'raw:Press12.deck.print_on', kind: 'raw', label: 'RAW · print_on', plottable: true, searchText: 'print_on State Event boolean' },
+      { key: 'raw:Press12.array', kind: 'raw', label: 'RAW · array', plottable: false, searchText: 'array Containers Arrays container' },
+    ]
+    assert.deepEqual(filterRawExplorerBrowserItems(items, 'canonical', '').map(({ key }) => key), ['ink.viscosity.actual:4'])
+    assert.deepEqual(filterRawExplorerBrowserItems(items, 'raw', 'print').map(({ key }) => key), ['raw:Press12.deck.print_on'])
+    assert.deepEqual(filterRawExplorerBrowserItems(items, 'all', 'deck 4').map(({ key }) => key), ['ink.viscosity.actual:4'])
+  })
+
+  it('keeps pins in insertion order, puts one preview last, and skips non-plottable containers while navigating', () => {
+    const items: RawExplorerBrowserItem[] = [
+      { key: 'one', kind: 'canonical', label: 'One', plottable: true, searchText: 'one' },
+      { key: 'container', kind: 'raw', label: 'Container', plottable: false, searchText: 'container' },
+      { key: 'two', kind: 'raw', label: 'Two', plottable: true, searchText: 'two' },
+    ]
+    assert.deepEqual(investigationTrackKeys(['two', 'one'], 'preview'), ['two', 'one', 'preview'])
+    assert.deepEqual(investigationTrackKeys(['two', 'one'], 'one'), ['two', 'one'])
+    assert.equal(adjacentPreviewKey(items, 'one', 1), 'two')
+    assert.equal(adjacentPreviewKey(items, 'two', 1), 'one')
+    assert.equal(adjacentPreviewKey(items, undefined, -1), 'two')
+    assert.match(pageSource, /setPreviewKey\(item\.key\)/)
+    assert.match(pageSource, /if \(!item\.plottable\) \{ setPreviewKey\(undefined\); return \}/)
+    assert.match(pageSource, /setPinnedKeys\(\(current\) => current\.filter/)
+    assert.match(pageSource, /raw-pinned-strip/)
+    assert.match(pageSource, /event\.stopPropagation\(\); onReview/)
+    assert.match(pageSource, /rawCache\.current\.has\(key\)/)
+  })
+
+  it('uses a bounded split workspace with independent sidebar scrolling and preserved collapse state', () => {
+    assert.match(pageSource, /raw-investigation-workspace/)
+    assert.match(pageSource, /raw-chart-workspace/)
+    assert.match(pageSource, /raw-telemetry-browser/)
+    assert.match(pageSource, /sidebarScrollTop\.current/)
+    assert.match(pageSource, /requestAnimationFrame/)
+    assert.match(pageSource, /PREVIEW ·/)
+    assert.match(pageSource, />Hide</)
+    assert.match(pageSource, /raw-telemetry-reopen/)
+    assert.match(stylesSource, /grid-template-columns: minmax\(0, 2fr\) minmax\(20rem, 1fr\)/)
+    assert.match(stylesSource, /\.raw-investigation-workspace\.is-sidebar-collapsed \{ grid-template-columns: minmax\(0, 1fr\) 0/)
+    assert.match(stylesSource, /\.raw-telemetry-browser \{[\s\S]*?overflow: hidden auto/)
+    assert.match(stylesSource, /@media \(max-width: 1050px\)/)
   })
 })
