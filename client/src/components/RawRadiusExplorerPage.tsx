@@ -234,6 +234,10 @@ function setupSignature(range: SelectedRange, identity: RawExplorerIdentity | un
   return `${range.fromUtc}|${range.toUtc}|${identity?.identity ?? ''}|${lookback}|${context}`
 }
 
+export function rawExplorerOccurrenceWindowKey(occurrence: RawExplorerOccurrence, lookbackMinutes: number, contextMinutes: number): string {
+  return `${occurrence.occurrenceId}|${occurrence.chartFromUtc}|${occurrence.chartToUtc}|${lookbackMinutes}|${contextMinutes}`
+}
+
 export function validateRawExplorerWindow(value: string, label: string, allowZero: boolean): number {
   const parsed = Number(value)
   if (!Number.isInteger(parsed) || parsed < (allowZero ? 0 : 1)) throw new Error(`${label} must be a whole number of minutes${allowZero ? ' at or above 0' : ' above 0'}.`)
@@ -590,7 +594,7 @@ export function RawRadiusExplorerPage() {
     {result && <>
       <section className="panel raw-result-summary"><header><div><span className="eyebrow">Complete selected scope</span><h2>{result.setup.identity.eventType} / {result.setup.identity.statusCode} / {result.setup.identity.statusDescription}</h2><p>{formatPlantDateTime(result.setup.fromUtc)}–{formatPlantDateTime(result.setup.toUtc)} CT</p><p><strong>Change Lookback {result.setup.changeLookbackMinutes} minutes</strong> · <strong>Chart Context {result.setup.chartContextMinutes} minutes before and after</strong></p></div><span>{result.performance.payloadBytes.toLocaleString()} bytes · {Math.round(result.performance.totalMs)} ms</span></header><div className="raw-summary-metrics"><div><strong>{result.summary.totalOccurrences.toLocaleString()}</strong><span>Occurrences</span></div><div><strong>{result.summary.pressesContainingCode}</strong><span>Presses containing code</span></div><div><strong>{durationLabel(result.summary.totalObservedDurationSeconds)}</strong><span>Total observed duration</span></div></div><div className="raw-press-counts">{result.summary.pressCounts.map((press) => <span key={press.pressKey}><strong>{press.displayName}</strong> {press.occurrenceCount}</span>)}</div></section>
       {!result.occurrences.length && <section className="panel raw-empty"><h2>No occurrences found</h2><p>The exact raw identity was not observed in this time range.</p></section>}
-      <section className="raw-occurrence-results" aria-label="Raw Radius occurrences">{visibleOccurrences.map((occurrence) => { const heading = occurrence.pressKey !== previousPress; previousPress = occurrence.pressKey; return <div key={occurrence.occurrenceId}>{heading && <h2 className="raw-press-heading">{occurrence.displayName}<span>{result.summary.pressCounts.find((press) => press.pressKey === occurrence.pressKey)?.occurrenceCount ?? 0} occurrences</span></h2>}<OccurrenceCard occurrence={occurrence} lookbackMinutes={result.setup.changeLookbackMinutes} contextMinutes={result.setup.chartContextMinutes} /></div> })}</section>
+      <section className="raw-occurrence-results" aria-label="Raw Radius occurrences">{visibleOccurrences.map((occurrence) => { const heading = occurrence.pressKey !== previousPress; previousPress = occurrence.pressKey; return <div key={rawExplorerOccurrenceWindowKey(occurrence, result.setup.changeLookbackMinutes, result.setup.chartContextMinutes)}>{heading && <h2 className="raw-press-heading">{occurrence.displayName}<span>{result.summary.pressCounts.find((press) => press.pressKey === occurrence.pressKey)?.occurrenceCount ?? 0} occurrences</span></h2>}<OccurrenceCard occurrence={occurrence} lookbackMinutes={result.setup.changeLookbackMinutes} contextMinutes={result.setup.chartContextMinutes} /></div> })}</section>
       {visibleCount < result.occurrences.length && <div className="raw-load-more"><button type="button" className="secondary-action" onClick={() => setVisibleCount((current) => Math.min(result.occurrences.length, current + LOAD_MORE_COUNT))}>Load 20 more</button><span>Showing {visibleOccurrences.length} of {result.occurrences.length} occurrences</span></div>}
     </>}
   </div>

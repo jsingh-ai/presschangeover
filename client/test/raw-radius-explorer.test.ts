@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 import React, { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { areaFromPathname, areaPath } from '../src/navigation'
-import { adjacentPreviewKey, DEFAULT_RAW_EXPLORER_CONTEXT_MINUTES, DEFAULT_RAW_EXPLORER_LOOKBACK_MINUTES, filterRawExplorerBrowserItems, filterRawExplorerIdentities, formatRawExplorerNumber, groupRawExplorerSignals, groupRawUnmappedSignals, investigationTrackKeys, latestNumericAtOrBefore, RawExplorerInspectionTooltip, rawExplorerNumberSamples, rawExplorerNumericPresentation, rawExplorerStateIntervals, rawExplorerStatePresentation, rawUnmappedNumberSamples, rawUnmappedStateIntervals, validateRawExplorerWindow, type RawExplorerBrowserItem } from '../src/components/RawRadiusExplorerPage'
+import { adjacentPreviewKey, DEFAULT_RAW_EXPLORER_CONTEXT_MINUTES, DEFAULT_RAW_EXPLORER_LOOKBACK_MINUTES, filterRawExplorerBrowserItems, filterRawExplorerIdentities, formatRawExplorerNumber, groupRawExplorerSignals, groupRawUnmappedSignals, investigationTrackKeys, latestNumericAtOrBefore, RawExplorerInspectionTooltip, rawExplorerNumberSamples, rawExplorerNumericPresentation, rawExplorerOccurrenceWindowKey, rawExplorerStateIntervals, rawExplorerStatePresentation, rawUnmappedNumberSamples, rawUnmappedStateIntervals, validateRawExplorerWindow, type RawExplorerBrowserItem } from '../src/components/RawRadiusExplorerPage'
 import { numericPaths, positionInspectionTooltip } from '../src/components/SynchronizedTimeline'
 import type { RawExplorerChangedSignal, RawExplorerDetail, RawExplorerOccurrence, RawExplorerSignalHistory, RawTelemetryChange, RawTelemetrySample, RawUnmappedChangedSignal, RawUnmappedHistory } from '../src/types/api'
 
@@ -39,6 +39,13 @@ describe('Raw Radius Code Explorer client', () => {
     assert.equal(validateRawExplorerWindow('1440', 'Chart Context', true), 1_440)
     assert.throws(() => validateRawExplorerWindow('0', 'Change Lookback', false), /above 0/)
     assert.throws(() => validateRawExplorerWindow('1441', 'Chart Context', true), /cannot exceed 1,440 minutes/)
+  })
+
+  it('reloads occurrence evidence when either evidence-window setting changes', () => {
+    const initial = rawExplorerOccurrenceWindowKey(occurrence, 10, 30)
+    assert.notEqual(rawExplorerOccurrenceWindowKey(occurrence, 20, 30), initial)
+    assert.notEqual(rawExplorerOccurrenceWindowKey(occurrence, 10, 120), initial)
+    assert.equal(validateRawExplorerWindow('120', 'Change Lookback', false), 120)
   })
 
   it('filters G/B/M/S and searches the complete exact identity without merging same-code descriptions', () => {
