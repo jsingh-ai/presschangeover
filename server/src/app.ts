@@ -176,6 +176,14 @@ function validateBodyRange(body: Record<string, unknown>): { fromUtc: string; to
   return { fromUtc, toUtc }
 }
 
+function validateTelemetryEventRange(body: Record<string, unknown>): { fromUtc: string; toUtc: string } {
+  const fromUtc = parseUtcTimestamp(body.fromUtc, 'invalid_from_utc')
+  const toUtc = parseUtcTimestamp(body.toUtc, 'invalid_to_utc')
+  const rangeMs = Date.parse(toUtc) - Date.parse(fromUtc)
+  if (rangeMs <= 0 || rangeMs > TELEMETRY_EVENT_MAX_RANGE_MS) throw new RequestValidationError('invalid_time_range')
+  return { fromUtc, toUtc }
+}
+
 function parseRepresentation(value: unknown): TelemetryRepresentation {
   if (typeof value !== 'string' || !TELEMETRY_REPRESENTATIONS.includes(value as TelemetryRepresentation)) throw new RequestValidationError('invalid_telemetry_representation')
   return value as TelemetryRepresentation
@@ -667,7 +675,7 @@ export function createApp({
 
   app.post('/api/telemetry/event-explorer/preview', asyncRoute(async (request, response) => {
     if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)) throw new RequestValidationError('invalid_telemetry_event_preview')
-    const raw = request.body as Record<string, unknown>; const range = validateBodyRange(raw)
+    const raw = request.body as Record<string, unknown>; const range = validateTelemetryEventRange(raw)
     const source = parseTelemetryEventSource(raw.source); const pressKey = parsePressKey(String(raw.pressKey ?? ''))
     const deckNumber = raw.deckNumber === null ? null : Number(raw.deckNumber)
     if (deckNumber !== null && (!Number.isSafeInteger(deckNumber) || deckNumber < 1 || deckNumber > 10) || source.kind === 'raw' && (source.pressKey !== pressKey || deckNumber !== null)) throw new RequestValidationError('invalid_telemetry_event_preview')

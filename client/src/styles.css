@@ -2363,6 +2363,7 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
 .telemetry-variable-preview > header { display: flex; justify-content: space-between; align-items: start; gap: 1rem; padding-bottom: .55rem; border-bottom: 1px solid var(--border); }
 .telemetry-variable-preview > header > div { display: grid; gap: .12rem; }
 .telemetry-variable-preview > header > div > strong { color: var(--text-strong); font-size: .9rem; }
+.telemetry-variable-preview__range { color: var(--muted); font-size: .61rem; font-weight: 700; }
 .telemetry-variable-preview > header label { min-width: 13rem; }
 .telemetry-preview-source-control { display: flex !important; align-items: end; gap: 0 !important; overflow: hidden; background: var(--surface); border: 1px solid var(--border-strong); border-radius: .52rem; box-shadow: var(--shadow-sm); }
 .telemetry-preview-source-control label { display: grid; gap: .22rem; color: var(--muted); font-size: .64rem; font-weight: 800; }
