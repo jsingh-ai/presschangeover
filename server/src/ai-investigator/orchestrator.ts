@@ -21,8 +21,11 @@ export interface AiModelResponse {
   usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number }
 }
 
+export type AiModelPhase = 'investigation' | 'final_synthesis' | 'grounding_correction'
+export type AiModelToolChoice = 'auto' | 'none'
+
 export interface AiInvestigatorModelClient {
-  create(input: unknown[], instructions: string, tools: AiInvestigatorToolDefinition[], signal: AbortSignal): Promise<AiModelResponse>
+  create(input: unknown[], instructions: string, tools: AiInvestigatorToolDefinition[], toolChoice: AiModelToolChoice, signal: AbortSignal): Promise<AiModelResponse>
 }
 
 export class OpenAiResponsesInvestigatorClient implements AiInvestigatorModelClient {
@@ -33,12 +36,13 @@ export class OpenAiResponsesInvestigatorClient implements AiInvestigatorModelCli
     this.client = new OpenAI({ apiKey: config.apiKey, timeout: config.openAiTimeoutMs, maxRetries: 0 })
   }
 
-  async create(input: unknown[], instructions: string, tools: AiInvestigatorToolDefinition[], signal: AbortSignal): Promise<AiModelResponse> {
+  async create(input: unknown[], instructions: string, tools: AiInvestigatorToolDefinition[], toolChoice: AiModelToolChoice, signal: AbortSignal): Promise<AiModelResponse> {
     const response = await this.client.responses.create({
       model: this.config.model,
       instructions,
       input: input as ResponseInput,
-      ...(tools.length ? { tools, tool_choice: 'auto' as const } : {}),
+      ...(tools.length ? { tools } : {}),
+      tool_choice: toolChoice,
       include: ['reasoning.encrypted_content'],
       text: { verbosity: 'low', format: { type: 'json_schema', name: 'process_intelligence_investigation', strict: true, schema: AI_INVESTIGATOR_CONTENT_SCHEMA } },
       max_output_tokens: 4_000,
@@ -56,6 +60,7 @@ class AiTimeoutError extends Error {
 interface ToolEvidence { name: string; arguments: unknown; result?: AiToolResult; error?: string; durationMs: number }
 
 const SYSTEM_INSTRUCTIONS = `You are the advisory ProcessIntelligence AI Investigator. You may use ONLY the supplied read-only functions. Never claim database, historian, filesystem, network, machine-control, Radius-control, MQTT, acknowledgement, or configuration access. Begin with get_fleet_operational_summary for the requested scope. Identify only materially different candidate presses, then use at most a few follow-up tools. Compare the requested period with the immediately preceding equal-duration baseline where useful. The supplied fact objects are authoritative. Every displayed deterministic fact must cite its exact factId. Never invent or recalculate numeric values, percentages, counts, durations, comparisons, identities, or timestamps; select the server-calculated current/baseline/delta fact IDs together. Do not create free-form timestamp ranges: cite timestamp fact IDs only. Evidence source is server-owned; do not reclassify Radius facts as telemetry. Null or unusable Job/Order/Recipe values are not evidence. Separate directly calculated FACTS, deterministic COMPARISONS, and cautious INTERPRETATIONS. Never assert a root cause or defect without evidence. Do not call behavior flat, unchanged, stable, or immaterial when selected comparison facts show a material change. Treat unavailable data as a limitation, never as a process event. If baseline evidence is insufficient, say "Insufficient baseline". Return no more than five ranked findings. Links must be relative ProcessIntelligence paths beginning with /raw-radius-explorer, /telemetry-event-explorer, /overview, or /operational-analysis. Do not emit HTML.`
+const FINAL_SYNTHESIS_INSTRUCTIONS = `${SYSTEM_INSTRUCTIONS} Evidence collection is complete. Do not call tools. Produce the complete structured investigation using only facts already supplied in prior tool results.`
 const CORRECTION_INSTRUCTIONS = `${SYSTEM_INSTRUCTIONS} This is the single grounding-correction response. Do not call any tools. Correct or omit each cited invalid finding using only fact IDs already supplied in prior tool results. Return the complete corrected structured response.`
 
 function safeLog(logger: AiInvestigatorLogger | false, level: 'info' | 'error', value: Record<string, unknown>) {
@@ -73,6 +78,18 @@ function errorCode(error: unknown): string {
   if (error instanceof AiTimeoutError) return error.kind === 'tool' ? 'tool_timeout' : 'overall_timeout'
   if (error instanceof Error && /^[a-z0-9_]+$/.test(error.message)) return error.message
   return 'tool_unavailable'
+}
+
+function safeModelError(error: unknown): Record<string, unknown> {
+  if (!error || typeof error !== 'object') return { errorType: typeof error }
+  const candidate = error as { constructor?: { name?: string }; status?: unknown; code?: unknown; type?: unknown; request_id?: unknown }
+  return {
+    errorType: candidate.constructor?.name ?? 'Error',
+    ...(typeof candidate.status === 'number' ? { status: candidate.status } : {}),
+    ...(typeof candidate.code === 'string' ? { code: candidate.code } : {}),
+    ...(typeof candidate.type === 'string' ? { type: candidate.type } : {}),
+    ...(typeof candidate.request_id === 'string' ? { requestId: candidate.request_id } : {}),
+  }
 }
 
 function fleetTable(evidence: ToolEvidence[]) {
@@ -139,43 +156,59 @@ export class AiInvestigatorOrchestrator {
       return result
     }
 
+    const requestModel = async (phase: AiModelPhase, instructions: string, tools: AiInvestigatorToolDefinition[], toolChoice: AiModelToolChoice) => {
+      safeLog(this.logger, 'info', { event: 'ai_investigator_model_request', analysisId, phase, toolRound: toolRounds, toolCallsUsed, toolsEnabled: tools.length > 0 && toolChoice !== 'none', toolChoice, availableTools: tools.map((tool) => tool.name) })
+      try {
+        const response = await this.model.create(input, instructions, tools, toolChoice, signal)
+        safeLog(this.logger, 'info', { event: 'ai_investigator_model_response', analysisId, responseId: response.id, phase, toolRound: toolRounds, toolCallsUsed, requestedTools: response.toolCalls.map((call) => call.name), usage: response.usage })
+        return response
+      } catch (error) {
+        safeLog(this.logger, 'error', { event: 'ai_investigator_model_failure', analysisId, phase, toolRound: toolRounds, toolCallsUsed, toolsEnabled: tools.length > 0 && toolChoice !== 'none', toolChoice, ...safeModelError(error) })
+        throw error
+      }
+    }
+
+    const synthesize = async (reason: string) => {
+      input.push({ role: 'user', content: JSON.stringify({ evidenceCollectionComplete: true, reason, instruction: 'Produce the final structured investigation from supplied evidence. Tools are disabled.' }) } satisfies ResponseInputItem)
+      const response = await requestModel('final_synthesis', FINAL_SYNTHESIS_INSTRUCTIONS, [], 'none')
+      input.push(...response.outputItems)
+      if (response.toolCalls.length || !response.outputText) throw new Error('invalid_final_synthesis')
+      const draft = validateAiInvestigatorDraft(JSON.parse(response.outputText))
+      const facts = groundingFacts(evidence); const tables = fleetTable(evidence)
+      const first = groundAiInvestigatorDraft(draft, facts, request, tables)
+      if (!first.issues.length) {
+        grounding = { acceptedUnchanged: first.content.findings.length, corrected: 0, omitted: 0, correctionAttempted: false }
+        return finish('complete', first.content)
+      }
+      grounding.correctionAttempted = true
+      safeLog(this.logger, 'info', { event: 'ai_investigator_grounding_rejected', analysisId, issueCount: first.issues.length, issues: first.issues.map(({ findingRank, code }) => ({ findingRank, code })) })
+      input.push({ role: 'user', content: JSON.stringify({ groundingCorrectionRequired: true, issues: first.issues.map(({ findingRank, code, detail }) => ({ findingRank, code, detail })), instruction: 'Correct or omit invalid findings. Use only exact supplied fact IDs. Do not call tools.' }) } satisfies ResponseInputItem)
+      const correction = await requestModel('grounding_correction', CORRECTION_INSTRUCTIONS, [], 'none')
+      if (correction.toolCalls.length || !correction.outputText) throw new Error('invalid_grounding_correction')
+      const correctedDraft = validateAiInvestigatorDraft(JSON.parse(correction.outputText))
+      const corrected = groundAiInvestigatorDraft(correctedDraft, facts, request, tables)
+      const unchanged = correctedDraft.findings.filter((item) => first.acceptedRanks.includes(item.rank) && draft.findings.some((original) => original.rank === item.rank && JSON.stringify(original) === JSON.stringify(item))).length
+      grounding = { acceptedUnchanged: unchanged, corrected: corrected.content.findings.length - unchanged, omitted: corrected.omitted, correctionAttempted: true }
+      if (!corrected.issues.length) return finish('complete', corrected.content)
+      const content = corrected.content
+      content.summary = 'Some AI interpretations could not be verified. Only findings grounded in deterministic ProcessIntelligence evidence are shown.'
+      content.limitations = [...content.limitations, 'Some AI interpretations could not be verified against deterministic ProcessIntelligence evidence and were omitted.']
+      return finish('partial', content)
+    }
+
     try {
       while (!signal.aborted) {
-        const response = await this.model.create(input, SYSTEM_INSTRUCTIONS, this.registry.definitions, signal)
-        safeLog(this.logger, 'info', { event: 'ai_investigator_model_response', analysisId, responseId: response.id, toolRound: toolRounds, usage: response.usage })
+        const response = await requestModel('investigation', SYSTEM_INSTRUCTIONS, this.registry.definitions, 'auto')
         input.push(...response.outputItems)
-        if (!response.toolCalls.length) {
-          if (!response.outputText) throw new Error('empty_ai_investigator_response')
-          const draft = validateAiInvestigatorDraft(JSON.parse(response.outputText))
-          const facts = groundingFacts(evidence); const tables = fleetTable(evidence)
-          const first = groundAiInvestigatorDraft(draft, facts, request, tables)
-          if (!first.issues.length) {
-            grounding = { acceptedUnchanged: first.content.findings.length, corrected: 0, omitted: 0, correctionAttempted: false }
-            return finish('complete', first.content)
-          }
-          grounding.correctionAttempted = true
-          safeLog(this.logger, 'info', { event: 'ai_investigator_grounding_rejected', analysisId, issueCount: first.issues.length, issues: first.issues.map(({ findingRank, code }) => ({ findingRank, code })) })
-          input.push({ role: 'user', content: JSON.stringify({ groundingCorrectionRequired: true, issues: first.issues.map(({ findingRank, code, detail }) => ({ findingRank, code, detail })), instruction: 'Correct or omit invalid findings. Use only exact supplied fact IDs. Do not call tools.' }) } satisfies ResponseInputItem)
-          const correction = await this.model.create(input, CORRECTION_INSTRUCTIONS, [], signal)
-          safeLog(this.logger, 'info', { event: 'ai_investigator_model_response', analysisId, responseId: correction.id, toolRound: toolRounds, groundingCorrection: true, usage: correction.usage })
-          if (correction.toolCalls.length || !correction.outputText) throw new Error('invalid_grounding_correction')
-          const correctedDraft = validateAiInvestigatorDraft(JSON.parse(correction.outputText))
-          const corrected = groundAiInvestigatorDraft(correctedDraft, facts, request, tables)
-          const unchanged = correctedDraft.findings.filter((item) => first.acceptedRanks.includes(item.rank) && draft.findings.some((original) => original.rank === item.rank && JSON.stringify(original) === JSON.stringify(item))).length
-          grounding = { acceptedUnchanged: unchanged, corrected: corrected.content.findings.length - unchanged, omitted: corrected.omitted, correctionAttempted: true }
-          if (!corrected.issues.length) return finish('complete', corrected.content)
-          const content = corrected.content
-          content.summary = 'Some AI interpretations could not be verified. Only findings grounded in deterministic ProcessIntelligence evidence are shown.'
-          content.limitations = [...content.limitations, 'Some AI interpretations could not be verified against deterministic ProcessIntelligence evidence and were omitted.']
-          return finish('partial', content)
-        }
-        if (toolRounds >= this.config.maxToolRounds) return finish('partial', partialContent('partial', evidence, `Maximum tool rounds (${this.config.maxToolRounds}) reached.`))
+        if (!response.toolCalls.length) return await synthesize('model_completed_evidence_collection')
+        if (toolRounds >= this.config.maxToolRounds) return await synthesize('maximum_tool_rounds_reached')
         toolRounds += 1
         const remaining = this.config.maxToolCalls - toolCallsUsed
-        if (remaining <= 0) return finish('partial', partialContent('partial', evidence, `Maximum tool calls (${this.config.maxToolCalls}) reached.`))
+        if (remaining <= 0) return await synthesize('maximum_tool_calls_reached')
         const executable = response.toolCalls.slice(0, remaining)
         const skipped = response.toolCalls.slice(remaining)
         const outputs: unknown[] = []
+        const evidenceOffset = evidence.length
         for (let offset = 0; offset < executable.length; offset += this.config.maxParallelTools) {
           if (signal.aborted) throw new AiTimeoutError('overall')
           const batch = executable.slice(offset, offset + this.config.maxParallelTools)
@@ -205,7 +238,11 @@ export class AiInvestigatorOrchestrator {
         }
         outputs.push(...skipped.map((call) => ({ type: 'function_call_output', call_id: call.callId, output: JSON.stringify({ ok: false, error: 'maximum_tool_calls_reached' }) })))
         input.push(...outputs)
-        if (skipped.length) return finish('partial', partialContent('partial', evidence, `Maximum tool calls (${this.config.maxToolCalls}) reached.`))
+        const newEvidence = evidence.slice(evidenceOffset)
+        const detailEvidenceComplete = newEvidence.some((item) => item.result && (item.name === 'get_press_event_summary' || item.name === 'get_event_context'))
+        if (detailEvidenceComplete) return await synthesize('detail_evidence_collected')
+        if (skipped.length || toolCallsUsed >= this.config.maxToolCalls) return await synthesize('maximum_tool_calls_reached')
+        if (toolRounds >= this.config.maxToolRounds) return await synthesize('maximum_tool_rounds_reached')
       }
       throw new AiTimeoutError('overall')
     } catch (error) {

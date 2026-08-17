@@ -3,14 +3,14 @@ import type { AddressInfo } from 'node:net'
 import { describe, it } from 'node:test'
 import { createApp } from '../src/app.js'
 import type { AiInvestigatorConfig } from '../src/config.js'
-import type { RadiusOverview } from '../src/radius/models.js'
+import type { RadiusOverview, RadiusPressEpisodes } from '../src/radius/models.js'
 import type { RadiusService } from '../src/radius/radius-service.js'
 import type { TelemetryFoundationService } from '../src/telemetry/telemetry-foundation-service.js'
 import type { TelemetryClient } from '../src/telemetry/telemetry-api-client.js'
 import { parseAiInvestigatorRequest, validateAiInvestigatorDraft, type AiGroundingFact, type AiInvestigatorDraftContent } from '../src/ai-investigator/contracts.js'
 import { groundAiInvestigatorDraft } from '../src/ai-investigator/grounding.js'
 import { AiInvestigatorReadOnlyToolRegistry, AI_INVESTIGATOR_TOOL_NAMES, sanitizeProductionContextIdentity } from '../src/ai-investigator/read-only-tools.js'
-import { AiInvestigatorOrchestrator, type AiInvestigatorModelClient, type AiModelResponse } from '../src/ai-investigator/orchestrator.js'
+import { AiInvestigatorOrchestrator, type AiInvestigatorModelClient, type AiModelResponse, type AiModelToolChoice } from '../src/ai-investigator/orchestrator.js'
 
 const start = '2026-08-16T12:00:00.000Z'; const end = '2026-08-17T12:00:00.000Z'
 const request = { scope: { pressKey: null }, range: { startUtc: start, endUtc: end }, analysis: 'discover_unusual_behavior' as const }
@@ -33,8 +33,19 @@ function overview(): RadiusOverview {
   return { fromUtc: start, toUtc: end, plantTimeZone: 'America/Chicago', productionStatusDescription: 'Run Production', stateBreakdownRunConfirmationSeconds: 300, rangeEndIsLive: false, feedStatus: 'ONLINE', lastObservationUtc: end, offlinePressCount: 0, onlinePressCount: 1, summary: { pressesMonitored: 1, currentlyRunProduction: 0, currentlyNonProduction: 1, openEpisodes: 0, totalNonProductionSeconds: 10_800 }, unmappedPressKeys: [], presses: [{ pressKey: 'press3', displayName: 'Press 3', radiusMachineId: 203, availability: 'online', lastRadiusStatus: null, lastObservationUtc: end, offlineSinceUtc: null, currentStatusDescription: 'Run Production', currentEventType: 'G', currentStatusAtUtc: end, isCurrentlyProduction: true, runProductionSeconds: 72_000, nonProductionSeconds: 10_800, offlineSeconds: 3_600, observedSeconds: 82_800, rangeSeconds: 86_400, dataCoveragePercent: 95.8, episodeCount: 2, openEpisodeCount: 0, longestEpisodeSeconds: 900, timelineSegments: [{ kind: 'radius', machineId: 203, pressKey: 'press3', displayName: 'Press 3', startUtc: start, endUtc: end, durationSeconds: 72_000, isOpen: false, sourceGeneration: 'compact', eventType: 'G', statusCode: '150', statusDescription: 'Run Production', isProduction: true }] }], episodeAnalysis: { sequenceFamilies: [] }, operationalAnalytics: { fromUtc: start, toUtc: end, scopePressKeys: ['press3'], scopePressCount: 1, annotationDisclaimer: '', coverage: { possibleSeconds: 86_400, observedSeconds: 82_800, unknownSeconds: 3_600, coveragePercentage: 95.8 }, categories: [], statusDrivers: [], productionStops: { anchorCount: 2, resolvedCount: 2, censoredCount: 0, outcomes: [], paths: [] }, beforeSuccessfulProduction: { anchorCount: 0, resolvedCount: 0, censoredCount: 0, outcomes: [], paths: [] }, afterMakeReady: { anchorCount: 0, resolvedCount: 0, censoredCount: 0, outcomes: [], paths: [], confirmedProductionCount: 0, returnedToMakeReadyCount: 0, enteredBadCount: 0, enteredSStateCount: 0, failedToReachConfirmedProductionCount: 0, unresolvedCount: 0, medianSecondsToConfirmedProduction: null, p90SecondsToConfirmedProduction: null }, relationshipGroups: [], anomalies: [] } }
 }
 
+function pressEpisodes(): RadiusPressEpisodes {
+  const fleet = overview(); const press = fleet.presses[0]
+  return {
+    fromUtc: start, toUtc: end, plantTimeZone: fleet.plantTimeZone, stateBreakdownRunConfirmationSeconds: fleet.stateBreakdownRunConfirmationSeconds, rangeEndIsLive: false,
+    press: { pressKey: 'press3', displayName: 'Press 3', machineId: 203 }, availability: 'online', lastRadiusStatus: null, lastObservationUtc: end, offlineSinceUtc: null,
+    currentStatusDescription: press.currentStatusDescription, currentEventType: press.currentEventType, currentStatusAtUtc: press.currentStatusAtUtc, isCurrentlyProduction: press.isCurrentlyProduction,
+    timelineSegments: press.timelineSegments, episodes: [], analysis: {}, operationalAnalytics: fleet.operationalAnalytics, runComparison: {},
+    summary: { episodeCount: press.episodeCount, openEpisodeCount: press.openEpisodeCount, totalNonProductionSeconds: press.nonProductionSeconds, runProductionSeconds: press.runProductionSeconds, offlineSeconds: press.offlineSeconds, observedSeconds: press.observedSeconds, rangeSeconds: press.rangeSeconds, dataCoveragePercent: press.dataCoveragePercent, averageEpisodeSeconds: 450, longestEpisodeSeconds: press.longestEpisodeSeconds },
+  } as unknown as RadiusPressEpisodes
+}
+
 function radiusWithOverview(load: () => Promise<RadiusOverview>): RadiusService {
-  return { getHealth: async () => ({ status: 'healthy', configured: true }), getOverview: load, getAnalysisOverview: load, getPressEpisodes: async () => { throw new Error('unused') }, getEpisode: async () => { throw new Error('unused') } }
+  return { getHealth: async () => ({ status: 'healthy', configured: true }), getOverview: load, getAnalysisOverview: load, getPressEpisodes: async () => pressEpisodes(), getEpisode: async () => { throw new Error('unused') } }
 }
 
 function registry(radius: RadiusService) { return new AiInvestigatorReadOnlyToolRegistry(radius, {} as TelemetryFoundationService) }
@@ -86,21 +97,54 @@ describe('AI Investigator read-only boundary', () => {
   it('enforces maximum total tool calls and tool rounds', async () => {
     let calls = 0; const load = async () => { calls += 1; return overview() }; const proposed = responseWithCalls({ name: 'get_fleet_operational_summary', arguments: { start, end, press: null } }, { name: 'get_fleet_operational_summary', arguments: { start, end, press: 'press3' } })
     const callLimited = await new AiInvestigatorOrchestrator({ ...config, maxToolCalls: 1 }, registry(radiusWithOverview(load)), modelQueue([proposed]), false).analyze(request)
-    assert.equal(callLimited.status, 'partial'); assert.equal(callLimited.toolCallsUsed, 1); assert.equal(calls, 1)
+    assert.equal(callLimited.status, 'complete'); assert.equal(callLimited.toolCallsUsed, 1); assert.equal(calls, 1)
     const oneCall = responseWithCalls({ name: 'get_fleet_operational_summary', arguments: { start, end, press: null } })
-    const roundLimited = await new AiInvestigatorOrchestrator({ ...config, maxToolRounds: 1 }, registry(radiusWithOverview(load)), modelQueue([oneCall, oneCall]), false).analyze(request)
-    assert.equal(roundLimited.status, 'partial'); assert.equal(roundLimited.toolCallsUsed, 1); assert.equal(calls, 2)
+    const roundLimited = await new AiInvestigatorOrchestrator({ ...config, maxToolRounds: 1 }, registry(radiusWithOverview(load)), modelQueue([oneCall, finalResponse]), false).analyze(request)
+    assert.equal(roundLimited.status, 'complete'); assert.equal(roundLimited.toolCallsUsed, 1); assert.equal(calls, 2)
+  })
+
+  it('allows four full tool rounds and then performs explicit tool-free synthesis', async () => {
+    const oneCall = responseWithCalls({ name: 'get_fleet_operational_summary', arguments: { start, end, press: null } })
+    const responses = [oneCall, oneCall, oneCall, oneCall, finalResponse]; let index = 0; const choices: AiModelToolChoice[] = []; const toolCounts: number[] = []
+    const model: AiInvestigatorModelClient = { create: async (_input, _instructions, tools, toolChoice) => { toolCounts.push(tools.length); choices.push(toolChoice); return responses[index++] } }
+    const result = await new AiInvestigatorOrchestrator(config, registry(radiusWithOverview(async () => overview())), model, false).analyze(request)
+    assert.equal(result.status, 'complete'); assert.equal(result.toolCallsUsed, 4)
+    assert.deepEqual(toolCounts, [4, 4, 4, 4, 0]); assert.deepEqual(choices, ['auto', 'auto', 'auto', 'auto', 'none'])
+  })
+
+  it('reproduces single-press evidence collection and transitions to tool-free grounded synthesis', async () => {
+    const pressRequest = { ...request, scope: { pressKey: 'press3' as const } }
+    const baselineStart = '2026-08-15T12:00:00.000Z'
+    const grounded: AiInvestigatorDraftContent = { ...draftFinding, findings: [{ ...draftFinding.findings[0], pressKey: 'press3', facts: [{ label: 'Production', factIds: ['press3.production_percent.current'] }], evidenceFactIds: ['press3.production_percent.current'] }] }
+    const responses = [
+      responseWithCalls({ name: 'get_fleet_operational_summary', arguments: { start, end, press: 'press3' } }),
+      responseWithCalls({ name: 'compare_press_period', arguments: { press: 'press3', currentStart: start, currentEnd: end, baselineStart, baselineEnd: start } }),
+      responseWithCalls({ name: 'get_press_event_summary', arguments: { press: 'press3', start, end, topN: 5 } }),
+      { id: 'grounded-final', outputText: JSON.stringify(grounded), outputItems: [], toolCalls: [] } satisfies AiModelResponse,
+    ]
+    let index = 0; const choices: AiModelToolChoice[] = []; const toolCounts: number[] = []
+    const model: AiInvestigatorModelClient = { create: async (_input, _instructions, tools, toolChoice) => { toolCounts.push(tools.length); choices.push(toolChoice); return responses[index++] } }
+    const result = await new AiInvestigatorOrchestrator(config, registry(radiusWithOverview(async () => overview())), model, false).analyze(pressRequest)
+    assert.equal(result.status, 'complete'); assert.equal(result.toolCallsUsed, 3); assert.equal(result.findings.length, 1)
+    assert.deepEqual(toolCounts, [4, 4, 4, 0]); assert.deepEqual(choices, ['auto', 'auto', 'auto', 'none'])
+  })
+
+  it('does not dispatch a function call returned during final synthesis', async () => {
+    let calls = 0; const load = async () => { calls += 1; return overview() }
+    const forbiddenFinalCall = responseWithCalls({ name: 'get_fleet_operational_summary', arguments: { start, end, press: null } })
+    const result = await new AiInvestigatorOrchestrator(config, registry(radiusWithOverview(load)), modelQueue([finalResponse, forbiddenFinalCall]), false).analyze(request)
+    assert.equal(result.status, 'error'); assert.equal(result.toolCallsUsed, 0); assert.equal(calls, 0); assert.match(result.limitations.join(' '), /invalid_final_synthesis/)
   })
 
   it('performs at most one no-tool grounding correction and returns grounded content', async () => {
     const invalid: AiInvestigatorDraftContent = { ...draftFinding, findings: [{ ...draftFinding.findings[0], pressKey: 'press3', facts: [{ label: 'Production', factIds: ['press3.invented.value'] }], evidenceFactIds: ['press3.invented.value'] }] }
     const corrected: AiInvestigatorDraftContent = { ...draftFinding, findings: [{ ...draftFinding.findings[0], pressKey: 'press3', facts: [{ label: 'Production', factIds: ['press3.production_percent.current'] }], evidenceFactIds: ['press3.production_percent.current'] }] }
-    const responses = [responseWithCalls({ name: 'get_fleet_operational_summary', arguments: { start, end, press: null } }), { id: 'invalid', outputText: JSON.stringify(invalid), outputItems: [], toolCalls: [] } satisfies AiModelResponse, { id: 'corrected', outputText: JSON.stringify(corrected), outputItems: [], toolCalls: [] } satisfies AiModelResponse]
-    let index = 0; const toolCounts: number[] = []
-    const model: AiInvestigatorModelClient = { create: async (_input, _instructions, tools) => { toolCounts.push(tools.length); return responses[index++] } }
+    const responses = [responseWithCalls({ name: 'get_fleet_operational_summary', arguments: { start, end, press: null } }), finalResponse, { id: 'invalid', outputText: JSON.stringify(invalid), outputItems: [], toolCalls: [] } satisfies AiModelResponse, { id: 'corrected', outputText: JSON.stringify(corrected), outputItems: [], toolCalls: [] } satisfies AiModelResponse]
+    let index = 0; const toolCounts: number[] = []; const choices: AiModelToolChoice[] = []
+    const model: AiInvestigatorModelClient = { create: async (_input, _instructions, tools, toolChoice) => { toolCounts.push(tools.length); choices.push(toolChoice); return responses[index++] } }
     const result = await new AiInvestigatorOrchestrator(config, registry(radiusWithOverview(async () => overview())), model, false).analyze(request)
     assert.equal(result.status, 'complete'); assert.equal(result.toolCallsUsed, 1)
-    assert.deepEqual(toolCounts, [4, 4, 0]); assert.deepEqual(result.grounding, { acceptedUnchanged: 0, corrected: 1, omitted: 0, correctionAttempted: true })
+    assert.deepEqual(toolCounts, [4, 4, 0, 0]); assert.deepEqual(choices, ['auto', 'auto', 'none', 'none']); assert.deepEqual(result.grounding, { acceptedUnchanged: 0, corrected: 1, omitted: 0, correctionAttempted: true })
     assert.equal(result.findings[0].facts[0].value, '87%')
   })
 
