@@ -16,6 +16,7 @@ import type {
   RawTelemetryChangesResponse,
   RawTelemetryHistoryQuery,
   RawTelemetryHistoryResponse,
+  TelemetrySourceSignal,
   TelemetrySemanticHistoryQuery,
   TelemetrySemanticHistoryResponse,
 } from './telemetry-contracts.js'
@@ -29,6 +30,7 @@ export interface TelemetryClient {
   getHealth(requestId?: string): Promise<TelemetryHealth>
   getDatabaseHealth(requestId?: string): Promise<TelemetryDatabaseHealth>
   getSources(requestId?: string, signal?: AbortSignal): Promise<TelemetrySource[]>
+  getSignals?(sourceId: number, requestId?: string, signal?: AbortSignal): Promise<TelemetrySourceSignal[]>
   getCapabilities?(sourceId: number, requestId?: string, signal?: AbortSignal): Promise<TelemetryCapabilitiesResponse>
   getMachineSpeedHistory?(sourceId: number, fromUtc: string, toUtc: string, requestId?: string, signal?: AbortSignal): Promise<TelemetryMachineSpeedHistory>
   querySemanticHistory?(sourceId: number, query: TelemetrySemanticHistoryQuery, requestId?: string, signal?: AbortSignal): Promise<TelemetrySemanticHistoryResponse>
@@ -212,6 +214,19 @@ function parseRawHistory(value: unknown): RawTelemetryHistoryResponse {
     historianReadCount: requireNumber(record, 'historianReadCount'), alternateRepresentationCount: requireNumber(record, 'alternateRepresentationCount'), alternateRawIdentities: requireStrings(record, 'alternateRawIdentities'),
     observations: record.observations.map((item) => { const observation = requireRecord(item); return { timestampUtc: requireString(observation, 'timestampUtc'), receivedAtUtc: requireString(observation, 'receivedAtUtc'), sourceTimestampUtc: requireString(observation, 'sourceTimestampUtc'), qualityState: requireString(observation, 'qualityState'), dataType: requireString(observation, 'dataType'), rawValue: requireJson(observation, 'rawValue') } }),
   }
+}
+
+function parseSourceSignals(value: unknown): TelemetrySourceSignal[] {
+  if (!Array.isArray(value)) throw new TelemetryApiError('invalid_response')
+  return value.map((item) => {
+    const record = requireRecord(item)
+    return {
+      id: requireNumber(record, 'id'), sourceId: requireNumber(record, 'sourceId'),
+      signalId: requireString(record, 'signalId'), displayName: requireString(record, 'displayName'),
+      sourceUnit: nullableString(record, 'sourceUnit'), valueKind: requireString(record, 'valueKind'),
+      enabled: requireBoolean(record, 'enabled'),
+    }
+  })
 }
 
 function parseState(value: unknown): PhysicalState {
@@ -411,6 +426,10 @@ export class TelemetryApiClient implements TelemetryClient {
 
   async getCapabilities(sourceId: number, requestId?: string, signal?: AbortSignal): Promise<TelemetryCapabilitiesResponse> {
     return parseCapabilitiesResponse(await this.request(`/api/telemetry/sources/${sourceId}/capabilities`, undefined, requestId, 'GET', undefined, signal))
+  }
+
+  async getSignals(sourceId: number, requestId?: string, signal?: AbortSignal): Promise<TelemetrySourceSignal[]> {
+    return parseSourceSignals(await this.request(`/api/telemetry/sources/${sourceId}/signals`, undefined, requestId, 'GET', undefined, signal))
   }
 
   async getMachineSpeedHistory(sourceId: number, fromUtc: string, toUtc: string, requestId?: string, signal?: AbortSignal): Promise<TelemetryMachineSpeedHistory> {

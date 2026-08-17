@@ -2334,7 +2334,20 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
 .telemetry-event-variable-list button.is-selected { background: var(--primary-soft); border: 2px solid var(--primary); }
 .telemetry-event-variable-list strong { font-size: .75rem; }
 .telemetry-event-variable-list small { color: var(--muted); font-size: .58rem; overflow-wrap: anywhere; }
+.telemetry-event-load-more { justify-self: center; }
 .telemetry-event-rule-fields { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .45rem; }
+.telemetry-event-value-rule { display: grid; gap: .55rem; }
+.telemetry-variable-preview { grid-column: 1 / -1; display: grid; min-width: 0; gap: .55rem; padding: .8rem; border: 1px solid var(--border); border-radius: .6rem; background: var(--surface-subtle); }
+.telemetry-variable-preview > header { display: flex; justify-content: space-between; align-items: end; gap: 1rem; }
+.telemetry-variable-preview > header > div { display: grid; gap: .15rem; }
+.telemetry-variable-preview > header label { min-width: 14rem; }
+.telemetry-variable-preview p { margin: 0; color: var(--muted); font-size: .72rem; }
+.telemetry-variable-preview__identity { display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); gap: .45rem .8rem; align-items: center; font-size: .66rem; color: var(--muted); }
+.telemetry-variable-preview__identity small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.telemetry-variable-preview .synchronized-timeline { max-height: 13rem; overflow: auto; }
+.telemetry-variable-preview__summary { display: flex; flex-wrap: wrap; gap: .45rem 1rem; font-size: .65rem; color: var(--muted); }
+.telemetry-variable-preview__changes { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.telemetry-variable-preview__changes > * { padding: .3rem .5rem; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-strong); font-size: .62rem; }
 .telemetry-event-results { display: grid; gap: .8rem; }
 .telemetry-event-results > header, .event-investigation-header { display: flex; justify-content: space-between; gap: 1rem; align-items: start; }
 .telemetry-event-results h2, .event-investigation-header h2 { margin: .15rem 0; }
@@ -2362,7 +2375,7 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
 .telemetry-event-browser-rows footer button { min-height: 1.9rem; padding: .28rem .55rem; border-radius: 999px; }
 .telemetry-event-browser-rows footer button.is-active { color: white; background: var(--primary); border-color: var(--primary); }
 @media (max-width: 1050px) { .telemetry-event-setup-grid { grid-template-columns: 1fr; } .telemetry-event-variable { grid-row: auto; } }
-@media (max-width: 700px) { .telemetry-event-rule-fields, .telemetry-event-occurrence-list > button { grid-template-columns: 1fr; } .telemetry-event-results > header, .event-investigation-header { display: grid; } }
+@media (max-width: 700px) { .telemetry-event-rule-fields, .telemetry-event-occurrence-list > button { grid-template-columns: 1fr; } .telemetry-event-results > header, .event-investigation-header, .telemetry-variable-preview > header { display: grid; } .telemetry-variable-preview__identity { grid-template-columns: 1fr; } }
 
 .raw-explorer-setup,
 .raw-result-summary,

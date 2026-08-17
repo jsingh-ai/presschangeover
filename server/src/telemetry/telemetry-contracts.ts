@@ -9,6 +9,16 @@ export type TelemetryValueKind = (typeof TELEMETRY_VALUE_KINDS)[number]
 export type TelemetryScalarValue = number | boolean | string
 export type RawTelemetryValue = TelemetryScalarValue | null | RawTelemetryValue[] | { [key: string]: RawTelemetryValue }
 
+export interface TelemetrySourceSignal {
+  id: number
+  sourceId: number
+  signalId: string
+  displayName: string
+  sourceUnit: string | null
+  valueKind: string
+  enabled: boolean
+}
+
 export interface RawTelemetryChangesQuery {
   press: RadiusPressKey
   fromUtc: string

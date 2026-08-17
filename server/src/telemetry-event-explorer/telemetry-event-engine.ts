@@ -1,5 +1,6 @@
 export type ThresholdOperator = '>' | '>=' | '<' | '<='
 export type DeltaDirection = 'increase' | 'decrease' | 'either'
+export type EventScalarValue = number | boolean | string
 
 export interface NumericEventObservation {
   atUtc: string
@@ -16,6 +17,32 @@ export interface DeltaRule {
   direction: DeltaDirection
   amount: number
   windowMinutes: number
+}
+
+export interface ValueChangeRule {
+  match: 'any' | 'becomes' | 'from_to'
+  becomesValue?: EventScalarValue
+  fromValue?: EventScalarValue
+  toValue?: EventScalarValue
+}
+
+export interface ValueEventObservation {
+  atUtc: string
+  value: EventScalarValue
+  qualityState?: string
+}
+
+export interface ValueChangeDetection {
+  startUtc: string
+  endUtc: string
+  durationSeconds: 0
+  transitionAtUtc: string
+  previousAtUtc: string | null
+  previousValue: EventScalarValue
+  newValue: EventScalarValue
+  clippedStart: boolean
+  clippedEnd: false
+  dataGap: boolean
 }
 
 export interface ThresholdDetection {
@@ -189,5 +216,56 @@ export function detectDeltaEvents(input: {
     history.push(current); previous = current
   }
   if (active) finish(input.toUtc, true, false)
+  return result
+}
+
+function usableScalar(observation: ValueEventObservation): boolean {
+  if (!Number.isFinite(Date.parse(observation.atUtc)) || !['number', 'boolean', 'string'].includes(typeof observation.value) || typeof observation.value === 'number' && !Number.isFinite(observation.value)) return false
+  const quality = observation.qualityState?.toUpperCase() ?? ''
+  return !['BAD', 'INVALID', 'UNAVAILABLE', 'NO_DATA', 'NODATA'].some((token) => quality.includes(token))
+}
+
+function scalarObservations(values: ValueEventObservation[]): ValueEventObservation[] {
+  const byTimestamp = new Map<number, ValueEventObservation>()
+  for (const item of values.filter(usableScalar).map((value) => ({ ...value, atUtc: new Date(Date.parse(value.atUtc)).toISOString() })).sort((a, b) => Date.parse(a.atUtc) - Date.parse(b.atUtc))) byTimestamp.set(Date.parse(item.atUtc), item)
+  return [...byTimestamp.values()]
+}
+
+function sameScalar(left: EventScalarValue, right: EventScalarValue) {
+  return typeof left === typeof right && Object.is(left, right)
+}
+
+function matchesValueChange(previousValue: EventScalarValue, newValue: EventScalarValue, rule: ValueChangeRule) {
+  if (rule.match === 'any') return true
+  if (rule.match === 'becomes') return rule.becomesValue !== undefined && sameScalar(newValue, rule.becomesValue)
+  return rule.fromValue !== undefined && rule.toValue !== undefined && sameScalar(previousValue, rule.fromValue) && sameScalar(newValue, rule.toValue)
+}
+
+export function detectValueChangeEvents(input: {
+  observations: ValueEventObservation[]
+  fromUtc: string
+  toUtc: string
+  rule: ValueChangeRule
+  seed?: ValueEventObservation | null
+}): ValueChangeDetection[] {
+  const fromMs = Date.parse(input.fromUtc); const toMs = Date.parse(input.toUtc)
+  const seed = input.seed && usableScalar(input.seed) && Date.parse(input.seed.atUtc) < fromMs ? { ...input.seed, atUtc: new Date(Date.parse(input.seed.atUtc)).toISOString() } : undefined
+  const inRange = scalarObservations(input.observations).filter(({ atUtc }) => Date.parse(atUtc) >= fromMs && Date.parse(atUtc) <= toMs)
+  const cadenceValues = [...(seed ? [seed] : []), ...inRange].map(({ atUtc }) => ({ atUtc, value: 0 }))
+  const gapLimit = significantGapMs(cadenceValues)
+  const result: ValueChangeDetection[] = []
+  let previous = seed
+  for (const current of inRange) {
+    if (!previous) { previous = current; continue }
+    if (sameScalar(previous.value, current.value)) { previous = current; continue }
+    const dataGap = Date.parse(current.atUtc) - Date.parse(previous.atUtc) > gapLimit
+    if (matchesValueChange(previous.value, current.value, input.rule)) result.push({
+      startUtc: current.atUtc, endUtc: current.atUtc, durationSeconds: 0,
+      transitionAtUtc: current.atUtc, previousAtUtc: previous.atUtc,
+      previousValue: previous.value, newValue: current.value,
+      clippedStart: Date.parse(previous.atUtc) < fromMs, clippedEnd: false, dataGap,
+    })
+    previous = current
+  }
   return result
 }

@@ -798,13 +798,17 @@ export interface RawUnmappedPlotResult {
   performance: { totalMs: number; historianReadCount: number; payloadBytes: number }
 }
 
-export type TelemetryEventSource = { kind: 'canonical'; canonicalId: string } | { kind: 'raw'; pressKey: RadiusPressKey; rawIdentity: string; displayName: string }
-export type TelemetryEventRule = { kind: 'threshold'; operator: '>' | '>=' | '<' | '<='; threshold: number } | { kind: 'delta'; direction: 'increase' | 'decrease' | 'either'; amount: number; windowMinutes: number }
+export type TelemetryEventScalar = number | boolean | string
+export type TelemetryEventSource = { kind: 'canonical'; canonicalId: string } | { kind: 'raw'; pressKey: RadiusPressKey; rawIdentity: string; displayName: string; dataType?: string; dataKind?: string }
+export type TelemetryEventRule = { kind: 'threshold'; operator: '>' | '>=' | '<' | '<='; threshold: number } | { kind: 'delta'; direction: 'increase' | 'decrease' | 'either'; amount: number; windowMinutes: number } | { kind: 'value_change'; match: 'any' | 'becomes' | 'from_to'; becomesValue?: TelemetryEventScalar; fromValue?: TelemetryEventScalar; toValue?: TelemetryEventScalar }
 
 export interface TelemetryEventCatalog {
-  canonicalVariables: Array<{ kind: 'canonical'; canonicalId: string; displayName: string; scope: 'machine' | 'deck'; signalType: RawExplorerSignalType; category: RawExplorerCategory; compatiblePresses: Array<{ pressKey: RadiusPressKey; displayName: string; deckNumbers: number[] }> }>
-  rawVariables: Array<{ kind: 'raw'; pressKey: RadiusPressKey; rawIdentity: string; displayName: string; discoveryCategory: string; sourceUnit: string | null }>
+  canonicalVariables: Array<{ kind: 'canonical'; canonicalId: string; displayName: string; scope: 'machine' | 'deck'; signalType: RawExplorerSignalType; dataKind: 'numeric' | 'string' | 'boolean' | 'categorical'; category: RawExplorerCategory; compatiblePresses: Array<{ pressKey: RadiusPressKey; displayName: string; deckNumbers: number[] }> }>
 }
+
+export interface TelemetryEventRawCatalogItem { kind: 'raw'; pressKey: RadiusPressKey; rawIdentity: string; displayName: string; dataType: string; dataKind: 'numeric' | 'string' | 'boolean' | 'categorical'; discoveryCategory: string; sourceUnit: string | null; plottable: boolean }
+export interface TelemetryEventRawCatalogResult { pressKey: RadiusPressKey; query: string; offset: number; limit: number; total: number; catalogTotal: number; items: TelemetryEventRawCatalogItem[] }
+export interface TelemetryEventPreview { sourceKind: 'canonical' | 'raw'; pressKey: RadiusPressKey; displayName: string; deckNumber: number | null; canonicalId: string | null; rawIdentity: string; signalDisplayName: string; dataType: string; dataKind: 'numeric' | 'string' | 'boolean' | 'categorical'; sourceUnit: string | null; canonicalUnitStatus: string | null; fromUtc: string; toUtc: string; plottable: boolean; observations: Array<{ atUtc: string; value: TelemetryEventScalar; qualityState?: string }> }
 
 export interface TelemetryEventSearchInput {
   fromUtc: string
@@ -827,6 +831,8 @@ export interface TelemetryEventOccurrence {
   signalDisplayName: string
   sourceUnit: string | null
   canonicalUnitStatus: string | null
+  valueKind: string
+  dataKind: 'numeric' | 'string' | 'boolean' | 'categorical'
   pressOccurrenceIndex: number
   pressOccurrenceCount: number
   startUtc: string
@@ -834,7 +840,7 @@ export interface TelemetryEventOccurrence {
   durationSeconds: number
   chartFromUtc: string
   chartToUtc: string
-  eventType: 'threshold' | 'delta'
+  eventType: 'threshold' | 'delta' | 'value_change'
   clippedStart?: boolean
   clippedEnd: boolean
   dataGap: boolean
@@ -851,6 +857,10 @@ export interface TelemetryEventOccurrence {
   elapsedSeconds?: number
   maximumExcursion?: number
   maximumExcursionAtUtc?: string
+  transitionAtUtc?: string
+  previousAtUtc?: string | null
+  previousValue?: TelemetryEventScalar
+  newValue?: TelemetryEventScalar
 }
 
 export interface TelemetryEventSearchResult {
@@ -867,6 +877,7 @@ export interface TelemetryEventCanonicalHistory {
   sourceUnit: string | null
   canonicalUnitStatus: string | null
   representation: 'samples' | 'changes'
+  valueKind?: string | null
   seed: RawTelemetrySample | null
   samples: RawTelemetrySample[]
   changes: RawTelemetryChange[]

@@ -19,7 +19,9 @@ import {
   type RawTelemetryChangesResponse,
   type RawTelemetryHistoryResponse,
   type TelemetrySemanticHistoryQuery,
+  type TelemetrySourceSignal,
   type TelemetrySemanticSignalHistory,
+  type TelemetryValueKind,
 } from './telemetry-contracts.js'
 import { TelemetryApiError } from './telemetry-error.js'
 import { TelemetrySourceRegistry } from './telemetry-source-registry.js'
@@ -50,6 +52,7 @@ function signalEvidence(signal: TelemetrySemanticSignalHistory, capability?: Cap
 }
 
 export interface PressSemanticSignalWithIdentity extends PressSemanticSignalEvidence {
+  valueKind?: TelemetryValueKind | null
   historianSignalId: number | null
   rawSignalId: string | null
   sourceSelector: string | null
@@ -95,7 +98,7 @@ export class TelemetryFoundationService {
     if (upstream.sourceId !== resolved.source.id || upstream.sourceKey.toLowerCase() !== pressKey) throw new TelemetryApiError('invalid_response')
     return {
       pressKey, sourceKey: upstream.sourceKey, displayName: upstream.displayName, fromUtc: upstream.fromUtc, toUtc: upstream.toUtc, includeSeed: upstream.includeSeed,
-      signals: upstream.signals.map((item) => ({ ...signalEvidence(item, capabilitySet?.capabilities.find(({ canonicalId }) => canonicalId === item.canonicalId)), historianSignalId: item.historianSignalId, rawSignalId: item.rawSignalId, sourceSelector: item.sourceSelector, selectedVariant: item.selectedVariant })),
+      signals: upstream.signals.map((item) => ({ ...signalEvidence(item, capabilitySet?.capabilities.find(({ canonicalId }) => canonicalId === item.canonicalId)), valueKind: item.valueKind, historianSignalId: item.historianSignalId, rawSignalId: item.rawSignalId, sourceSelector: item.sourceSelector, selectedVariant: item.selectedVariant })),
     }
   }
 
@@ -104,6 +107,14 @@ export class TelemetryFoundationService {
     const response = await this.client.getRawTelemetryChanges({ press: pressKey, fromUtc, toUtc }, requestId, signal)
     if (response.press.toLowerCase() !== pressKey) throw new TelemetryApiError('invalid_response')
     return response
+  }
+
+  async rawCatalog(pressKey: RadiusPressKey, requestId?: string, signal?: AbortSignal): Promise<TelemetrySourceSignal[]> {
+    if (!this.client.getSignals) throw new TelemetryApiError('unavailable')
+    const resolved = await this.sources.resolve(pressKey, requestId, signal)
+    const values = await this.client.getSignals(resolved.source.id, requestId, signal)
+    if (values.some(({ sourceId }) => sourceId !== resolved.source.id)) throw new TelemetryApiError('invalid_response')
+    return values.filter(({ enabled }) => enabled)
   }
 
   async rawHistory(pressKey: RadiusPressKey, rawIdentity: string, fromUtc: string, toUtc: string, requestId?: string, signal?: AbortSignal): Promise<RawTelemetryHistoryResponse> {

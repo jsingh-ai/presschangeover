@@ -253,3 +253,18 @@ test('raw telemetry history requests one exact raw identity and preserves suppor
   assert.equal(result.observations[0]?.timestampUtc, '2026-08-14T16:46:00.000Z')
   assert.equal(result.observations[0]?.rawValue, 10)
 })
+
+test('source signal catalog preserves numeric, string, and boolean scalar metadata', async () => {
+  let requestedUrl = ''
+  const client = new TelemetryApiClient({ baseUrl: 'http://telemetry.internal:5080', timeoutMs: 500 }, async (input) => {
+    requestedUrl = String(input)
+    return jsonResponse([
+      { id: 1, sourceId: 14, signalId: 'Press14.Temp', displayName: 'Temperature', sourceUnit: 'degF', valueKind: 'numeric', enabled: true },
+      { id: 2, sourceId: 14, signalId: 'Press14.Job', displayName: 'Job', sourceUnit: null, valueKind: 'string', enabled: true },
+      { id: 3, sourceId: 14, signalId: 'Press14.Nip', displayName: 'Nip', sourceUnit: null, valueKind: 'boolean', enabled: true },
+    ])
+  })
+  const result = await client.getSignals(14)
+  assert.equal(requestedUrl, 'http://telemetry.internal:5080/api/telemetry/sources/14/signals')
+  assert.deepEqual(result.map(({ signalId, valueKind }) => ({ signalId, valueKind })), [{ signalId: 'Press14.Temp', valueKind: 'numeric' }, { signalId: 'Press14.Job', valueKind: 'string' }, { signalId: 'Press14.Nip', valueKind: 'boolean' }])
+})

@@ -327,23 +327,33 @@ function parseRawReviewStatus(value: unknown): RawTelemetryReviewStatus {
   return value as RawTelemetryReviewStatus
 }
 
+function parseTelemetryEventSource(value: unknown): TelemetryEventSearchInput['source'] {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RequestValidationError('invalid_telemetry_event_source')
+  const raw = value as Record<string, unknown>
+  if (raw.kind === 'canonical') {
+    if (typeof raw.canonicalId !== 'string' || !/^[a-z0-9_.]{1,200}$/.test(raw.canonicalId)) throw new RequestValidationError('invalid_telemetry_event_source')
+    return { kind: 'canonical', canonicalId: raw.canonicalId }
+  }
+  if (raw.kind === 'raw') {
+    const rawIdentity = parseRawIdentity(raw.rawIdentity)
+    if (typeof raw.displayName !== 'string' || !raw.displayName.trim() || raw.displayName.length > 300) throw new RequestValidationError('invalid_telemetry_event_source')
+    return { kind: 'raw', pressKey: parsePressKey(String(raw.pressKey ?? '')), rawIdentity, displayName: raw.displayName, ...(typeof raw.dataType === 'string' ? { dataType: raw.dataType } : {}), ...(typeof raw.dataKind === 'string' ? { dataKind: raw.dataKind } : {}) }
+  }
+  throw new RequestValidationError('invalid_telemetry_event_source')
+}
+
+function parseTelemetryEventScalar(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value) || typeof value === 'boolean' || typeof value === 'string' && value.length <= 1_000) return value
+  throw new RequestValidationError('invalid_telemetry_event_rule')
+}
+
 function parseTelemetryEventSearch(body: unknown): TelemetryEventSearchInput {
   if (!body || typeof body !== 'object' || Array.isArray(body)) throw new RequestValidationError('invalid_telemetry_event_search')
   const raw = body as Record<string, unknown>
   const fromUtc = parseUtcTimestamp(raw.fromUtc, 'invalid_from_utc'); const toUtc = parseUtcTimestamp(raw.toUtc, 'invalid_to_utc')
   const rangeMs = Date.parse(toUtc) - Date.parse(fromUtc)
   if (rangeMs <= 0 || rangeMs > TELEMETRY_EVENT_MAX_RANGE_MS) throw new RequestValidationError('invalid_time_range')
-  if (!raw.source || typeof raw.source !== 'object' || Array.isArray(raw.source)) throw new RequestValidationError('invalid_telemetry_event_source')
-  const sourceRaw = raw.source as Record<string, unknown>
-  let source: TelemetryEventSearchInput['source']
-  if (sourceRaw.kind === 'canonical') {
-    if (typeof sourceRaw.canonicalId !== 'string' || !/^[a-z0-9_.]{1,200}$/.test(sourceRaw.canonicalId)) throw new RequestValidationError('invalid_telemetry_event_source')
-    source = { kind: 'canonical', canonicalId: sourceRaw.canonicalId }
-  } else if (sourceRaw.kind === 'raw') {
-    const rawIdentity = parseRawIdentity(sourceRaw.rawIdentity)
-    if (typeof sourceRaw.displayName !== 'string' || !sourceRaw.displayName.trim() || sourceRaw.displayName.length > 300) throw new RequestValidationError('invalid_telemetry_event_source')
-    source = { kind: 'raw', pressKey: parsePressKey(String(sourceRaw.pressKey ?? '')), rawIdentity, displayName: sourceRaw.displayName }
-  } else throw new RequestValidationError('invalid_telemetry_event_source')
+  const source = parseTelemetryEventSource(raw.source)
   const pressKey = raw.pressKey === 'all' ? 'all' : parsePressKey(String(raw.pressKey ?? ''))
   const deckNumber = raw.deckNumber === 'any' ? 'any' : raw.deckNumber === null ? null : Number(raw.deckNumber)
   if (deckNumber !== 'any' && deckNumber !== null && (!Number.isSafeInteger(deckNumber) || deckNumber < 1 || deckNumber > 10)) throw new RequestValidationError('invalid_telemetry_event_deck')
@@ -356,6 +366,10 @@ function parseTelemetryEventSearch(body: unknown): TelemetryEventSearchInput {
   } else if (ruleRaw.kind === 'delta') {
     if (!['increase', 'decrease', 'either'].includes(String(ruleRaw.direction)) || typeof ruleRaw.amount !== 'number' || !Number.isFinite(ruleRaw.amount) || ruleRaw.amount <= 0 || !Number.isSafeInteger(ruleRaw.windowMinutes) || Number(ruleRaw.windowMinutes) < 1 || Number(ruleRaw.windowMinutes) > 1_440) throw new RequestValidationError('invalid_telemetry_event_rule')
     rule = { kind: 'delta', direction: ruleRaw.direction as 'increase' | 'decrease' | 'either', amount: ruleRaw.amount, windowMinutes: Number(ruleRaw.windowMinutes) }
+  } else if (ruleRaw.kind === 'value_change') {
+    if (!['any', 'becomes', 'from_to'].includes(String(ruleRaw.match))) throw new RequestValidationError('invalid_telemetry_event_rule')
+    const match = ruleRaw.match as 'any' | 'becomes' | 'from_to'
+    rule = match === 'any' ? { kind: 'value_change', match } : match === 'becomes' ? { kind: 'value_change', match, becomesValue: parseTelemetryEventScalar(ruleRaw.becomesValue) } : { kind: 'value_change', match, fromValue: parseTelemetryEventScalar(ruleRaw.fromValue), toValue: parseTelemetryEventScalar(ruleRaw.toValue) }
   } else throw new RequestValidationError('invalid_telemetry_event_rule')
   if (!Number.isSafeInteger(raw.chartContextMinutes) || Number(raw.chartContextMinutes) < 0 || Number(raw.chartContextMinutes) > TELEMETRY_EVENT_MAX_CONTEXT_MINUTES) throw new RequestValidationError('invalid_telemetry_event_context')
   if (source.kind === 'raw' && (pressKey === 'all' || pressKey !== source.pressKey || deckNumber !== null)) throw new RequestValidationError('invalid_telemetry_event_source_scope')
@@ -367,7 +381,7 @@ function parseTelemetryEventOccurrence(value: unknown): TelemetryEventOccurrence
   const raw = value as Record<string, unknown>
   const occurrenceId = typeof raw.occurrenceId === 'string' && raw.occurrenceId.length <= 2_000 ? raw.occurrenceId : undefined
   const sourceKind = raw.sourceKind === 'canonical' || raw.sourceKind === 'raw' ? raw.sourceKind : undefined
-  const eventType = raw.eventType === 'threshold' || raw.eventType === 'delta' ? raw.eventType : undefined
+  const eventType = raw.eventType === 'threshold' || raw.eventType === 'delta' || raw.eventType === 'value_change' ? raw.eventType : undefined
   const startUtc = parseUtcTimestamp(raw.startUtc, 'invalid_telemetry_event_occurrence'); const endUtc = parseUtcTimestamp(raw.endUtc, 'invalid_telemetry_event_occurrence')
   const chartFromUtc = parseUtcTimestamp(raw.chartFromUtc, 'invalid_telemetry_event_occurrence'); const chartToUtc = parseUtcTimestamp(raw.chartToUtc, 'invalid_telemetry_event_occurrence')
   if (!occurrenceId || !sourceKind || !eventType || Date.parse(endUtc) < Date.parse(startUtc) || Date.parse(chartFromUtc) > Date.parse(startUtc) || Date.parse(chartToUtc) < Date.parse(endUtc) || Date.parse(chartToUtc) - Date.parse(chartFromUtc) > (TELEMETRY_EVENT_MAX_CONTEXT_MINUTES * 2 * 60_000 + TELEMETRY_EVENT_MAX_RANGE_MS)) throw new RequestValidationError('invalid_telemetry_event_occurrence')
@@ -376,6 +390,11 @@ function parseTelemetryEventOccurrence(value: unknown): TelemetryEventOccurrence
   if (raw.deckNumber !== null && (!Number.isSafeInteger(raw.deckNumber) || Number(raw.deckNumber) < 1 || Number(raw.deckNumber) > 10)) throw new RequestValidationError('invalid_telemetry_event_occurrence')
   const numeric = (name: string, required = false) => { const candidate = raw[name]; if (candidate === undefined && !required) return undefined; if (typeof candidate !== 'number' || !Number.isFinite(candidate)) throw new RequestValidationError('invalid_telemetry_event_occurrence'); return candidate }
   for (const name of ['extremeAtUtc', 'baselineAtUtc', 'triggerAtUtc', 'maximumExcursionAtUtc'] as const) if (raw[name] !== undefined) parseUtcTimestamp(raw[name], 'invalid_telemetry_event_occurrence')
+  if (eventType === 'value_change') {
+    parseUtcTimestamp(raw.transitionAtUtc, 'invalid_telemetry_event_occurrence')
+    if (raw.previousAtUtc !== null) parseUtcTimestamp(raw.previousAtUtc, 'invalid_telemetry_event_occurrence')
+    parseTelemetryEventScalar(raw.previousValue); parseTelemetryEventScalar(raw.newValue)
+  }
   return { ...(raw as unknown as TelemetryEventOccurrence), occurrenceId, sourceKind, eventType, pressKey: parsePressKey(String(raw.pressKey ?? '')), displayName: raw.displayName, deckNumber: raw.deckNumber === null ? null : Number(raw.deckNumber), canonicalId: raw.canonicalId as string | null, rawIdentity: raw.rawIdentity, signalDisplayName: raw.signalDisplayName, startUtc, endUtc, chartFromUtc, chartToUtc, durationSeconds: numeric('durationSeconds', true)!, pressOccurrenceIndex: numeric('pressOccurrenceIndex', true)!, pressOccurrenceCount: numeric('pressOccurrenceCount', true)!, clippedEnd: Boolean(raw.clippedEnd), dataGap: Boolean(raw.dataGap) }
 }
 
@@ -635,6 +654,24 @@ export function createApp({
     const rawPressKey = request.query.rawPressKey === undefined ? undefined : parsePressKey(String(request.query.rawPressKey))
     const range = rawPressKey ? validateRadiusRange(request.query) : undefined
     response.status(200).json(await telemetryEventExplorer.catalog(rawPressKey, range?.fromUtc, range?.toUtc, String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.get('/api/telemetry/event-explorer/raw-catalog', asyncRoute(async (request, response) => {
+    const pressKey = parsePressKey(String(request.query.pressKey ?? ''))
+    const query = typeof request.query.q === 'string' ? request.query.q : ''
+    const offset = request.query.offset === undefined ? 0 : Number(request.query.offset)
+    const limit = request.query.limit === undefined ? 50 : Number(request.query.limit)
+    if (query.length > 300 || !Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new RequestValidationError('invalid_raw_catalog_query')
+    response.status(200).json(await telemetryEventExplorer.rawCatalog(pressKey, query, offset, limit, String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.post('/api/telemetry/event-explorer/preview', asyncRoute(async (request, response) => {
+    if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)) throw new RequestValidationError('invalid_telemetry_event_preview')
+    const raw = request.body as Record<string, unknown>; const range = validateBodyRange(raw)
+    const source = parseTelemetryEventSource(raw.source); const pressKey = parsePressKey(String(raw.pressKey ?? ''))
+    const deckNumber = raw.deckNumber === null ? null : Number(raw.deckNumber)
+    if (deckNumber !== null && (!Number.isSafeInteger(deckNumber) || deckNumber < 1 || deckNumber > 10) || source.kind === 'raw' && (source.pressKey !== pressKey || deckNumber !== null)) throw new RequestValidationError('invalid_telemetry_event_preview')
+    response.status(200).json(await telemetryEventExplorer.preview({ source, pressKey, deckNumber, ...range }, String(response.locals.requestId), cancellationSignal(request, response)))
   }))
 
   app.post('/api/telemetry/event-explorer/search', asyncRoute(async (request, response) => {

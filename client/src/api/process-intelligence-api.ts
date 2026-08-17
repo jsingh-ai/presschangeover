@@ -32,10 +32,13 @@ import type {
   RawTelemetryReviewStatus,
   RawUnmappedPlotResult,
   TelemetryEventCatalog,
+  TelemetryEventPreview,
+  TelemetryEventRawCatalogResult,
   TelemetryEventDetail,
   TelemetryEventOccurrence,
   TelemetryEventSearchInput,
   TelemetryEventSearchResult,
+  TelemetryEventSource,
 } from '../types/api'
 import type {
   CuratedPhysicalEvidence,
@@ -189,10 +192,17 @@ export function setRawTelemetryReview(pressKey: RadiusPressKey, rawIdentity: str
   return sendJson<RawTelemetryReview>('/api/radius/raw-explorer/raw-review', 'PATCH', { pressKey, rawIdentity, reviewStatus }, signal)
 }
 
-export function getTelemetryEventCatalog(fromUtc?: string, toUtc?: string, rawPressKey?: RadiusPressKey, signal?: AbortSignal) {
-  const query = new URLSearchParams()
-  if (rawPressKey && fromUtc && toUtc) { query.set('rawPressKey', rawPressKey); query.set('fromUtc', fromUtc); query.set('toUtc', toUtc) }
-  return getJson<TelemetryEventCatalog>(`/api/telemetry/event-explorer/catalog${query.size ? `?${query}` : ''}`, signal)
+export function getTelemetryEventCatalog(signal?: AbortSignal) {
+  return getJson<TelemetryEventCatalog>('/api/telemetry/event-explorer/catalog', signal)
+}
+
+export function searchTelemetryEventRawCatalog(pressKey: RadiusPressKey, query: string, offset = 0, limit = 50, signal?: AbortSignal) {
+  const parameters = new URLSearchParams({ pressKey, q: query, offset: String(offset), limit: String(limit) })
+  return getJson<TelemetryEventRawCatalogResult>(`/api/telemetry/event-explorer/raw-catalog?${parameters}`, signal)
+}
+
+export function previewTelemetryEventVariable(input: { source: TelemetryEventSource; pressKey: RadiusPressKey; deckNumber: number | null; fromUtc: string; toUtc: string }, signal?: AbortSignal) {
+  return sendJson<TelemetryEventPreview>('/api/telemetry/event-explorer/preview', 'POST', input, signal)
 }
 
 export function searchTelemetryEvents(input: TelemetryEventSearchInput, signal?: AbortSignal) {
