@@ -276,7 +276,7 @@ export class AiInvestigatorOrchestrator {
   ) {}
 
   async analyzeDiscovery(request: AiInvestigatorRequest, requestSignal?: AbortSignal): Promise<AiInvestigatorResult> {
-    const analysisId = randomUUID(); const started = this.now(); const startedAt = started.toISOString(); const deadlineAt = Date.now() + this.config.totalTimeoutMs
+    const analysisId = randomUUID(); const started = this.now(); const startedAt = started.toISOString()
     const deadline = new AbortController(); const deadlineTimer = setTimeout(() => deadline.abort(new AiTimeoutError('overall')), this.config.totalTimeoutMs)
     const signal = requestSignal ? AbortSignal.any([deadline.signal, requestSignal]) : deadline.signal
     let evidence: ToolEvidence[] = []
@@ -295,22 +295,14 @@ export class AiInvestigatorOrchestrator {
       const input: unknown[] = [{ role: 'user', content: JSON.stringify(preflight.modelInput) } satisfies ResponseInputItem]
       const options: AiModelRequestOptions = { structuredOutputSchema: AI_INVESTIGATOR_DISCOVERY_SCHEMA as unknown as Record<string, unknown>, structuredOutputName: 'process_intelligence_discovery', maxOutputTokens: DISCOVERY_OUTPUT_TOKENS, promptCacheKey: DISCOVERY_PROMPT_CACHE_KEY }
       const payload = buildAiResponsesRequestPayload(this.config.model, input, DISCOVERY_INSTRUCTIONS, [], 'none', options)
-      let response: AiModelResponse | undefined; let requestNumber = 0; let rateLimitRetryUsed = false
-      while (!response) {
-        requestNumber += 1
-        safeLog(this.logger, 'info', { event: 'ai_investigator_model_request', architecture: 'single_synthesis', analysisId, requestNumber, phase: 'final_synthesis', toolsEnabled: false, toolChoice: 'none', availableTools: [], estimatedInputTokens: Math.ceil(utf8Bytes(payload) / 4), maxOutputTokens: DISCOVERY_OUTPUT_TOKENS, requestBytes: utf8Bytes(payload), modelFacingEvidenceBytes: utf8Bytes(preflight.modelInput), toolResultsIncluded: evidence.length, priorModelMessagesIncluded: 0, priorModelResultsIncluded: 0 })
-        try {
-          response = await this.model.create(input, DISCOVERY_INSTRUCTIONS, [], 'none', signal, options)
-          safeLog(this.logger, 'info', { event: 'ai_investigator_model_response', architecture: 'single_synthesis', analysisId, requestNumber, responseId: response.id, phase: 'final_synthesis', usage: response.usage, ...response.http })
-        } catch (error) {
-          const resetDelay = retryDelayMs(error); const jitterMs = 25 + Math.floor(this.random() * 76); const remainingMs = Math.max(0, deadlineAt - Date.now())
-          const retryable = isRateLimit(error) && !rateLimitRetryUsed && resetDelay !== undefined && resetDelay + jitterMs + this.config.openAiTimeoutMs < remainingMs
-          safeLog(this.logger, 'error', { event: 'ai_investigator_model_failure', architecture: 'single_synthesis', analysisId, requestNumber, phase: 'final_synthesis', ...safeModelError(error) })
-          if (!retryable) throw error
-          rateLimitRetryUsed = true
-          safeLog(this.logger, 'info', { event: 'ai_investigator_model_retry', architecture: 'single_synthesis', analysisId, requestNumber, phase: 'final_synthesis', retryNumber: 1, waitMs: resetDelay + jitterMs, remainingMs })
-          await this.wait(resetDelay + jitterMs, signal)
-        }
+      safeLog(this.logger, 'info', { event: 'ai_investigator_model_request', architecture: 'single_synthesis', analysisId, requestNumber: 1, phase: 'final_synthesis', toolsEnabled: false, toolChoice: 'none', availableTools: [], estimatedInputTokens: Math.ceil(utf8Bytes(payload) / 4), maxOutputTokens: DISCOVERY_OUTPUT_TOKENS, requestBytes: utf8Bytes(payload), modelFacingEvidenceBytes: utf8Bytes(preflight.modelInput), toolResultsIncluded: evidence.length, priorModelMessagesIncluded: 0, priorModelResultsIncluded: 0 })
+      let response: AiModelResponse
+      try {
+        response = await this.model.create(input, DISCOVERY_INSTRUCTIONS, [], 'none', signal, options)
+        safeLog(this.logger, 'info', { event: 'ai_investigator_model_response', architecture: 'single_synthesis', analysisId, requestNumber: 1, responseId: response.id, phase: 'final_synthesis', usage: response.usage, ...response.http })
+      } catch (error) {
+        safeLog(this.logger, 'error', { event: 'ai_investigator_model_failure', architecture: 'single_synthesis', analysisId, requestNumber: 1, phase: 'final_synthesis', ...safeModelError(error) })
+        throw error
       }
       if (response.toolCalls.length || !response.outputText) throw new Error('invalid_final_synthesis')
       const compactDraft = validateAiInvestigatorDiscoveryDraft(JSON.parse(response.outputText))
@@ -319,7 +311,7 @@ export class AiInvestigatorOrchestrator {
         if (!suppliedPresses.has(finding.pressKey) || ranks.has(finding.rank) || findingPresses.has(finding.pressKey)) throw new Error('invalid_investigator_response')
         ranks.add(finding.rank); findingPresses.add(finding.pressKey)
       }
-      const expanded = expandDiscoveryDraft(compactDraft, preflight.facts)
+      const expanded = expandDiscoveryDraft(compactDraft, preflight.facts, preflight.candidates.flatMap(({ observations }) => observations))
       expanded.limitations = [...new Set([...expanded.limitations, ...preflight.limitations])]
       const grounded = groundAiInvestigatorDraft(expanded, preflight.facts, request, fleetTable(evidence))
       const grounding = { acceptedUnchanged: grounded.content.findings.length, corrected: 0, omitted: grounded.omitted, correctionAttempted: false }

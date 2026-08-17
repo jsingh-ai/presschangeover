@@ -14,18 +14,19 @@ const config: AiInvestigatorConfig = { enabled: true, apiKey: 'offline-test', mo
 function value(preflight: Awaited<ReturnType<typeof buildDiscoveryPreflight>>, id: string) { return preflight.facts.find((fact) => fact.factId === id)?.value }
 
 describe('AI Investigator deterministic discovery preflight', () => {
-  it('ranks transparently and bounds detail to top 3, top 5, or all 12 candidates', async () => {
+  it('ranks transparently and enforces the V1 hard maximum of five all-press candidates', async () => {
     const profiles = []
     for (const candidateLimit of [3, 5, 12]) {
       const preflight = await buildDiscoveryPreflight(new DiscoveryFixtureExecutor(), request, new AbortController().signal, { candidateLimit })
-      assert.equal(preflight.candidates.length, candidateLimit)
+      assert.equal(preflight.candidates.length, Math.min(candidateLimit, 5))
       const payload = buildAiResponsesRequestPayload('test-model', [{ role: 'user', content: JSON.stringify(preflight.modelInput) }], DISCOVERY_INSTRUCTIONS, [], 'none', { structuredOutputSchema: AI_INVESTIGATOR_DISCOVERY_SCHEMA as unknown as Record<string, unknown>, structuredOutputName: 'process_intelligence_discovery', maxOutputTokens: DISCOVERY_OUTPUT_TOKENS })
       const profile = profileAiResponsesRequest(payload)
       assert.equal(profile.exactRequestBytes, Buffer.byteLength(JSON.stringify(payload), 'utf8'))
       profiles.push({ candidateLimit, ...profile })
     }
     assert.deepEqual(profiles.map((profile) => profile.candidateLimit), [3, 5, 12])
-    assert.ok(profiles[0].exactRequestBytes < profiles[1].exactRequestBytes && profiles[1].exactRequestBytes < profiles[2].exactRequestBytes)
+    assert.ok(profiles[0].exactRequestBytes < profiles[1].exactRequestBytes)
+    assert.equal(profiles[1].exactRequestBytes, profiles[2].exactRequestBytes)
   })
 
   it('retains all named offline quality regressions in the default top-five package', async () => {
@@ -43,6 +44,9 @@ describe('AI Investigator deterministic discovery preflight', () => {
     assert.equal(value(preflight, 'press6.interruptions.baseline'), 9)
     assert.equal(value(preflight, 'press6.interruptions.delta'), 5)
     assert.match(preflight.facts.filter((fact) => ['press10', 'press13', 'press14'].includes(fact.pressKey) && fact.metric === 'radiusDriverDurationMinutes').map((fact) => fact.label).join(' '), /Sheet feed|delivery jam|web break/)
+    assert.ok(preflight.candidates.every((candidate) => candidate.observations.length <= 3 && candidate.observations.every((observation) => observation.support.adequate && observation.material)))
+    assert.equal(preflight.analytics.modelCandidates, 5); assert.equal(preflight.analytics.grouped, preflight.candidates.reduce((sum, candidate) => sum + candidate.observations.length, 0))
+    assert.equal(JSON.stringify(preflight.modelInput).includes('samples'), false)
   })
 
   it('expands the compact model draft into the rich grounded UI contract server-side', async () => {
@@ -66,5 +70,12 @@ describe('AI Investigator deterministic discovery preflight', () => {
     assert.equal(result.status, 'complete'); assert.equal(result.findings.length, 1); assert.equal(result.toolCallsUsed, 3)
     assert.equal(observed.length, 1); assert.equal(observed[0].tools, 0)
     assert.deepEqual((observed[0].options as { structuredOutputName: string; maxOutputTokens: number }).structuredOutputName, 'process_intelligence_discovery')
+  })
+
+  it('stops after the first failed discovery synthesis request without retry or fallback', async () => {
+    let calls = 0
+    const model: AiInvestigatorModelClient = { create: async () => { calls += 1; const error = new Error('rate limited') as Error & { status: number }; error.status = 429; throw error } }
+    const result = await new AiInvestigatorOrchestrator(config, new DiscoveryFixtureExecutor(), model, false).analyzeDiscovery({ ...request, scope: { pressKey: 'press14' } })
+    assert.equal(result.status, 'error'); assert.equal(calls, 1)
   })
 })

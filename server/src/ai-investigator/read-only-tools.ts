@@ -3,6 +3,8 @@ import type { RadiusService } from '../radius/radius-service.js'
 import { RADIUS_PRESS_KEYS, type RadiusPressKey, type RadiusStatusSegment } from '../radius/models.js'
 import type { TelemetryFoundationService } from '../telemetry/telemetry-foundation-service.js'
 import type { ProductionContextChange, ProductionContextEvidence, TelemetrySample, TelemetryScalarValue } from '../telemetry/telemetry-contracts.js'
+import { IndustrialAnalyticsService } from '../industrial-analytics/industrial-analytics-service.js'
+import type { IndustrialAnalyticalObservation, IndustrialNumericSample, IndustrialStateSample } from '../industrial-analytics/contracts.js'
 import { AI_INVESTIGATOR_MAX_RANGE_MS, type AiEvidenceSource, type AiGroundingFact } from './contracts.js'
 
 export const AI_INVESTIGATOR_TOOL_NAMES = [
@@ -185,6 +187,42 @@ function speedSummary(samples: TelemetrySample[]) {
   return { observationCount: usable.length, minimum: round(Math.min(...values), 2), maximum: round(Math.max(...values), 2), average: round(values.reduce((sum, value) => sum + value, 0) / values.length, 2), latest: round(latest.value, 2), latestAtUtc: latest.sample.observedAtUtc }
 }
 
+function industrialNumericSamples(samples: TelemetrySample[]): IndustrialNumericSample[] {
+  return samples.flatMap((sample) => typeof sample.value === 'number' && Number.isFinite(sample.value)
+    ? [{ atUtc: sample.observedAtUtc, value: sample.value, qualityState: sample.qualityState }]
+    : [])
+}
+
+const INDUSTRIAL_METRIC_LABELS: Record<string, string> = {
+  median: 'Median', startEndDelta: 'Start-to-end change', largestDelta: 'Largest adjacent change', standardDeviation: 'Standard deviation',
+  beforeMedian: 'Before-event median', eventMedian: 'Event median', afterMedian: 'After-event median', beforeToEventDelta: 'Before-to-event change',
+  transitionCount: 'State transitions', transitionsNearEvent: 'Transitions near event', stateBefore: 'State before', stateAfter: 'State after',
+  commonSequenceCount: 'Common Radius sequence support', commonSequenceSharePercent: 'Common Radius sequence share', extraStepCount: 'Extra Radius steps', loopCount: 'Looped Radius steps',
+  pearson: 'Pearson correlation', spearman: 'Spearman correlation', bestLagMinutes: 'Strongest lag', bestLagCorrelation: 'Lagged correlation', direction: 'Lag direction',
+}
+
+const INDUSTRIAL_FACT_METRICS: Record<IndustrialAnalyticalObservation['family'], string[]> = {
+  baseline_deviation: ['current', 'baseline', 'delta'],
+  robust_numeric_change: ['median', 'startEndDelta', 'largestDelta', 'standardDeviation'],
+  event_aligned_change: ['beforeMedian', 'eventMedian', 'afterMedian', 'beforeToEventDelta'],
+  value_state_transition: ['transitionCount', 'transitionsNearEvent', 'stateBefore', 'stateAfter'],
+  radius_sequence_deviation: ['commonSequenceCount', 'commonSequenceSharePercent', 'extraStepCount', 'loopCount'],
+  numeric_relationship: ['pearson', 'spearman', 'bestLagMinutes', 'bestLagCorrelation'],
+  cross_press_comparison: ['pressMedian', 'compatiblePressMedian', 'delta'],
+}
+
+function industrialFacts(observation: IndustrialAnalyticalObservation, pressName: string): AiGroundingFact[] {
+  const unit = typeof observation.metrics.unit === 'string' ? observation.metrics.unit : null
+  const units: Record<string, string | null> = { transitionCount: 'count', transitionsNearEvent: 'count', commonSequenceCount: 'episodes', commonSequenceSharePercent: 'percent', extraStepCount: 'count', loopCount: 'count', bestLagMinutes: 'minutes', pearson: 'coefficient', spearman: 'coefficient', bestLagCorrelation: 'coefficient' }
+  const result = INDUSTRIAL_FACT_METRICS[observation.family].flatMap((metric) => {
+    const value = observation.metrics[metric]
+    if (value === null || value === undefined || value === '') return []
+    return [fact(observation.pressKey, pressName, observation.evidenceSource, `industrial.${observation.family}.${metric}`, value, units[metric] ?? unit, 'event', INDUSTRIAL_METRIC_LABELS[metric] ?? metric, `${observation.observationId}.${metric}.event`, { range: observation.range })]
+  })
+  observation.factIds = result.map(({ factId }) => factId)
+  return result
+}
+
 function safePayload(result: AiToolResult): AiToolResult {
   if (Buffer.byteLength(JSON.stringify(result), 'utf8') > MAX_TOOL_PAYLOAD_BYTES) throw new Error('ai_tool_payload_too_large')
   return result
@@ -192,6 +230,7 @@ function safePayload(result: AiToolResult): AiToolResult {
 
 export class AiInvestigatorReadOnlyToolRegistry implements AiInvestigatorToolExecutor {
   readonly definitions = AI_INVESTIGATOR_TOOL_DEFINITIONS
+  private readonly industrialAnalytics = new IndustrialAnalyticsService()
 
   constructor(private readonly radius: RadiusService, private readonly telemetry: TelemetryFoundationService) {}
 
@@ -227,7 +266,7 @@ export class AiInvestigatorReadOnlyToolRegistry implements AiInvestigatorToolExe
       leadingRadiusStates: compactRadiusStates(item.timelineSegments),
     }))
     return {
-      range: { start, end }, scope: selectedPress ?? 'all', feedStatus: overview.feedStatus, lastObservationUtc: overview.lastObservationUtc,
+      range: { start, end }, scope: selectedPress ?? 'all', feedStatus: overview.feedStatus, lastObservationUtc: overview.lastObservationUtc, queryCount: 1,
       presses: mappedPresses,
       facts: mappedPresses.flatMap((item) => [...summaryFacts(item.pressKey, item.press, item, 'current', { start, end }), ...driverFacts(item.pressKey, item.press, item.leadingRadiusStates, 'current', { start, end })]),
       limitations: ['Job, Order, and Recipe are not fleet-scanned in this phase; request press event context only for the strongest candidates.', 'Unavailable time is reported separately and is not classified as an operational state.'],
@@ -250,17 +289,25 @@ export class AiInvestigatorReadOnlyToolRegistry implements AiInvestigatorToolExe
       fact(pressKey, currentData.displayName, 'comparison', 'interruptionDelta', differences.productionInterruptions, 'count', 'delta', 'Interruption change', 'interruptions.delta', { range: current }),
       fact(pressKey, currentData.displayName, 'comparison', 'longestInterruptionDeltaMinutes', differences.longestInterruptionMinutes, 'minutes', 'delta', 'Longest interruption change', 'longest_interruption_minutes.delta', { range: current }),
     ]
-    return { press: currentData.displayName, pressKey, current: { range: current, ...currentSummary }, baseline: { range: baseline, ...baselineSummary }, differences, facts: [...summaryFacts(pressKey, currentData.displayName, currentSummary, 'current', current), ...summaryFacts(pressKey, currentData.displayName, baselineSummary, 'baseline', baseline), ...comparisonFacts, ...driverFacts(pressKey, currentData.displayName, currentSummary.leadingRadiusStates, 'current', current), ...driverFacts(pressKey, currentData.displayName, baselineSummary.leadingRadiusStates, 'baseline', baseline)], baselineSufficient: baselineData.dataCoveragePercent >= 80, limitations: ['Job counts are omitted because no compact aggregate is available without additional telemetry queries.'] }
+    return { press: currentData.displayName, pressKey, current: { range: current, ...currentSummary }, baseline: { range: baseline, ...baselineSummary }, differences, queryCount: 2, facts: [...summaryFacts(pressKey, currentData.displayName, currentSummary, 'current', current), ...summaryFacts(pressKey, currentData.displayName, baselineSummary, 'baseline', baseline), ...comparisonFacts, ...driverFacts(pressKey, currentData.displayName, currentSummary.leadingRadiusStates, 'current', current), ...driverFacts(pressKey, currentData.displayName, baselineSummary.leadingRadiusStates, 'baseline', baseline)], baselineSufficient: baselineData.dataCoveragePercent >= 80, limitations: ['Job counts are omitted because no compact aggregate is available without additional telemetry queries.'] }
   }
 
   private async pressEvents(args: Record<string, unknown>, context: AiToolExecutionContext): Promise<AiToolResult> {
     if (!exactKeys(args, ['press', 'start', 'end', 'topN'])) throw new Error('invalid_ai_tool_arguments')
     const pressKey = press(args.press); const { start, end } = range(args.start, args.end); const topN = integer(args.topN, 1, 10)
     if (Date.parse(end) - Date.parse(start) > MAX_EVENT_SUMMARY_RANGE_MS) throw new Error('invalid_ai_tool_range')
-    const [radiusResult, contextResult] = await Promise.allSettled([this.radius.getPressEpisodes(pressKey, start, end), this.productionContextChanges(pressKey, start, end, context)])
+    const [radiusResult] = await Promise.allSettled([this.radius.getPressEpisodes(pressKey, start, end)])
     if (radiusResult.status === 'rejected') throw radiusResult.reason
     const data = radiusResult.value
-    const episodes = data.episodes.slice().sort((left, right) => right.durationSeconds - left.durationSeconds).slice(0, topN).map((episode) => ({ startUtc: episode.startUtc, endUtc: episode.endUtc, durationMinutes: round(episode.durationSeconds / 60), completionStatus: episode.completionStatus, dataInterrupted: episode.dataInterrupted, primaryRadiusState: episode.primaryStatusDescription, returnAttempts: episode.returnToProductionAttemptCount, failedReturnAttempts: episode.failedReturnToProductionAttempts }))
+    const orderedEpisodes = data.episodes.slice().sort((left, right) => right.durationSeconds - left.durationSeconds)
+    const focusEpisode = orderedEpisodes[0]
+    const focusEndMs = focusEpisode ? Math.min(Date.parse(focusEpisode.endUtc ?? end), Date.parse(focusEpisode.startUtc) + 20 * 60_000) : null
+    const focusEvent = focusEpisode && focusEndMs !== null ? { id: focusEpisode.episodeId, start: focusEpisode.startUtc, end: new Date(focusEndMs).toISOString() } : null
+    const telemetryRange = focusEvent && focusEndMs !== null ? { start: new Date(Math.max(Date.parse(start), Date.parse(focusEvent.start) - 20 * 60_000)).toISOString(), end: new Date(Math.min(Date.parse(end), focusEndMs + 20 * 60_000)).toISOString() } : null
+    const contextResult: PromiseSettledResult<ProductionContextChange[]> = telemetryRange
+      ? (await Promise.allSettled([this.productionContextChanges(pressKey, telemetryRange.start, telemetryRange.end, context)]))[0]!
+      : { status: 'fulfilled', value: [] }
+    const episodes = orderedEpisodes.slice(0, topN).map((episode) => ({ episodeId: episode.episodeId, startUtc: episode.startUtc, endUtc: episode.endUtc, durationMinutes: round(episode.durationSeconds / 60), completionStatus: episode.completionStatus, dataInterrupted: episode.dataInterrupted, primaryRadiusState: episode.primaryStatusDescription, returnAttempts: episode.returnToProductionAttemptCount, failedReturnAttempts: episode.failedReturnToProductionAttempts }))
     const contextChanges = contextResult.status === 'fulfilled' ? contextResult.value.filter((change) => ['job', 'order', 'recipe'].includes(change.field)).slice(0, 30).map((change) => ({ atUtc: change.atUtc, field: change.field, previous: sanitizeProductionContextIdentity(displayValue(change.previousValue)), current: sanitizeProductionContextIdentity(displayValue(change.value)) })) : []
     const productionContext = contextResult.status === 'fulfilled' ? { available: true, changes: contextChanges.map((change) => ({ atUtc: change.atUtc, field: change.field, previousValue: change.previous.value, value: change.current.value, usable: change.current.usable })) } : { available: false, changes: [] }
     const topRadiusDrivers = data.operationalAnalytics.statusDrivers.slice().sort((left, right) => right.durationSeconds - left.durationSeconds).slice(0, topN).map((item) => ({ eventType: item.eventType, statusCode: item.statusCode, statusDescription: item.statusDescription, durationMinutes: round(item.durationSeconds / 60), occurrences: item.occurrenceCount }))
@@ -273,7 +320,43 @@ export class AiInvestigatorReadOnlyToolRegistry implements AiInvestigatorToolExe
     })
     const contextFacts = contextChanges.map((change) => fact(pressKey, data.press.displayName, 'production_context', change.field, change.current.value, null, 'event', `${change.field[0].toUpperCase()}${change.field.slice(1)}`, `context.${change.field}.${identity(change.atUtc)}.event`, { timestamp: change.atUtc, range: { start, end } })).map((item, index) => ({ ...item, usable: contextChanges[index].current.usable }))
     const summary = { coveragePercent: round(data.summary.dataCoveragePercent), productionPercent: null, productionInterruptions: data.summary.episodeCount, longestInterruptionMinutes: round(data.summary.longestEpisodeSeconds / 60) }
-    return { press: data.press.displayName, pressKey, range: { start, end }, coveragePercent: summary.coveragePercent, productionInterruptions: summary.productionInterruptions, longestInterruptionMinutes: summary.longestInterruptionMinutes, events: episodes, topRadiusDrivers, productionContext, facts: [...summaryFacts(pressKey, data.press.displayName, summary, 'current', { start, end }).filter((item) => item.metric !== 'productionPercent'), ...driverFacts(pressKey, data.press.displayName, topRadiusDrivers, 'event', { start, end }), ...eventFacts, ...contextFacts], limitations: [...(contextResult.status === 'rejected' ? ['Job/Order/Recipe context was unavailable; Radius evidence remains valid.'] : []), 'Broad telemetry threshold and delta scanning is intentionally deferred in Phase 1.'] }
+    const observations: IndustrialAnalyticalObservation[] = []
+    let speedUnavailable = false
+    if (focusEpisode && focusEvent && telemetryRange) {
+      try {
+        const speed = await this.telemetry.speed(pressKey, telemetryRange.start, telemetryRange.end, context.requestId, context.signal)
+        const actual = industrialNumericSamples(speed.actual.samples)
+        const robust = this.industrialAnalytics.robustNumericChange({ pressKey, variableId: speed.actual.canonicalId, unit: speed.actual.sourceUnit, range: telemetryRange, samples: actual, eventId: focusEpisode.episodeId })
+        const aligned = this.industrialAnalytics.eventAlignedNumeric({ pressKey, variableId: speed.actual.canonicalId, unit: speed.actual.sourceUnit, range: telemetryRange, samples: actual, event: focusEvent })
+        if (robust) observations.push(robust)
+        if (aligned) observations.push(aligned)
+        if (speed.setpoint) {
+          const relationship = this.industrialAnalytics.relationshipObservation({ pressKey, leftVariableId: speed.setpoint.canonicalId, rightVariableId: speed.actual.canonicalId, range: telemetryRange, left: industrialNumericSamples(speed.setpoint.samples), right: actual, context: `Radius episode ${focusEpisode.episodeId}` })
+          if (relationship) observations.push(relationship)
+        }
+      } catch {
+        speedUnavailable = true
+      }
+      observations.push(this.industrialAnalytics.sequenceDeviation({
+        pressKey,
+        range: { start, end },
+        occurrence: { episodeId: focusEpisode.episodeId, startUtc: focusEpisode.startUtc, endUtc: focusEpisode.endUtc ?? end, orderedStates: focusEpisode.statusSegments.map((segment) => ({ state: segment.statusDescription, durationSeconds: segment.durationSeconds })), returnAttempts: focusEpisode.returnToProductionAttemptCount },
+        comparable: data.episodes.map((episode) => ({ episodeId: episode.episodeId, startUtc: episode.startUtc, endUtc: episode.endUtc ?? end, orderedStates: episode.statusSegments.map((segment) => ({ state: segment.statusDescription, durationSeconds: segment.durationSeconds })), returnAttempts: episode.returnToProductionAttemptCount })),
+      }))
+      if (contextResult.status === 'fulfilled') {
+        for (const field of ['job', 'order', 'recipe']) {
+          const changes = contextChanges.filter((change) => change.field === field && change.current.usable)
+          if (!changes.length) continue
+          const stateSamples: IndustrialStateSample[] = []
+          if (changes[0]!.previous.usable && changes[0]!.previous.value !== null) stateSamples.push({ atUtc: start, value: changes[0]!.previous.value })
+          stateSamples.push(...changes.map((change) => ({ atUtc: change.atUtc, value: change.current.value! })))
+          observations.push(this.industrialAnalytics.valueTransitions({ pressKey, variableId: `production.${field}`, range: { start, end }, samples: stateSamples, event: focusEvent }))
+        }
+      }
+    }
+    const retainedObservations = observations.filter((observation) => observation.support.adequate && observation.material)
+    const analyticsFacts = retainedObservations.flatMap((observation) => industrialFacts(observation, data.press.displayName))
+    return { press: data.press.displayName, pressKey, range: { start, end }, coveragePercent: summary.coveragePercent, productionInterruptions: summary.productionInterruptions, longestInterruptionMinutes: summary.longestInterruptionMinutes, events: episodes, topRadiusDrivers, productionContext, industrialAnalytics: { calculatedCount: observations.length, retainedCount: retainedObservations.length, excludedCount: observations.length - retainedObservations.length, observations: retainedObservations }, queryCount: focusEpisode ? 3 : 1, facts: [...summaryFacts(pressKey, data.press.displayName, summary, 'current', { start, end }).filter((item) => item.metric !== 'productionPercent'), ...driverFacts(pressKey, data.press.displayName, topRadiusDrivers, 'event', { start, end }), ...eventFacts, ...contextFacts, ...analyticsFacts], limitations: [...(contextResult.status === 'rejected' ? ['Job/Order/Recipe context was unavailable; Radius evidence remains valid.'] : []), ...(speedUnavailable ? ['Trusted canonical speed evidence was unavailable for the bounded event window.'] : []), 'Industrial analytics is bounded to the strongest Radius event and trusted canonical speed/context signals; no broad tag scan is performed.'] }
   }
 
   private async eventContext(args: Record<string, unknown>, context: AiToolExecutionContext): Promise<AiToolResult> {
@@ -302,7 +385,7 @@ export class AiInvestigatorReadOnlyToolRegistry implements AiInvestigatorToolExe
       return { ...result, usable: item.usable }
     })
     return {
-      press: timeline.displayName, pressKey, timestamp, range: { start: fromUtc, end: toUtc },
+      press: timeline.displayName, pressKey, timestamp, range: { start: fromUtc, end: toUtc }, queryCount: 3,
       radius: { coveragePercent: round(100 - offlineSeconds / ((Date.parse(toUtc) - Date.parse(fromUtc)) / 1_000) * 100), segments },
       actualSpeed,
       productionContext: productionResult.status === 'fulfilled' ? { available: true, atEvent, changes: productionChanges } : { available: false, atEvent: {}, changes: [] },
