@@ -27,6 +27,10 @@ export interface AiToolExecutionContext {
 }
 
 export type AiToolResult = Record<string, unknown>
+export interface AiInvestigatorToolExecutor {
+  readonly definitions: AiInvestigatorToolDefinition[]
+  execute(name: string, rawArguments: unknown, context: AiToolExecutionContext): Promise<AiToolResult>
+}
 const MAX_TOOL_PAYLOAD_BYTES = 64 * 1024
 const MAX_EVENT_CONTEXT_MINUTES = 60
 const MAX_EVENT_SUMMARY_RANGE_MS = 24 * 60 * 60_000
@@ -186,7 +190,7 @@ function safePayload(result: AiToolResult): AiToolResult {
   return result
 }
 
-export class AiInvestigatorReadOnlyToolRegistry {
+export class AiInvestigatorReadOnlyToolRegistry implements AiInvestigatorToolExecutor {
   readonly definitions = AI_INVESTIGATOR_TOOL_DEFINITIONS
 
   constructor(private readonly radius: RadiusService, private readonly telemetry: TelemetryFoundationService) {}

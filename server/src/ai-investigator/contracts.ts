@@ -94,6 +94,23 @@ export interface AiInvestigatorDraftContent {
   limitations: string[]
 }
 
+export interface AiInvestigatorDiscoveryDraftFinding {
+  rank: number
+  pressKey: RadiusPressKey
+  title: string
+  importance: 'high' | 'medium' | 'low'
+  confidence: 'high' | 'medium' | 'low'
+  interpretation: string
+  factIds: string[]
+  recommendedInvestigation: string
+}
+
+export interface AiInvestigatorDiscoveryDraftContent {
+  summary: string
+  findings: AiInvestigatorDiscoveryDraftFinding[]
+  limitations: string[]
+}
+
 const FACT_ID = { type: 'string', pattern: '^press(?:3|5|6|7|8|9|10|11|12|13|14|15)\\.[a-z0-9_.-]{3,160}$', maxLength: 180 }
 const LINK = { type: 'object', additionalProperties: false, required: ['label', 'href'], properties: { label: { type: 'string', maxLength: 80 }, href: { type: 'string', maxLength: 600 } } }
 
@@ -118,6 +135,25 @@ export const AI_INVESTIGATOR_CONTENT_SCHEMA = {
   },
 } as const
 
+export const AI_INVESTIGATOR_DISCOVERY_SCHEMA = {
+  type: 'object', additionalProperties: false, required: ['summary', 'findings', 'limitations'],
+  properties: {
+    summary: { type: 'string', maxLength: 900 },
+    findings: { type: 'array', maxItems: 5, items: {
+      type: 'object', additionalProperties: false,
+      required: ['rank', 'pressKey', 'title', 'importance', 'confidence', 'interpretation', 'factIds', 'recommendedInvestigation'],
+      properties: {
+        rank: { type: 'integer', minimum: 1, maximum: 5 }, pressKey: { type: 'string', enum: RADIUS_PRESS_KEYS },
+        title: { type: 'string', maxLength: 140 }, importance: { type: 'string', enum: ['high', 'medium', 'low'] }, confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+        interpretation: { type: 'string', maxLength: 500 },
+        factIds: { type: 'array', minItems: 1, maxItems: 18, items: FACT_ID },
+        recommendedInvestigation: { type: 'string', maxLength: 400 },
+      },
+    } },
+    limitations: { type: 'array', maxItems: 8, items: { type: 'string', maxLength: 350 } },
+  },
+} as const
+
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === 'object' && !Array.isArray(value) }
 function exactKeys(value: Record<string, unknown>, expected: string[]): boolean { const keys = Object.keys(value).sort(); const sorted = [...expected].sort(); return keys.length === sorted.length && keys.every((key, index) => key === sorted[index]) }
 function boundedString(value: unknown, maximum: number): value is string { return typeof value === 'string' && value.length <= maximum }
@@ -135,6 +171,17 @@ export function validateAiInvestigatorDraft(value: unknown): AiInvestigatorDraft
     if (!isRecord(candidate.productionContextFactIds) || !exactKeys(candidate.productionContextFactIds, ['job', 'order', 'recipe']) || !Object.values(candidate.productionContextFactIds).every((item) => item === null || factId(item))) throw new Error('invalid_investigator_response')
     if (!Array.isArray(candidate.links) || candidate.links.length > 4 || !candidate.links.every((link) => isRecord(link) && exactKeys(link, ['label', 'href']) && boundedString(link.label, 80) && boundedString(link.href, 600) && safeInvestigatorHref(link.href))) throw new Error('invalid_investigator_response')
     return candidate as unknown as AiInvestigatorDraftFinding
+  })
+  return { summary: value.summary, findings, limitations: value.limitations }
+}
+
+export function validateAiInvestigatorDiscoveryDraft(value: unknown): AiInvestigatorDiscoveryDraftContent {
+  if (!isRecord(value) || !exactKeys(value, ['summary', 'findings', 'limitations']) || !boundedString(value.summary, 900) || !Array.isArray(value.findings) || value.findings.length > 5 || !stringArray(value.limitations, 8, 350)) throw new Error('invalid_investigator_response')
+  const findings = value.findings.map((candidate): AiInvestigatorDiscoveryDraftFinding => {
+    if (!isRecord(candidate) || !exactKeys(candidate, ['rank', 'pressKey', 'title', 'importance', 'confidence', 'interpretation', 'factIds', 'recommendedInvestigation'])) throw new Error('invalid_investigator_response')
+    if (!Number.isInteger(candidate.rank) || Number(candidate.rank) < 1 || Number(candidate.rank) > 5 || typeof candidate.pressKey !== 'string' || !RADIUS_PRESS_KEYS.includes(candidate.pressKey as RadiusPressKey) || !boundedString(candidate.title, 140) || !['high', 'medium', 'low'].includes(String(candidate.importance)) || !['high', 'medium', 'low'].includes(String(candidate.confidence)) || !boundedString(candidate.interpretation, 500) || !boundedString(candidate.recommendedInvestigation, 400)) throw new Error('invalid_investigator_response')
+    if (!Array.isArray(candidate.factIds) || candidate.factIds.length < 1 || candidate.factIds.length > 18 || !candidate.factIds.every(factId)) throw new Error('invalid_investigator_response')
+    return candidate as unknown as AiInvestigatorDiscoveryDraftFinding
   })
   return { summary: value.summary, findings, limitations: value.limitations }
 }

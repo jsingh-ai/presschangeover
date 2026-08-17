@@ -13,6 +13,7 @@
     "build:client": "npm run build --workspace client",
     "build:server": "npm run build --workspace server",
     "test": "npm run test --workspace server && npm run test --workspace client",
-    "typecheck": "npm run typecheck --workspace server"
+    "typecheck": "npm run typecheck --workspace server",
+    "profile:ai-investigator": "tsx server/scripts/profile-ai-investigator.ts"
   }
 }

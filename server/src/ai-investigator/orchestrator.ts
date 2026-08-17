@@ -3,9 +3,10 @@ import OpenAI from 'openai'
 import type { ResponseInput, ResponseInputItem } from 'openai/resources/responses/responses'
 import type { AiInvestigatorConfig } from '../config.js'
 import type { RadiusPressKey } from '../radius/models.js'
-import { AI_INVESTIGATOR_CONTENT_SCHEMA, type AiGroundingFact, type AiInvestigatorContent, type AiInvestigatorDraftContent, type AiInvestigatorRequest, type AiInvestigatorResult, validateAiInvestigatorDraft } from './contracts.js'
+import { AI_INVESTIGATOR_CONTENT_SCHEMA, AI_INVESTIGATOR_DISCOVERY_SCHEMA, type AiGroundingFact, type AiInvestigatorContent, type AiInvestigatorDraftContent, type AiInvestigatorRequest, type AiInvestigatorResult, validateAiInvestigatorDiscoveryDraft, validateAiInvestigatorDraft } from './contracts.js'
+import { buildDiscoveryPreflight, DISCOVERY_CANDIDATE_LIMIT, DISCOVERY_INSTRUCTIONS, DISCOVERY_OUTPUT_TOKENS, DISCOVERY_PROMPT_CACHE_KEY, expandDiscoveryDraft } from './discovery.js'
 import { groundAiInvestigatorDraft } from './grounding.js'
-import { AiInvestigatorReadOnlyToolRegistry, type AiInvestigatorToolDefinition, type AiToolResult } from './read-only-tools.js'
+import { AiInvestigatorReadOnlyToolRegistry, type AiInvestigatorToolDefinition, type AiInvestigatorToolExecutor, type AiToolResult } from './read-only-tools.js'
 
 export interface AiInvestigatorLogger {
   info(message: string): void
@@ -39,8 +40,15 @@ export interface AiModelResponse {
 export type AiModelPhase = 'investigation' | 'final_synthesis' | 'grounding_correction'
 export type AiModelToolChoice = 'auto' | 'none'
 
+export interface AiModelRequestOptions {
+  structuredOutputSchema?: Record<string, unknown>
+  structuredOutputName?: string
+  maxOutputTokens?: number
+  promptCacheKey?: string
+}
+
 export interface AiInvestigatorModelClient {
-  create(input: unknown[], instructions: string, tools: AiInvestigatorToolDefinition[], toolChoice: AiModelToolChoice, signal: AbortSignal): Promise<AiModelResponse>
+  create(input: unknown[], instructions: string, tools: AiInvestigatorToolDefinition[], toolChoice: AiModelToolChoice, signal: AbortSignal, options?: AiModelRequestOptions): Promise<AiModelResponse>
 }
 
 const SAFE_OPENAI_HEADERS = {
@@ -83,20 +91,27 @@ export class OpenAiResponsesInvestigatorClient implements AiInvestigatorModelCli
     this.client = new OpenAI({ apiKey: config.apiKey, timeout: config.openAiTimeoutMs, maxRetries: 0 })
   }
 
-  async create(input: unknown[], instructions: string, tools: AiInvestigatorToolDefinition[], toolChoice: AiModelToolChoice, signal: AbortSignal): Promise<AiModelResponse> {
-    const wrapped = await this.client.responses.create({
-      model: this.config.model,
-      instructions,
-      input: input as ResponseInput,
-      ...(tools.length ? { tools } : {}),
-      tool_choice: toolChoice,
-      text: toolChoice === 'none' ? { verbosity: 'low', format: { type: 'json_schema', name: 'process_intelligence_investigation', strict: true, schema: AI_INVESTIGATOR_CONTENT_SCHEMA } } : { verbosity: 'low' },
-      max_output_tokens: toolChoice === 'auto' ? INVESTIGATION_OUTPUT_TOKENS : FINAL_OUTPUT_TOKENS,
-      store: false,
-    }, { signal, timeout: this.config.openAiTimeoutMs, maxRetries: 0 }).withResponse()
+  async create(input: unknown[], instructions: string, tools: AiInvestigatorToolDefinition[], toolChoice: AiModelToolChoice, signal: AbortSignal, options: AiModelRequestOptions = {}): Promise<AiModelResponse> {
+    const payload = buildAiResponsesRequestPayload(this.config.model, input, instructions, tools, toolChoice, options)
+    const wrapped = await this.client.responses.create(payload as never, { signal, timeout: this.config.openAiTimeoutMs, maxRetries: 0 }).withResponse()
     const response = wrapped.data
     const toolCalls = response.output.filter((item) => item.type === 'function_call').map((item) => ({ type: 'function_call' as const, callId: item.call_id, name: item.name, arguments: item.arguments }))
     return { id: response.id, outputText: response.output_text, outputItems: [], toolCalls, usage: response.usage ? { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens, totalTokens: response.usage.total_tokens } : undefined, http: safeOpenAiHttpMetadata(wrapped.response.headers, wrapped.request_id) }
+  }
+}
+
+export function buildAiResponsesRequestPayload(model: string, input: unknown[], instructions: string, tools: AiInvestigatorToolDefinition[], toolChoice: AiModelToolChoice, options: AiModelRequestOptions = {}) {
+  const schema = options.structuredOutputSchema ?? AI_INVESTIGATOR_CONTENT_SCHEMA
+  return {
+    model,
+    instructions,
+    input: input as ResponseInput,
+    ...(tools.length ? { tools } : {}),
+    tool_choice: toolChoice,
+    text: toolChoice === 'none' ? { verbosity: 'low', format: { type: 'json_schema', name: options.structuredOutputName ?? 'process_intelligence_investigation', strict: true, schema } } : { verbosity: 'low' },
+    max_output_tokens: options.maxOutputTokens ?? (toolChoice === 'auto' ? INVESTIGATION_OUTPUT_TOKENS : FINAL_OUTPUT_TOKENS),
+    ...(options.promptCacheKey ? { prompt_cache_key: options.promptCacheKey } : {}),
+    store: false,
   }
 }
 
@@ -106,8 +121,8 @@ class AiTimeoutError extends Error {
 
 export interface ToolEvidence { name: string; arguments: unknown; result?: AiToolResult; error?: string; durationMs: number }
 
-const SYSTEM_INSTRUCTIONS = `You are the advisory ProcessIntelligence AI Investigator. Use only supplied read-only functions; never claim database, historian, filesystem, network, control, MQTT, acknowledgement, or configuration access. When collectedTools is empty, call get_fleet_operational_summary first. Otherwise never repeat a completed tool with the same arguments; select only materially different candidates and a few necessary follow-ups. Use the preceding equal-duration baseline when useful. Supplied facts are authoritative: cite exact ids, never invent or recalculate values, counts, durations, comparisons, identities, or timestamps, and select related current/baseline/delta ids together. Sources are server-owned; unusable production context is not evidence. Separate facts, comparisons, and cautious interpretations; never assert root cause or contradict a material comparison. Unavailable data is a limitation; insufficient baseline must be stated. Return at most five ranked findings. Links must be relative /raw-radius-explorer, /telemetry-event-explorer, /overview, or /operational-analysis paths. No HTML.`
-const FINAL_SYNTHESIS_INSTRUCTIONS = `${SYSTEM_INSTRUCTIONS} Evidence collection is complete. Tools are disabled. Produce the complete structured investigation only from supplied facts.`
+export const SYSTEM_INSTRUCTIONS = `You are the advisory ProcessIntelligence AI Investigator. Use only supplied read-only functions; never claim database, historian, filesystem, network, control, MQTT, acknowledgement, or configuration access. When collectedTools is empty, call get_fleet_operational_summary first. Otherwise never repeat a completed tool with the same arguments; select only materially different candidates and a few necessary follow-ups. Use the preceding equal-duration baseline when useful. Supplied facts are authoritative: cite exact ids, never invent or recalculate values, counts, durations, comparisons, identities, or timestamps, and select related current/baseline/delta ids together. Sources are server-owned; unusable production context is not evidence. Separate facts, comparisons, and cautious interpretations; never assert root cause or contradict a material comparison. Unavailable data is a limitation; insufficient baseline must be stated. Return at most five ranked findings. Links must be relative /raw-radius-explorer, /telemetry-event-explorer, /overview, or /operational-analysis paths. No HTML.`
+export const FINAL_SYNTHESIS_INSTRUCTIONS = `${SYSTEM_INSTRUCTIONS} Evidence collection is complete. Tools are disabled. Produce the complete structured investigation only from supplied facts.`
 const CORRECTION_INSTRUCTIONS = `${SYSTEM_INSTRUCTIONS} Tools are disabled. Correct or omit rejected findings using only supplied fact ids and return the complete response.`
 const INVESTIGATION_OUTPUT_TOKENS = 600
 const FINAL_OUTPUT_TOKENS = 2_400
@@ -252,7 +267,7 @@ function requestPrompt(request: AiInvestigatorRequest): string {
 export class AiInvestigatorOrchestrator {
   constructor(
     private readonly config: AiInvestigatorConfig,
-    private readonly registry: AiInvestigatorReadOnlyToolRegistry,
+    private readonly registry: AiInvestigatorToolExecutor,
     private readonly model: AiInvestigatorModelClient,
     private readonly logger: AiInvestigatorLogger | false = console,
     private readonly now: () => Date = () => new Date(),
@@ -260,7 +275,72 @@ export class AiInvestigatorOrchestrator {
     private readonly wait: (milliseconds: number, signal: AbortSignal) => Promise<void> = waitFor,
   ) {}
 
-  async analyze(request: AiInvestigatorRequest, requestSignal?: AbortSignal): Promise<AiInvestigatorResult> {
+  async analyzeDiscovery(request: AiInvestigatorRequest, requestSignal?: AbortSignal): Promise<AiInvestigatorResult> {
+    const analysisId = randomUUID(); const started = this.now(); const startedAt = started.toISOString(); const deadlineAt = Date.now() + this.config.totalTimeoutMs
+    const deadline = new AbortController(); const deadlineTimer = setTimeout(() => deadline.abort(new AiTimeoutError('overall')), this.config.totalTimeoutMs)
+    const signal = requestSignal ? AbortSignal.any([deadline.signal, requestSignal]) : deadline.signal
+    let evidence: ToolEvidence[] = []
+    const finish = (status: AiInvestigatorResult['status'], content: AiInvestigatorContent, grounding: AiInvestigatorResult['grounding']) => {
+      const completedAt = this.now().toISOString()
+      const result: AiInvestigatorResult = { analysisId, status, scope: { pressKey: request.scope.pressKey, startUtc: request.range.startUtc, endUtc: request.range.endUtc, analysis: request.analysis }, startedAt, completedAt, elapsedMs: Math.max(0, Date.parse(completedAt) - started.getTime()), toolCallsUsed: evidence.length, grounding, ...content }
+      safeLog(this.logger, status === 'error' ? 'error' : 'info', { event: 'ai_investigator_finished', architecture: 'single_synthesis', analysisId, status, elapsedMs: result.elapsedMs, toolCallsUsed: evidence.length, grounding })
+      return result
+    }
+    safeLog(this.logger, 'info', { event: 'ai_investigator_started', architecture: 'single_synthesis', analysisId, scope: request.scope.pressKey ?? 'all', startUtc: request.range.startUtc, endUtc: request.range.endUtc, modelConfigured: true, model: this.config.model })
+    try {
+      const candidateLimit = Math.min(request.scope.pressKey ? 1 : DISCOVERY_CANDIDATE_LIMIT, Math.max(0, this.config.maxToolCalls - 2))
+      const preflight = await buildDiscoveryPreflight(this.registry, request, signal, { requestId: analysisId, candidateLimit, maxParallelTools: this.config.maxParallelTools, toolTimeoutMs: this.config.toolTimeoutMs })
+      evidence = preflight.evidence
+      for (const item of evidence) safeLog(this.logger, 'info', { event: 'ai_investigator_tool', architecture: 'single_synthesis', analysisId, tool: item.name, durationMs: item.durationMs, success: true, payloadBytes: utf8Bytes(item.result) })
+      const input: unknown[] = [{ role: 'user', content: JSON.stringify(preflight.modelInput) } satisfies ResponseInputItem]
+      const options: AiModelRequestOptions = { structuredOutputSchema: AI_INVESTIGATOR_DISCOVERY_SCHEMA as unknown as Record<string, unknown>, structuredOutputName: 'process_intelligence_discovery', maxOutputTokens: DISCOVERY_OUTPUT_TOKENS, promptCacheKey: DISCOVERY_PROMPT_CACHE_KEY }
+      const payload = buildAiResponsesRequestPayload(this.config.model, input, DISCOVERY_INSTRUCTIONS, [], 'none', options)
+      let response: AiModelResponse | undefined; let requestNumber = 0; let rateLimitRetryUsed = false
+      while (!response) {
+        requestNumber += 1
+        safeLog(this.logger, 'info', { event: 'ai_investigator_model_request', architecture: 'single_synthesis', analysisId, requestNumber, phase: 'final_synthesis', toolsEnabled: false, toolChoice: 'none', availableTools: [], estimatedInputTokens: Math.ceil(utf8Bytes(payload) / 4), maxOutputTokens: DISCOVERY_OUTPUT_TOKENS, requestBytes: utf8Bytes(payload), modelFacingEvidenceBytes: utf8Bytes(preflight.modelInput), toolResultsIncluded: evidence.length, priorModelMessagesIncluded: 0, priorModelResultsIncluded: 0 })
+        try {
+          response = await this.model.create(input, DISCOVERY_INSTRUCTIONS, [], 'none', signal, options)
+          safeLog(this.logger, 'info', { event: 'ai_investigator_model_response', architecture: 'single_synthesis', analysisId, requestNumber, responseId: response.id, phase: 'final_synthesis', usage: response.usage, ...response.http })
+        } catch (error) {
+          const resetDelay = retryDelayMs(error); const jitterMs = 25 + Math.floor(this.random() * 76); const remainingMs = Math.max(0, deadlineAt - Date.now())
+          const retryable = isRateLimit(error) && !rateLimitRetryUsed && resetDelay !== undefined && resetDelay + jitterMs + this.config.openAiTimeoutMs < remainingMs
+          safeLog(this.logger, 'error', { event: 'ai_investigator_model_failure', architecture: 'single_synthesis', analysisId, requestNumber, phase: 'final_synthesis', ...safeModelError(error) })
+          if (!retryable) throw error
+          rateLimitRetryUsed = true
+          safeLog(this.logger, 'info', { event: 'ai_investigator_model_retry', architecture: 'single_synthesis', analysisId, requestNumber, phase: 'final_synthesis', retryNumber: 1, waitMs: resetDelay + jitterMs, remainingMs })
+          await this.wait(resetDelay + jitterMs, signal)
+        }
+      }
+      if (response.toolCalls.length || !response.outputText) throw new Error('invalid_final_synthesis')
+      const compactDraft = validateAiInvestigatorDiscoveryDraft(JSON.parse(response.outputText))
+      const suppliedPresses = new Set(preflight.candidates.map((candidate) => candidate.pressKey)); const ranks = new Set<number>(); const findingPresses = new Set<string>()
+      for (const finding of compactDraft.findings) {
+        if (!suppliedPresses.has(finding.pressKey) || ranks.has(finding.rank) || findingPresses.has(finding.pressKey)) throw new Error('invalid_investigator_response')
+        ranks.add(finding.rank); findingPresses.add(finding.pressKey)
+      }
+      const expanded = expandDiscoveryDraft(compactDraft, preflight.facts)
+      expanded.limitations = [...new Set([...expanded.limitations, ...preflight.limitations])]
+      const grounded = groundAiInvestigatorDraft(expanded, preflight.facts, request, fleetTable(evidence))
+      const grounding = { acceptedUnchanged: grounded.content.findings.length, corrected: 0, omitted: grounded.omitted, correctionAttempted: false }
+      if (!grounded.issues.length) return finish('complete', grounded.content, grounding)
+      safeLog(this.logger, 'info', { event: 'ai_investigator_grounding_rejected', architecture: 'single_synthesis', analysisId, issueCount: grounded.issues.length, issues: grounded.issues.map(({ findingRank, code }) => ({ findingRank, code })) })
+      grounded.content.summary = 'Some AI interpretations could not be verified. Only findings grounded in deterministic ProcessIntelligence evidence are shown.'
+      grounded.content.limitations = [...grounded.content.limitations, 'Some AI interpretations could not be verified against deterministic ProcessIntelligence evidence and were omitted.']
+      return finish('partial', grounded.content, grounding)
+    } catch (error) {
+      const code = deadline.signal.aborted ? 'overall_timeout' : errorCode(error)
+      safeLog(this.logger, 'error', { event: 'ai_investigator_failure', architecture: 'single_synthesis', analysisId, error: code, ...safeModelError(error) })
+      const status = deadline.signal.aborted ? 'timeout' : 'error'
+      return finish(status, partialContent(status, evidence, code), { acceptedUnchanged: 0, corrected: 0, omitted: 0, correctionAttempted: false })
+    } finally { clearTimeout(deadlineTimer) }
+  }
+
+  analyze(request: AiInvestigatorRequest, requestSignal?: AbortSignal): Promise<AiInvestigatorResult> {
+    return this.analyzeWithToolSelection(request, requestSignal)
+  }
+
+  async analyzeWithToolSelection(request: AiInvestigatorRequest, requestSignal?: AbortSignal): Promise<AiInvestigatorResult> {
     const analysisId = randomUUID(); const started = this.now(); const startedAt = started.toISOString(); const deadlineAt = Date.now() + this.config.totalTimeoutMs
     const deadline = new AbortController(); const deadlineTimer = setTimeout(() => deadline.abort(new AiTimeoutError('overall')), this.config.totalTimeoutMs)
     const signal = requestSignal ? AbortSignal.any([deadline.signal, requestSignal]) : deadline.signal

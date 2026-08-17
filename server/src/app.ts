@@ -530,7 +530,7 @@ export function createApp({
     let input
     try { input = parseAiInvestigatorRequest(request.body) }
     catch (error) { throw new RequestValidationError(error instanceof Error ? error.message : 'invalid_ai_investigator_request') }
-    response.status(200).json(await aiInvestigator.analyze(input, cancellationSignal(request, response)))
+    response.status(200).json(await aiInvestigator.analyzeDiscovery(input, cancellationSignal(request, response)))
   }))
 
   app.get(
