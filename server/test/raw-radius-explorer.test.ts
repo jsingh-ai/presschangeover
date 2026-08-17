@@ -5,7 +5,7 @@ import type { RadiusStatusSegment } from '../src/radius/models.js'
 import { ENGINEERING_CLUE_CATALOG } from '../src/telemetry/engineering-clue-analysis.js'
 import type { CapabilityAssessment, PressSemanticSignalEvidence, TelemetryChange, TelemetrySample, TelemetrySemanticSelector } from '../src/telemetry/telemetry-contracts.js'
 import type { TelemetryFoundationService } from '../src/telemetry/telemetry-foundation-service.js'
-import { CURRENT_ROLL_LENGTH_CANONICAL_ID, normalizeHistorianNumber, numericSummary, RawRadiusExplorerService, RAW_EXPLORER_LENGTH_CATALOG, RAW_EXPLORER_MAX_WINDOW_MINUTES, samplesWithSeed, stateSummary, type RawExplorerOccurrence } from '../src/raw-radius-explorer/raw-radius-explorer-service.js'
+import { CURRENT_ROLL_LENGTH_CANONICAL_ID, normalizeHistorianNumber, numericSummary, observedRadiusEntrySegments, RawRadiusExplorerService, RAW_EXPLORER_LENGTH_CATALOG, RAW_EXPLORER_MAX_WINDOW_MINUTES, samplesWithSeed, stateSummary, type RawExplorerOccurrence } from '../src/raw-radius-explorer/raw-radius-explorer-service.js'
 import { InMemoryRawTelemetryReviewRepository, RawTelemetryReviewService } from '../src/raw-radius-explorer/raw-telemetry-review-service.js'
 
 const startUtc = '2026-08-13T12:00:00.000Z'
@@ -59,6 +59,22 @@ describe('Raw Radius Code Explorer', () => {
     assert.equal(result.occurrences[0]?.durationSeconds, 10_800)
     assert.equal(result.occurrences[0]?.chartFromUtc, '2026-08-13T11:20:00.000Z')
     assert.equal(result.occurrences[0]?.chartToUtc, '2026-08-13T15:40:00.000Z')
+  })
+
+  it('does not count the first Radius state after OFFLINE as a new observed code entry', async () => {
+    const before = radiusSegment('2026-08-13T12:00:00.000Z', '2026-08-13T12:05:00.000Z')
+    const offline: RadiusStatusSegment = { kind: 'offline', machineId: 3, pressKey: 'press3', displayName: 'Press 3', startUtc: '2026-08-13T12:05:00.000Z', endUtc: '2026-08-13T12:08:00.000Z', durationSeconds: 180, isOpen: false, sourceGeneration: 'offline_inference', eventType: null, statusCode: null, statusDescription: null, isProduction: false }
+    const resumed = radiusSegment('2026-08-13T12:08:00.000Z', '2026-08-13T12:12:00.000Z')
+    const observedAgain = radiusSegment('2026-08-13T12:15:00.000Z', '2026-08-13T12:20:00.000Z')
+    const segments = [before, offline, resumed, observedAgain]
+    assert.deepEqual(observedRadiusEntrySegments(segments).map(({ startUtc }) => startUtc), [before.startUtc, observedAgain.startUtc])
+    const source = radiusService()
+    source.getAnalysisOverview = async () => ({ presses: [{ pressKey: 'press3', displayName: 'Press 3', timelineSegments: segments }] }) as never
+    const telemetry = { capabilities: { get: async () => ({ capabilities: [] }) } } as unknown as TelemetryFoundationService
+    const explorer = new RawRadiusExplorerService(source, telemetry)
+    assert.equal((await explorer.identities(before.startUtc, observedAgain.endUtc)).find(({ statusCode }) => statusCode === '400')?.eventCount, 2)
+    const result = await explorer.explore({ fromUtc: before.startUtc, toUtc: observedAgain.endUtc, identity: { eventType: 'B', statusCode: '400', statusDescription: 'Recorded B state' }, changeLookbackMinutes: 15, chartContextMinutes: 30 })
+    assert.deepEqual(result.occurrences.map(({ startUtc }) => startUtc), [before.startUtc, observedAgain.startUtc])
   })
 
   it('discovers the exact 15-to-40 change in a 15-minute half-open lookback with 40-minute context', async () => {
@@ -174,6 +190,16 @@ describe('Raw Radius Code Explorer', () => {
     assert.equal(numericSummary(evidence(selector, null, [], [sample('2026-08-13T11:50:00.000Z', 10)]), Date.parse('2026-08-13T11:45:00.000Z'), Date.parse(startUtc)), null)
   })
 
+  it('excludes unavailable-quality values and reconnect transitions from changed-signal summaries', () => {
+    const numericSelector = { canonicalId: 'dryer.tunnel.temperature.actual', representation: 'samples' as const }
+    const bad = { ...sample('2026-08-13T11:55:00.000Z', 900), qualityState: 'BAD' }
+    assert.equal(numericSummary(evidence(numericSelector, null, [], [sample('2026-08-13T11:50:00.000Z', 10), bad, sample('2026-08-13T11:56:00.000Z', 20)]), Date.parse('2026-08-13T11:45:00.000Z'), Date.parse(startUtc)), null)
+    const stateSelector = { canonicalId: 'ink.pump.status', deckNumber: 4, representation: 'changes' as const }
+    const badQualityChange = { ...change('2026-08-13T11:55:00.000Z', 0, 1), previousQualityState: 'BAD' }
+    const reconnectChange = { ...change('2026-08-13T11:58:00.000Z', 1, 2), previousObservedAtUtc: '2026-08-13T11:40:00.000Z' }
+    assert.equal(stateSummary(evidence(stateSelector, null, [badQualityChange, reconnectChange]), Date.parse('2026-08-13T11:45:00.000Z'), Date.parse(startUtc)), null)
+  })
+
   it('keeps raw discovery separate, uses the exact half-open lookback, plots one exact identity, and persists reviews per press', async () => {
     const rawCalls: Array<{ pressKey: string; fromUtc: string; toUtc: string }> = []
     const historyCalls: Array<{ pressKey: string; rawIdentity: string; fromUtc: string; toUtc: string }> = []
@@ -185,6 +211,7 @@ describe('Raw Radius Code Explorer', () => {
         return { press: pressKey, displayName: 'Press 3', fromUtc, toUtc, rawCatalogIdentityCount: 3, canonicallyRepresentedIdentityCount: 1, unmappedIdentityCount: 2, usableIdentityCount: 2, changedIdentityCount: 2, framesRead: 10, historianReadCount: 1, signals: [
           { rawIdentity: 'Press3.unique.numeric', displayName: 'unique numeric', dataType: 'numeric', dataKind: 'numeric', sourceUnit: null, discoveryCategory: 'Other', plottable: true, usableObservationCount: 2, unavailableObservationCount: 0, firstValue: 14.8, lastValue: 24, minimum: 14.1, maximum: 24.6, changeCount: 1, largestAbsoluteStep: 9.2, positiveMovementPresent: true, negativeMovementPresent: false, transitionSequence: [], transitionSequenceTruncated: false, knownShape: null, alternateRepresentationCount: 0, alternateRawIdentities: [] },
           { rawIdentity: 'Press3.unique.container', displayName: 'deck.print_on', dataType: 'container', dataKind: 'container', sourceUnit: null, discoveryCategory: 'Containers / Arrays', plottable: false, usableObservationCount: 2, unavailableObservationCount: 0, firstValue: [0], lastValue: [1], minimum: null, maximum: null, changeCount: 1, largestAbsoluteStep: null, positiveMovementPresent: false, negativeMovementPresent: false, transitionSequence: [], transitionSequenceTruncated: false, knownShape: 'array[13]', alternateRepresentationCount: 0, alternateRawIdentities: [] },
+          { rawIdentity: 'Press3.outage.artifact', displayName: 'outage artifact', dataType: 'numeric', dataKind: 'numeric', sourceUnit: null, discoveryCategory: 'Other', plottable: true, usableObservationCount: 2, unavailableObservationCount: 1, firstValue: 1, lastValue: 2, minimum: 1, maximum: 2, changeCount: 1, largestAbsoluteStep: 1, positiveMovementPresent: true, negativeMovementPresent: false, transitionSequence: [], transitionSequenceTruncated: false, knownShape: null, alternateRepresentationCount: 0, alternateRawIdentities: [] },
         ] }
       },
       rawHistory: async (pressKey: string, rawIdentity: string, fromUtc: string, toUtc: string) => {

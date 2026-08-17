@@ -97,7 +97,9 @@ export function significantGapMs(values: NumericEventObservation[]): number {
   const ordered = observations(values)
   const gaps = ordered.slice(1).map((value, index) => Date.parse(value.atUtc) - Date.parse(ordered[index]!.atUtc)).filter((gap) => gap > 0).sort((a, b) => a - b)
   // Use the lower median so a single long outage cannot redefine normal cadence.
-  const median = gaps.length ? gaps[Math.floor((gaps.length - 1) / 2)]! : 0
+  // One interval cannot establish a slower normal cadence, so keep the known
+  // freshness boundary until at least two intervals are available.
+  const median = gaps.length > 1 ? gaps[Math.floor((gaps.length - 1) / 2)]! : 0
   return Math.max(MINIMUM_SIGNIFICANT_GAP_MS, median * 5)
 }
 
@@ -122,6 +124,7 @@ export function detectThresholdEvents(input: {
   const result: ThresholdDetection[] = []
   let active: { startUtc: string; entryValue: number; extremeValue: number; extremeAtUtc: string; clippedStart: boolean; dataGap: boolean } | undefined
   let previous = seed
+  let suppressMatchingReconnect = false
 
   const finish = (endUtc: string, returnValue: number | null, clippedEnd: boolean, dataGap: boolean) => {
     if (!active) return
@@ -138,11 +141,15 @@ export function detectThresholdEvents(input: {
       else finish(new Date(Math.max(Date.parse(previous.atUtc), Date.parse(active.startUtc))).toISOString(), null, true, true)
     }
     const matches = thresholdMatches(current.value, input.rule)
-    if (matches && !active) active = { startUtc: current.atUtc, entryValue: current.value, extremeValue: current.value, extremeAtUtc: current.atUtc, clippedStart: hasGap || !previous, dataGap: hasGap }
+    if (hasGap) suppressMatchingReconnect = matches
+    if (matches && !active && !suppressMatchingReconnect) active = { startUtc: current.atUtc, entryValue: current.value, extremeValue: current.value, extremeAtUtc: current.atUtc, clippedStart: !previous, dataGap: false }
     else if (matches && active) {
       const moreExtreme = input.rule.operator === '>' || input.rule.operator === '>=' ? current.value > active.extremeValue : current.value < active.extremeValue
       if (moreExtreme) { active.extremeValue = current.value; active.extremeAtUtc = current.atUtc }
-    } else if (!matches && active) finish(current.atUtc, current.value, false, false)
+    } else if (!matches) {
+      suppressMatchingReconnect = false
+      if (active) finish(current.atUtc, current.value, false, false)
+    }
     previous = current
   }
   if (active) finish(input.toUtc, null, true, false)
@@ -259,11 +266,12 @@ export function detectValueChangeEvents(input: {
     if (!previous) { previous = current; continue }
     if (sameScalar(previous.value, current.value)) { previous = current; continue }
     const dataGap = Date.parse(current.atUtc) - Date.parse(previous.atUtc) > gapLimit
+    if (dataGap) { previous = current; continue }
     if (matchesValueChange(previous.value, current.value, input.rule)) result.push({
       startUtc: current.atUtc, endUtc: current.atUtc, durationSeconds: 0,
       transitionAtUtc: current.atUtc, previousAtUtc: previous.atUtc,
       previousValue: previous.value, newValue: current.value,
-      clippedStart: Date.parse(previous.atUtc) < fromMs, clippedEnd: false, dataGap,
+      clippedStart: Date.parse(previous.atUtc) < fromMs, clippedEnd: false, dataGap: false,
     })
     previous = current
   }

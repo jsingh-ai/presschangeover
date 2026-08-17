@@ -1,5 +1,5 @@
 import { exactRadiusIdentity } from '../radius/radius-identity.js'
-import { RADIUS_PRESS_KEYS, type RadiusPressKey, type RadiusStatusSegment } from '../radius/models.js'
+import { RADIUS_PRESS_KEYS, type RadiusPressKey, type RadiusStateSegment, type RadiusStatusSegment } from '../radius/models.js'
 import { RadiusUnavailableError, type RadiusService } from '../radius/radius-service.js'
 import { ENGINEERING_CLUE_CATALOG, type EngineeringCategory, type EngineeringClueCatalogItem, type EngineeringSignalType } from '../telemetry/engineering-clue-analysis.js'
 import type { PressSemanticSignalEvidence, TelemetryChange, TelemetrySample, TelemetryScalarValue, TelemetrySemanticSelector } from '../telemetry/telemetry-contracts.js'
@@ -124,6 +124,10 @@ function sameIdentity(segment: RadiusStatusSegment, identity: RawExplorerSetup['
   return segment.kind === 'radius' && segment.eventType === identity.eventType && segment.statusCode === identity.statusCode && segment.statusDescription === identity.statusDescription
 }
 
+export function observedRadiusEntrySegments(segments: RadiusStatusSegment[]) {
+  return segments.filter((segment, index): segment is RadiusStateSegment => segment.kind === 'radius' && segments[index - 1]?.kind !== 'offline')
+}
+
 function mapWithConcurrency<T, R>(items: T[], limit: number, work: (item: T) => Promise<R>): Promise<R[]> {
   const results = new Array<R>(items.length)
   let cursor = 0
@@ -159,6 +163,34 @@ export function samplesWithSeed(signal: Pick<PressSemanticSignalEvidence, 'seed'
     .sort((left, right) => Date.parse(left.observedAtUtc) - Date.parse(right.observedAtUtc))
 }
 
+const MAX_CONTINUOUS_CHANGE_GAP_MS = 330_000
+const MINIMUM_DISCOVERY_SAMPLE_GAP_MS = 900_000
+
+function usableAnalysisQuality(qualityState: string | undefined) {
+  const quality = qualityState?.toUpperCase() ?? ''
+  return !['BAD', 'INVALID', 'UNAVAILABLE', 'NO_DATA', 'NODATA'].some((token) => quality.includes(token))
+}
+
+function latestContinuousNumericRun(values: Array<{ atUtc: string; value: number; usable: boolean }>) {
+  const ordered = uniqueBy(values.filter(({ atUtc, value }) => Number.isFinite(Date.parse(atUtc)) && Number.isFinite(value)), ({ atUtc }) => atUtc)
+    .sort((left, right) => Date.parse(left.atUtc) - Date.parse(right.atUtc))
+  const gaps = ordered.slice(1).map((item, index) => Date.parse(item.atUtc) - Date.parse(ordered[index]!.atUtc)).filter((gap) => gap > 0).sort((left, right) => left - right)
+  const median = gaps.length > 1 ? gaps[Math.floor((gaps.length - 1) / 2)]! : 0
+  const gapLimit = Math.max(MINIMUM_DISCOVERY_SAMPLE_GAP_MS, median * 5)
+  let runStart = 0
+  ordered.forEach((item, index) => {
+    if (!item.usable) runStart = index + 1
+    else if (index > 0 && Date.parse(item.atUtc) - Date.parse(ordered[index - 1]!.atUtc) > gapLimit) runStart = index
+  })
+  return ordered.slice(runStart).filter(({ usable }) => usable)
+}
+
+function usableContinuousChange(change: TelemetryChange) {
+  return usableAnalysisQuality(change.qualityState) && usableAnalysisQuality(change.previousQualityState)
+    && Number.isFinite(Date.parse(change.observedAtUtc)) && Number.isFinite(Date.parse(change.previousObservedAtUtc))
+    && Date.parse(change.observedAtUtc) - Date.parse(change.previousObservedAtUtc) <= MAX_CONTINUOUS_CHANGE_GAP_MS
+}
+
 function mergeSignals(histories: PressSemanticSignalEvidence[][]): PressSemanticSignalEvidence[] {
   const merged = new Map<string, PressSemanticSignalEvidence>()
   for (const history of histories.flat()) {
@@ -178,14 +210,11 @@ function mergeSignals(histories: PressSemanticSignalEvidence[][]): PressSemantic
 
 export function numericSummary(signal: PressSemanticSignalEvidence, fromMs: number, toMs: number): RawExplorerNumericSummary | null {
   const values = signal.representation === 'samples'
-    ? [
-        ...(signal.seed && Date.parse(signal.seed.observedAtUtc) <= fromMs && typeof signal.seed.value === 'number' && Number.isFinite(signal.seed.value) ? [normalizeHistorianNumber(signal.seed.value)] : []),
-        ...signal.samples.filter((item) => Date.parse(item.observedAtUtc) >= fromMs && Date.parse(item.observedAtUtc) < toMs && typeof item.value === 'number' && Number.isFinite(item.value)).map((item) => normalizeHistorianNumber(item.value as number)),
-      ]
-    : [
-        ...(signal.seed && Date.parse(signal.seed.observedAtUtc) <= fromMs && typeof signal.seed.value === 'number' ? [normalizeHistorianNumber(signal.seed.value)] : []),
-        ...signal.changes.filter((item) => Date.parse(item.observedAtUtc) >= fromMs && Date.parse(item.observedAtUtc) < toMs && typeof item.value === 'number' && Number.isFinite(item.value)).map((item) => normalizeHistorianNumber(item.value as number)),
-      ]
+    ? latestContinuousNumericRun([
+        ...(signal.seed && Date.parse(signal.seed.observedAtUtc) <= fromMs && typeof signal.seed.value === 'number' && Number.isFinite(signal.seed.value) ? [{ atUtc: signal.seed.observedAtUtc, value: normalizeHistorianNumber(signal.seed.value), usable: usableAnalysisQuality(signal.seed.qualityState) }] : []),
+        ...signal.samples.filter((item) => Date.parse(item.observedAtUtc) >= fromMs && Date.parse(item.observedAtUtc) < toMs && typeof item.value === 'number' && Number.isFinite(item.value)).map((item) => ({ atUtc: item.observedAtUtc, value: normalizeHistorianNumber(item.value as number), usable: usableAnalysisQuality(item.qualityState) })),
+      ]).map(({ value }) => value)
+    : signal.changes.filter((item) => Date.parse(item.observedAtUtc) >= fromMs && Date.parse(item.observedAtUtc) < toMs && usableContinuousChange(item) && typeof item.previousValue === 'number' && Number.isFinite(item.previousValue) && typeof item.value === 'number' && Number.isFinite(item.value)).flatMap((item, index) => [...(index === 0 ? [normalizeHistorianNumber(item.previousValue as number)] : []), normalizeHistorianNumber(item.value as number)])
   if (values.length < 2) return null
   const firstValue = values[0]!
   if (values.every((value) => value === firstValue)) return null
@@ -204,7 +233,7 @@ export function numericSummary(signal: PressSemanticSignalEvidence, fromMs: numb
 
 export function stateSummary(signal: PressSemanticSignalEvidence, fromMs: number, toMs: number): RawExplorerStateSummary | null {
   const transitions = signal.changes
-    .filter((item) => Date.parse(item.observedAtUtc) >= fromMs && Date.parse(item.observedAtUtc) < toMs && !scalarEqual(item.previousValue, item.value))
+    .filter((item) => Date.parse(item.observedAtUtc) >= fromMs && Date.parse(item.observedAtUtc) < toMs && usableContinuousChange(item) && !scalarEqual(item.previousValue, item.value))
     .map(({ observedAtUtc, previousValue, value }) => ({ atUtc: observedAtUtc, previousValue, value }))
   if (!transitions.length) return null
   return { kind: 'state', firstValue: transitions[0]!.previousValue, lastValue: transitions.at(-1)!.value, transitions }
@@ -221,8 +250,8 @@ export class RawRadiusExplorerService {
   async identities(fromUtc: string, toUtc: string): Promise<RawExplorerIdentity[]> {
     const overview = await (this.radius.getAnalysisOverview?.(fromUtc, toUtc) ?? this.radius.getOverview(fromUtc, toUtc))
     const observed = new Map<string, RawExplorerIdentity>()
-    for (const press of overview.presses) for (const segment of press.timelineSegments) {
-      if (segment.kind !== 'radius' || !['G', 'B', 'M', 'S'].includes(segment.eventType) || typeof segment.statusCode !== 'string' || !segment.statusCode.trim() || !segment.statusDescription.trim()) continue
+    for (const press of overview.presses) for (const segment of observedRadiusEntrySegments(press.timelineSegments)) {
+      if (!['G', 'B', 'M', 'S'].includes(segment.eventType) || typeof segment.statusCode !== 'string' || !segment.statusCode.trim() || !segment.statusDescription.trim()) continue
       const identity = exactRadiusIdentity(segment)
       const current = observed.get(identity)
       if (current) { current.eventCount += 1; if (!current.lastSeenUtc || Date.parse(segment.startUtc) > Date.parse(current.lastSeenUtc)) current.lastSeenUtc = segment.startUtc }
@@ -239,7 +268,7 @@ export class RawRadiusExplorerService {
     for (const pressKey of RADIUS_PRESS_KEYS) {
       const press = overview.presses.find((item) => item.pressKey === pressKey)
       if (!press) continue
-      const matching = press.timelineSegments.filter((segment) => sameIdentity(segment, input.identity))
+      const matching = observedRadiusEntrySegments(press.timelineSegments).filter((segment) => sameIdentity(segment, input.identity))
       matching.forEach((segment, index) => {
         const contextMs = input.chartContextMinutes * 60_000
         occurrences.push({
@@ -326,7 +355,8 @@ export class RawRadiusExplorerService {
     const speedSignal = speed.signals.find((item) => item.canonicalId === 'machine.speed.actual')
     const currentRollSignal = currentRoll?.signals.find((item) => item.canonicalId === CURRENT_ROLL_LENGTH_CANONICAL_ID)
     const currentRollDefinition = RAW_EXPLORER_LENGTH_CATALOG.find((item) => item.canonicalId === CURRENT_ROLL_LENGTH_CANONICAL_ID)!
-    const rawReviews = rawDiscovery ? await this.reviews.list(occurrence.pressKey, rawDiscovery.signals.map(({ rawIdentity }) => rawIdentity)).catch(() => []) : []
+    const analysisSafeRawSignals = rawDiscovery?.signals.filter(({ unavailableObservationCount }) => unavailableObservationCount === 0) ?? []
+    const rawReviews = rawDiscovery ? await this.reviews.list(occurrence.pressKey, analysisSafeRawSignals.map(({ rawIdentity }) => rawIdentity)).catch(() => []) : []
     const reviewByIdentity = new Map(rawReviews.map((item) => [item.rawIdentity, item.reviewStatus]))
     const response = {
       occurrence, lookback: { fromUtc: lookbackFromUtc, toUtc: occurrence.startUtc, halfOpen: true },
@@ -336,8 +366,8 @@ export class RawRadiusExplorerService {
       changedSignals,
       rawTelemetry: rawDiscovery ? {
         status: 'available' as const,
-        signals: rawDiscovery.signals.map((item): RawExplorerRawChangedSignal => ({ ...item, reviewStatus: reviewByIdentity.get(item.rawIdentity) ?? 'UNREVIEWED' })),
-        counts: { rawCatalogIdentityCount: rawDiscovery.rawCatalogIdentityCount, canonicallyRepresentedIdentityCount: rawDiscovery.canonicallyRepresentedIdentityCount, unmappedIdentityCount: rawDiscovery.unmappedIdentityCount, usableIdentityCount: rawDiscovery.usableIdentityCount, changedIdentityCount: rawDiscovery.changedIdentityCount },
+        signals: analysisSafeRawSignals.map((item): RawExplorerRawChangedSignal => ({ ...item, reviewStatus: reviewByIdentity.get(item.rawIdentity) ?? 'UNREVIEWED' })),
+        counts: { rawCatalogIdentityCount: rawDiscovery.rawCatalogIdentityCount, canonicallyRepresentedIdentityCount: rawDiscovery.canonicallyRepresentedIdentityCount, unmappedIdentityCount: rawDiscovery.unmappedIdentityCount, usableIdentityCount: rawDiscovery.usableIdentityCount, changedIdentityCount: analysisSafeRawSignals.length },
         historianReadCount: rawDiscovery.historianReadCount,
       } : { status: 'unavailable' as const, signals: [], counts: null, historianReadCount: 0 },
       performance: { totalMs: this.now() - started, selectorCount: discovery.selectorCount, semanticHistoryRequests: discovery.requestCount + speed.requestCount + (currentRoll?.requestCount ?? 0), speedHistoryMs: speed.totalMs, payloadBytes: 0 },

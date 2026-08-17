@@ -27,12 +27,12 @@ describe('Telemetry Event Explorer mathematics', () => {
     assert.equal(activeAtStart[0]?.clippedStart, true)
     assert.equal(activeAtStart[0]?.startUtc, at(0))
     const gap = detectThresholdEvents({ observations: [{ atUtc: at(0), value: 205 }, { atUtc: at(1), value: 206 }, { atUtc: '2026-08-17T10:20:00.000Z', value: 207 }], fromUtc: at(0), toUtc: '2026-08-17T10:21:00.000Z', rule: { operator: '>', threshold: 200 } })
-    assert.equal(gap.length, 2)
+    assert.equal(gap.length, 1)
     assert.equal(gap[0]?.dataGap, true)
-    assert.equal(gap[1]?.clippedStart, true)
     const seededGap = detectThresholdEvents({ observations: [{ atUtc: '2026-08-17T10:20:00.123456Z', value: 207 }], seed: { atUtc: '2026-08-17T09:50:00.999999Z', value: 205 }, fromUtc: at(0), toUtc: '2026-08-17T10:21:00.000Z', rule: { operator: '>', threshold: 200 } })
-    assert.equal(seededGap.length, 1)
-    assert.equal(seededGap[0]?.startUtc, '2026-08-17T10:20:00.123Z')
+    assert.equal(seededGap.length, 0)
+    const afterRecovery = detectThresholdEvents({ observations: [{ atUtc: at(0), value: 205 }, { atUtc: at(20), value: 207 }, { atUtc: at(21), value: 199 }, { atUtc: at(22), value: 208 }, { atUtc: at(23), value: 198 }], fromUtc: at(0), toUtc: at(24), rule: { operator: '>', threshold: 200 } })
+    assert.deepEqual(afterRecovery.map(({ startUtc }) => startUtc), [at(0), at(22)])
   })
 
   it('finds the first qualifying rolling increase without requiring an exact window endpoint', () => {
@@ -91,7 +91,12 @@ describe('Telemetry Event Explorer mathematics', () => {
   it('uses a seed for a query that starts mid-state and marks clipping and telemetry gaps', () => {
     const result = detectValueChangeEvents({ observations: [{ atUtc: at(1), value: 'XYZ' }, { atUtc: at(30), value: 'DEF' }], seed: { atUtc: '2026-08-17T09:59:00.000Z', value: 'ABC' }, fromUtc: at(0), toUtc: at(31), rule: { match: 'any' } })
     assert.equal(result[0]?.previousValue, 'ABC'); assert.equal(result[0]?.clippedStart, true)
-    assert.equal(result[1]?.dataGap, true)
+    assert.equal(result.length, 1)
+  })
+
+  it('never turns an outage or reconnect into a value-change occurrence', () => {
+    const result = detectValueChangeEvents({ observations: [{ atUtc: at(0), value: 'ORDER-A' }, { atUtc: at(20), value: 'ORDER-B' }, { atUtc: at(21), value: 'ORDER-C' }], fromUtc: at(0), toUtc: at(22), rule: { match: 'any' } })
+    assert.deepEqual(result.map(({ previousValue, newValue, transitionAtUtc }) => ({ previousValue, newValue, transitionAtUtc })), [{ previousValue: 'ORDER-B', newValue: 'ORDER-C', transitionAtUtc: at(21) }])
   })
 
   it('drops invalid/missing values and resolves duplicate timestamps deterministically', () => {
