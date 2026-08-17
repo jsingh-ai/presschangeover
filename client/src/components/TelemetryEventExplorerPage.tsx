@@ -355,6 +355,17 @@ export function TelemetryEventExplorerPage() {
   useEffect(() => { if (selectedDataKind && selectedDataKind !== 'numeric') setEventType('value_change') }, [selectedDataKind])
 
   function selectLast24Hours() { setRangeMode('last24'); setRange(createPresetRange('last24')); setError(undefined) }
+  function searchAnotherCondition() {
+    previewRequestId.current += 1
+    setResult(undefined); setResultPressFilter('all'); setSelectedIndex(-1)
+    setSetupCollapsed(false); setSidebarOpen(true); setLoading(false); setError(undefined)
+    setRangeMode('last24'); setRange(createPresetRange('last24')); setCustomFrom(customDefaults.from); setCustomTo(customDefaults.to)
+    setSourceTab('canonical'); setVariableSearch(''); setSelectedCanonicalId(undefined); setSelectedRaw(undefined); setRawPressKey('press3'); setRawCatalog(undefined); setRawCatalogError(undefined); setRawPage(0)
+    setPressKey('all'); setDeckNumber('any')
+    setEventType('threshold'); setOperator('>'); setThreshold('200'); setDirection('increase'); setAmount('5'); setWindowMinutes('10'); setContextMinutes('30')
+    setValueMatch('any'); setBecomesValue(''); setFromValue(''); setToValue('')
+    setPreviewOption(undefined); setPreview(undefined); setPreviewLoading(false); setPreviewError(undefined); setRangeApplyPending(false)
+  }
   function applyCustomRange() {
     try {
       const next = createCustomRange(customFrom, customTo)
@@ -386,7 +397,7 @@ export function TelemetryEventExplorerPage() {
   return <div className="telemetry-event-explorer-page">
     <section className={`panel telemetry-event-setup${setupCollapsed ? ' is-collapsed' : ''}`}>
       {rangeApplyPending && <div className="telemetry-event-range-overlay" role="status" aria-live="polite"><i aria-hidden="true" /><div><strong>Applying time range</strong><span>Loading the selected variable preview for this exact window…</span></div></div>}
-      {result && setupCollapsed ? <div className="raw-explorer-setup__collapsed"><div><span className="eyebrow">Current telemetry search</span><strong>{result.occurrences[0]?.signalDisplayName ?? selectedCanonical?.displayName ?? 'Telemetry event'} · {ruleLabel(result.setup.rule)}</strong><small>{result.summary.totalOccurrences} occurrences across {result.summary.compatiblePressesSearched.length} compatible presses</small></div><button type="button" className="secondary-action" onClick={() => setSetupCollapsed(false)}>Search another condition</button></div> : <>
+      {result && setupCollapsed ? <div className="raw-explorer-setup__collapsed"><div><span className="eyebrow">Current telemetry search</span><strong>{result.occurrences[0]?.signalDisplayName ?? selectedCanonical?.displayName ?? 'Telemetry event'} · {ruleLabel(result.setup.rule)}</strong><small>{result.summary.totalOccurrences} occurrences across {result.summary.compatiblePressesSearched.length} compatible presses</small></div><button type="button" className="secondary-action" onClick={searchAnotherCondition}>Search another condition</button></div> : <>
         <div className="raw-explorer-title"><div><span className="eyebrow">Read-only event finder</span><h1>Telemetry Event Explorer</h1><p>Choose a telemetry condition, find every matching occurrence, then investigate it with synchronized telemetry and Radius context.</p></div></div>
         <div className="telemetry-event-setup-grid">
           <fieldset><legend>1 · Time range</legend><div className="raw-choice-row"><button type="button" className={rangeMode === 'last24' ? 'filter-chip active' : 'filter-chip'} onClick={selectLast24Hours}>Last 24 hours</button><button type="button" className={rangeMode === 'custom' ? 'filter-chip active' : 'filter-chip'} onClick={() => setRangeMode('custom')}>Custom</button></div>{rangeMode === 'custom' && <div className="raw-custom-range telemetry-event-custom-range"><label>Start (CT)<input type="datetime-local" value={customFrom} onChange={(event) => setCustomFrom(event.target.value)} /></label><label>End (CT)<input type="datetime-local" value={customTo} onChange={(event) => setCustomTo(event.target.value)} /></label><button type="button" className="secondary-action telemetry-apply-range" disabled={rangeApplyPending} onClick={applyCustomRange}><ApplyRangeIcon />{rangeApplyPending ? 'Applying…' : 'Apply range'}</button></div>}<small>{formatSelectedRange(range)}</small></fieldset>

@@ -79,6 +79,15 @@ describe('Telemetry Event Explorer UI', () => {
     assert.match(pageSource, /visibleOccurrences\.map/)
   })
 
+  it('starts a genuinely new search instead of leaving prior results and investigation mounted', () => {
+    assert.match(pageSource, /function searchAnotherCondition\(\)/)
+    assert.match(pageSource, /setResult\(undefined\); setResultPressFilter\('all'\); setSelectedIndex\(-1\)/)
+    assert.match(pageSource, /setSelectedCanonicalId\(undefined\); setSelectedRaw\(undefined\)/)
+    assert.match(pageSource, /setPreviewOption\(undefined\); setPreview\(undefined\); setPreviewLoading\(false\)/)
+    assert.match(pageSource, /setEventType\('threshold'\); setOperator\('>'\); setThreshold\('200'\)/)
+    assert.match(pageSource, /onClick=\{searchAnotherCondition\}>Search another condition/)
+  })
+
   it('applies a custom range explicitly and keeps its loading overlay tied to the current preview request', () => {
     assert.match(pageSource, /function applyCustomRange\(\)/)
     assert.match(pageSource, /setPreviewRefreshKey\(\(current\) => current \+ 1\)/)
