@@ -28,6 +28,10 @@ import { StopRestartAnalysisService, type FleetSpeedContextInput, type RadiusTim
 import { RAW_EXPLORER_MAX_WINDOW_MINUTES, RawRadiusExplorerService, type RawExplorerOccurrence, type RawExplorerSetup, type RawExplorerSignalIdentity } from './raw-radius-explorer/raw-radius-explorer-service.js'
 import { RAW_TELEMETRY_REVIEW_STATUSES, type RawTelemetryReviewService, type RawTelemetryReviewStatus } from './raw-radius-explorer/raw-telemetry-review-service.js'
 import { TELEMETRY_EVENT_MAX_CONTEXT_MINUTES, TELEMETRY_EVENT_MAX_RANGE_MS, TelemetryEventExplorerService, type TelemetryEventOccurrence, type TelemetryEventSearchInput } from './telemetry-event-explorer/telemetry-event-explorer-service.js'
+import type { AiInvestigatorConfig } from './config.js'
+import { parseAiInvestigatorRequest } from './ai-investigator/contracts.js'
+import { AI_INVESTIGATOR_TOOL_NAMES, AiInvestigatorReadOnlyToolRegistry } from './ai-investigator/read-only-tools.js'
+import { AiInvestigatorOrchestrator, createAiInvestigatorOrchestrator, investigatorDisplayName, type AiInvestigatorModelClient } from './ai-investigator/orchestrator.js'
 
 const MAX_PHYSICAL_STATE_RANGE_MS = 2 * 60 * 60 * 1_000
 const MAX_RADIUS_RANGE_MS = 31 * 24 * 60 * 60 * 1_000
@@ -83,6 +87,8 @@ export interface CreateAppOptions {
   classificationService?: ClassificationService
   classificationAuthorizer?: ClassificationAuthorizer
   rawTelemetryReviewService?: RawTelemetryReviewService
+  aiInvestigatorConfig?: AiInvestigatorConfig
+  aiInvestigatorModelClient?: AiInvestigatorModelClient
 }
 
 class RequestValidationError extends Error {
@@ -459,6 +465,8 @@ export function createApp({
   classificationService,
   classificationAuthorizer = () => ({ id: 'anonymous', canEdit: false }),
   rawTelemetryReviewService,
+  aiInvestigatorConfig,
+  aiInvestigatorModelClient,
 }: CreateAppOptions) {
   const app = express()
   const telemetry = new TelemetryFoundationService(telemetryClient)
@@ -466,6 +474,10 @@ export function createApp({
   const stopRestart = new StopRestartAnalysisService(telemetry)
   const rawRadiusExplorer = new RawRadiusExplorerService(radiusService, telemetry, rawTelemetryReviewService)
   const telemetryEventExplorer = new TelemetryEventExplorerService(telemetry, radiusService, rawRadiusExplorer)
+  const aiToolRegistry = new AiInvestigatorReadOnlyToolRegistry(radiusService, telemetry)
+  const aiInvestigator = aiInvestigatorConfig?.enabled && aiInvestigatorModelClient
+    ? new AiInvestigatorOrchestrator(aiInvestigatorConfig, aiToolRegistry, aiInvestigatorModelClient, logger)
+    : aiInvestigatorConfig ? createAiInvestigatorOrchestrator(aiInvestigatorConfig, aiToolRegistry, logger) : undefined
   const observedIdentityCache = new ObservedIdentityCache(
     () => radiusService.getObservedIdentities?.() ?? Promise.resolve([]),
     { onRefreshError: () => { if (logger) logger.error('classification_observed_identity_refresh_unavailable') } },
@@ -493,6 +505,33 @@ export function createApp({
       status: 'healthy',
     })
   })
+
+  app.get('/api/ai-investigator/status', (_request, response) => {
+    const config = aiInvestigatorConfig
+    response.status(200).json({
+      configured: Boolean(aiInvestigator),
+      enabled: config?.enabled ?? false,
+      model: config?.model ?? 'not-configured',
+      maximumAnalysisMs: config?.totalTimeoutMs ?? 45_000,
+      maximumToolMs: config?.toolTimeoutMs ?? 8_000,
+      maximumToolCalls: config?.maxToolCalls ?? 8,
+      maximumToolRounds: config?.maxToolRounds ?? 4,
+      maximumParallelTools: config?.maxParallelTools ?? 3,
+      presses: RADIUS_PRESS_KEYS.map((pressKey) => ({ pressKey, displayName: investigatorDisplayName(pressKey) })),
+      allowedTools: AI_INVESTIGATOR_TOOL_NAMES,
+    })
+  })
+
+  app.post('/api/ai-investigator/analyze', asyncRoute(async (request, response) => {
+    if (!aiInvestigator) {
+      response.status(503).json({ status: 'not_configured', message: 'AI Investigator is not configured on this server.' })
+      return
+    }
+    let input
+    try { input = parseAiInvestigatorRequest(request.body) }
+    catch (error) { throw new RequestValidationError(error instanceof Error ? error.message : 'invalid_ai_investigator_request') }
+    response.status(200).json(await aiInvestigator.analyze(input, cancellationSignal(request, response)))
+  }))
 
   app.get(
     '/api/telemetry/health',

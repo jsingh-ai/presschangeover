@@ -1,0 +1,190 @@
+import { randomUUID } from 'node:crypto'
+import OpenAI from 'openai'
+import type { ResponseInput, ResponseInputItem, ResponseOutputItem } from 'openai/resources/responses/responses'
+import type { AiInvestigatorConfig } from '../config.js'
+import type { RadiusPressKey } from '../radius/models.js'
+import { AI_INVESTIGATOR_CONTENT_SCHEMA, type AiInvestigatorContent, type AiInvestigatorRequest, type AiInvestigatorResult, validateAiInvestigatorContent } from './contracts.js'
+import { AiInvestigatorReadOnlyToolRegistry, type AiInvestigatorToolDefinition, type AiToolResult } from './read-only-tools.js'
+
+export interface AiInvestigatorLogger {
+  info(message: string): void
+  error(message: string): void
+}
+
+export interface AiModelToolCall { type: 'function_call'; callId: string; name: string; arguments: string }
+export interface AiModelResponse {
+  id: string
+  outputText: string
+  outputItems: unknown[]
+  toolCalls: AiModelToolCall[]
+  usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number }
+}
+
+export interface AiInvestigatorModelClient {
+  create(input: unknown[], instructions: string, tools: AiInvestigatorToolDefinition[], signal: AbortSignal): Promise<AiModelResponse>
+}
+
+export class OpenAiResponsesInvestigatorClient implements AiInvestigatorModelClient {
+  private readonly client: OpenAI
+
+  constructor(private readonly config: AiInvestigatorConfig) {
+    if (!config.apiKey) throw new Error('ai_investigator_not_configured')
+    this.client = new OpenAI({ apiKey: config.apiKey, timeout: config.openAiTimeoutMs, maxRetries: 0 })
+  }
+
+  async create(input: unknown[], instructions: string, tools: AiInvestigatorToolDefinition[], signal: AbortSignal): Promise<AiModelResponse> {
+    const response = await this.client.responses.create({
+      model: this.config.model,
+      instructions,
+      input: input as ResponseInput,
+      tools,
+      tool_choice: 'auto',
+      include: ['reasoning.encrypted_content'],
+      text: { verbosity: 'low', format: { type: 'json_schema', name: 'process_intelligence_investigation', strict: true, schema: AI_INVESTIGATOR_CONTENT_SCHEMA } },
+      max_output_tokens: 4_000,
+      store: false,
+    }, { signal, timeout: this.config.openAiTimeoutMs, maxRetries: 0 })
+    const toolCalls = response.output.filter((item) => item.type === 'function_call').map((item) => ({ type: 'function_call' as const, callId: item.call_id, name: item.name, arguments: item.arguments }))
+    return { id: response.id, outputText: response.output_text, outputItems: response.output as ResponseOutputItem[], toolCalls, usage: response.usage ? { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens, totalTokens: response.usage.total_tokens } : undefined }
+  }
+}
+
+class AiTimeoutError extends Error {
+  constructor(public readonly kind: 'overall' | 'tool') { super(`ai_${kind}_timeout`); this.name = 'AiTimeoutError' }
+}
+
+interface ToolEvidence { name: string; arguments: unknown; result?: AiToolResult; error?: string; durationMs: number }
+
+const SYSTEM_INSTRUCTIONS = `You are the advisory ProcessIntelligence AI Investigator. You may use ONLY the supplied read-only functions. Never claim database, historian, filesystem, network, machine-control, Radius-control, MQTT, acknowledgement, or configuration access. Begin with get_fleet_operational_summary for the requested scope. Identify only materially different candidate presses, then use at most a few follow-up tools. Compare the requested period with the immediately preceding equal-duration baseline where useful. Separate directly calculated FACTS, deterministic COMPARISONS, and cautious INTERPRETATIONS. Never assert a root cause or defect without evidence. Treat unavailable data as a limitation, never as a process event. If baseline evidence is insufficient, say "Insufficient baseline". Return no more than five ranked findings. Links must be relative ProcessIntelligence paths beginning with /raw-radius-explorer, /telemetry-event-explorer, /overview, or /operational-analysis. Do not emit HTML.`
+
+function safeLog(logger: AiInvestigatorLogger | false, level: 'info' | 'error', value: Record<string, unknown>) {
+  if (logger) logger[level](JSON.stringify(value))
+}
+
+function parseToolArguments(raw: string): unknown {
+  if (Buffer.byteLength(raw, 'utf8') > 20_000) throw new Error('invalid_ai_tool_arguments')
+  let parsed: unknown
+  try { parsed = JSON.parse(raw) } catch { throw new Error('invalid_ai_tool_arguments') }
+  return parsed
+}
+
+function errorCode(error: unknown): string {
+  if (error instanceof AiTimeoutError) return error.kind === 'tool' ? 'tool_timeout' : 'overall_timeout'
+  if (error instanceof Error && /^[a-z0-9_]+$/.test(error.message)) return error.message
+  return 'tool_unavailable'
+}
+
+function fleetTable(evidence: ToolEvidence[]) {
+  const fleet = evidence.find((item) => item.name === 'get_fleet_operational_summary' && item.result)?.result
+  const presses = fleet?.presses
+  if (!Array.isArray(presses)) return []
+  const rows = presses.slice(0, 12).flatMap((item) => {
+    if (!item || typeof item !== 'object') return []
+    const row = item as Record<string, unknown>
+    return [[String(row.press ?? ''), String(row.coveragePercent ?? 'Unavailable'), String(row.productionPercent ?? 'Unavailable'), String(row.productionInterruptions ?? 'Unavailable'), String(row.longestInterruptionMinutes ?? 'Unavailable')]]
+  })
+  return rows.length ? [{ title: 'Deterministic press summary', columns: ['Press', 'Coverage %', 'Production %', 'Interruptions', 'Longest interruption (min)'], rows }] : []
+}
+
+function partialContent(status: 'partial' | 'timeout' | 'error', evidence: ToolEvidence[], reason: string): AiInvestigatorContent {
+  const prefix = status === 'timeout' ? 'Analysis reached its time budget.' : status === 'error' ? 'The AI service could not complete the investigation.' : 'Analysis stopped at its configured exploration limit.'
+  return { summary: `${prefix} Safe deterministic evidence collected before it stopped is shown below.`, findings: [], tables: fleetTable(evidence), limitations: [reason, 'No unsupported root-cause conclusion was generated.'] }
+}
+
+function requestPrompt(request: AiInvestigatorRequest): string {
+  const duration = Date.parse(request.range.endUtc) - Date.parse(request.range.startUtc)
+  const baselineEnd = request.range.startUtc
+  const baselineStart = new Date(Date.parse(baselineEnd) - duration).toISOString()
+  return JSON.stringify({ task: 'Discover unusual behavior', requestedScope: request.scope.pressKey ?? 'all', currentPeriod: request.range, recommendedBaseline: { startUtc: baselineStart, endUtc: baselineEnd }, constraints: { rankedFindingsMaximum: 5, manualVerificationRequired: true } })
+}
+
+export class AiInvestigatorOrchestrator {
+  constructor(
+    private readonly config: AiInvestigatorConfig,
+    private readonly registry: AiInvestigatorReadOnlyToolRegistry,
+    private readonly model: AiInvestigatorModelClient,
+    private readonly logger: AiInvestigatorLogger | false = console,
+    private readonly now: () => Date = () => new Date(),
+  ) {}
+
+  async analyze(request: AiInvestigatorRequest, requestSignal?: AbortSignal): Promise<AiInvestigatorResult> {
+    const analysisId = randomUUID(); const started = this.now(); const startedAt = started.toISOString()
+    const deadline = new AbortController(); const deadlineTimer = setTimeout(() => deadline.abort(new AiTimeoutError('overall')), this.config.totalTimeoutMs)
+    const signal = requestSignal ? AbortSignal.any([deadline.signal, requestSignal]) : deadline.signal
+    const evidence: ToolEvidence[] = []; let toolCallsUsed = 0; let toolRounds = 0
+    let input: unknown[] = [{ role: 'user', content: requestPrompt(request) } satisfies ResponseInputItem]
+    safeLog(this.logger, 'info', { event: 'ai_investigator_started', analysisId, scope: request.scope.pressKey ?? 'all', startUtc: request.range.startUtc, endUtc: request.range.endUtc, modelConfigured: true, model: this.config.model })
+
+    const finish = (status: AiInvestigatorResult['status'], content: AiInvestigatorContent) => {
+      const completedAt = this.now().toISOString(); const result: AiInvestigatorResult = { analysisId, status, scope: { pressKey: request.scope.pressKey, startUtc: request.range.startUtc, endUtc: request.range.endUtc, analysis: request.analysis }, startedAt, completedAt, elapsedMs: Math.max(0, Date.parse(completedAt) - started.getTime()), toolCallsUsed, ...content }
+      safeLog(this.logger, status === 'error' ? 'error' : 'info', { event: 'ai_investigator_finished', analysisId, status, elapsedMs: result.elapsedMs, toolCallsUsed, toolRounds })
+      return result
+    }
+
+    try {
+      while (!signal.aborted) {
+        const response = await this.model.create(input, SYSTEM_INSTRUCTIONS, this.registry.definitions, signal)
+        safeLog(this.logger, 'info', { event: 'ai_investigator_model_response', analysisId, responseId: response.id, toolRound: toolRounds, usage: response.usage })
+        input.push(...response.outputItems)
+        if (!response.toolCalls.length) {
+          if (!response.outputText) throw new Error('empty_ai_investigator_response')
+          return finish('complete', validateAiInvestigatorContent(JSON.parse(response.outputText)))
+        }
+        if (toolRounds >= this.config.maxToolRounds) return finish('partial', partialContent('partial', evidence, `Maximum tool rounds (${this.config.maxToolRounds}) reached.`))
+        toolRounds += 1
+        const remaining = this.config.maxToolCalls - toolCallsUsed
+        if (remaining <= 0) return finish('partial', partialContent('partial', evidence, `Maximum tool calls (${this.config.maxToolCalls}) reached.`))
+        const executable = response.toolCalls.slice(0, remaining)
+        const skipped = response.toolCalls.slice(remaining)
+        const outputs: unknown[] = []
+        for (let offset = 0; offset < executable.length; offset += this.config.maxParallelTools) {
+          if (signal.aborted) throw new AiTimeoutError('overall')
+          const batch = executable.slice(offset, offset + this.config.maxParallelTools)
+          const batchOutputs = await Promise.all(batch.map(async (call) => {
+            toolCallsUsed += 1
+            let parsed: unknown
+            const began = Date.now()
+            try {
+              parsed = parseToolArguments(call.arguments)
+              const toolController = new AbortController(); const timer = setTimeout(() => toolController.abort(new AiTimeoutError('tool')), this.config.toolTimeoutMs)
+              const toolSignal = AbortSignal.any([signal, toolController.signal])
+              try {
+                const operation = this.registry.execute(call.name, parsed, { requestId: analysisId, signal: toolSignal })
+                const result = await Promise.race([operation, new Promise<never>((_resolve, reject) => toolSignal.addEventListener('abort', () => reject(toolSignal.reason ?? new AiTimeoutError('tool')), { once: true }))])
+                const durationMs = Date.now() - began; const item = { name: call.name, arguments: parsed, result, durationMs }; evidence.push(item)
+                safeLog(this.logger, 'info', { event: 'ai_investigator_tool', analysisId, tool: call.name, durationMs, success: true, payloadBytes: Buffer.byteLength(JSON.stringify(result), 'utf8') })
+                return { type: 'function_call_output', call_id: call.callId, output: JSON.stringify({ ok: true, result }) }
+              } finally { clearTimeout(timer) }
+            } catch (error) {
+              const code = errorCode(error); const durationMs = Date.now() - began; evidence.push({ name: call.name, arguments: parsed ?? null, error: code, durationMs })
+              safeLog(this.logger, 'error', { event: 'ai_investigator_tool', analysisId, tool: call.name, durationMs, success: false, error: code })
+              if (signal.aborted) throw new AiTimeoutError('overall')
+              return { type: 'function_call_output', call_id: call.callId, output: JSON.stringify({ ok: false, error: code }) }
+            }
+          }))
+          outputs.push(...batchOutputs)
+        }
+        outputs.push(...skipped.map((call) => ({ type: 'function_call_output', call_id: call.callId, output: JSON.stringify({ ok: false, error: 'maximum_tool_calls_reached' }) })))
+        input.push(...outputs)
+        if (skipped.length) return finish('partial', partialContent('partial', evidence, `Maximum tool calls (${this.config.maxToolCalls}) reached.`))
+      }
+      throw new AiTimeoutError('overall')
+    } catch (error) {
+      if (deadline.signal.aborted || error instanceof AiTimeoutError && error.kind === 'overall') return finish('timeout', partialContent('timeout', evidence, `Maximum analysis time was ${Math.round(this.config.totalTimeoutMs / 1_000)} seconds.`))
+      const code = errorCode(error)
+      safeLog(this.logger, 'error', { event: 'ai_investigator_failure', analysisId, error: code })
+      return finish('error', partialContent('error', evidence, code))
+    } finally {
+      clearTimeout(deadlineTimer)
+    }
+  }
+}
+
+export function createAiInvestigatorOrchestrator(config: AiInvestigatorConfig, registry: AiInvestigatorReadOnlyToolRegistry, logger: AiInvestigatorLogger | false = console): AiInvestigatorOrchestrator | undefined {
+  if (!config.enabled || !config.apiKey) return undefined
+  return new AiInvestigatorOrchestrator(config, registry, new OpenAiResponsesInvestigatorClient(config), logger)
+}
+
+export function investigatorDisplayName(pressKey: RadiusPressKey): string {
+  return pressKey.replace('press', 'Press ')
+}

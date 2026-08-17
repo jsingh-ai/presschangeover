@@ -39,6 +39,8 @@ import type {
   TelemetryEventSearchInput,
   TelemetryEventSearchResult,
   TelemetryEventSource,
+  AiInvestigatorServerStatus,
+  AiInvestigatorResult,
 } from '../types/api'
 import type {
   CuratedPhysicalEvidence,
@@ -85,6 +87,14 @@ async function sendJson<T>(path: string, method: 'POST' | 'PATCH' | 'DELETE', bo
 
 export function getProcessIntelligenceHealth(signal?: AbortSignal) {
   return getJson<ProcessIntelligenceHealth>('/api/health', signal)
+}
+
+export function getAiInvestigatorStatus(signal?: AbortSignal) {
+  return getJson<AiInvestigatorServerStatus>('/api/ai-investigator/status', signal)
+}
+
+export function analyzeWithAiInvestigator(input: { scope: { pressKey: RadiusPressKey | null }; range: { startUtc: string; endUtc: string }; analysis: 'discover_unusual_behavior' }, signal?: AbortSignal) {
+  return sendJson<AiInvestigatorResult>('/api/ai-investigator/analyze', 'POST', input, signal)
 }
 
 export function getTelemetryHealth(signal?: AbortSignal) {

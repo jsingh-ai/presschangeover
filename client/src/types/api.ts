@@ -63,6 +63,49 @@ export type RadiusPressKey =
   | 'press14'
   | 'press15'
 
+export interface AiInvestigatorServerStatus {
+  configured: boolean
+  enabled: boolean
+  model: string
+  maximumAnalysisMs: number
+  maximumToolMs: number
+  maximumToolCalls: number
+  maximumToolRounds: number
+  maximumParallelTools: number
+  presses: Array<{ pressKey: RadiusPressKey; displayName: string }>
+  allowedTools: string[]
+}
+
+export interface AiInvestigatorFinding {
+  rank: number
+  press: string
+  title: string
+  importance: 'high' | 'medium' | 'low'
+  confidence: 'high' | 'medium' | 'low'
+  whyItMatters: string
+  facts: Array<{ label: string; value: string; comparison: string }>
+  timestamps: string[]
+  radiusEvidence: string[]
+  telemetryEvidence: string[]
+  productionContext: { job: string; order: string; recipe: string }
+  recommendedInvestigation: string
+  links: Array<{ label: string; href: string }>
+}
+
+export interface AiInvestigatorResult {
+  analysisId: string
+  status: 'complete' | 'partial' | 'timeout' | 'error'
+  scope: { pressKey: RadiusPressKey | null; startUtc: string; endUtc: string; analysis: 'discover_unusual_behavior' }
+  startedAt: string
+  completedAt: string
+  elapsedMs: number
+  toolCallsUsed: number
+  summary: string
+  findings: AiInvestigatorFinding[]
+  tables: Array<{ title: string; columns: string[]; rows: string[][] }>
+  limitations: string[]
+}
+
 export interface RadiusHealth {
   status: 'healthy' | 'unavailable'
   configured: boolean
