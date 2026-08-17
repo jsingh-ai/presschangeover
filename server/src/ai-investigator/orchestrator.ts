@@ -45,7 +45,7 @@ export class OpenAiResponsesInvestigatorClient implements AiInvestigatorModelCli
       tool_choice: toolChoice,
       include: ['reasoning.encrypted_content'],
       text: { verbosity: 'low', format: { type: 'json_schema', name: 'process_intelligence_investigation', strict: true, schema: AI_INVESTIGATOR_CONTENT_SCHEMA } },
-      max_output_tokens: 4_000,
+      max_output_tokens: toolChoice === 'auto' ? 1_000 : 4_000,
       store: false,
     }, { signal, timeout: this.config.openAiTimeoutMs, maxRetries: 0 })
     const toolCalls = response.output.filter((item) => item.type === 'function_call').map((item) => ({ type: 'function_call' as const, callId: item.call_id, name: item.name, arguments: item.arguments }))
@@ -76,6 +76,10 @@ function parseToolArguments(raw: string): unknown {
 
 function errorCode(error: unknown): string {
   if (error instanceof AiTimeoutError) return error.kind === 'tool' ? 'tool_timeout' : 'overall_timeout'
+  if (error && typeof error === 'object') {
+    const candidate = error as { status?: unknown; code?: unknown }
+    if (candidate.status === 429 && candidate.code === 'rate_limit_exceeded') return 'openai_rate_limit'
+  }
   if (error instanceof Error && /^[a-z0-9_]+$/.test(error.message)) return error.message
   return 'tool_unavailable'
 }

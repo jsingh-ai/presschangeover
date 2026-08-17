@@ -136,6 +136,13 @@ describe('AI Investigator read-only boundary', () => {
     assert.equal(result.status, 'error'); assert.equal(result.toolCallsUsed, 0); assert.equal(calls, 0); assert.match(result.limitations.join(' '), /invalid_final_synthesis/)
   })
 
+  it('reports an OpenAI token-rate rejection accurately instead of tool_unavailable', async () => {
+    const rateLimit = Object.assign(new Error('Rate limit reached for tokens'), { status: 429, code: 'rate_limit_exceeded', type: 'tokens' })
+    const model: AiInvestigatorModelClient = { create: async () => { throw rateLimit } }
+    const result = await new AiInvestigatorOrchestrator(config, registry(radiusWithOverview(async () => overview())), model, false).analyze(request)
+    assert.equal(result.status, 'error'); assert.deepEqual(result.limitations, ['openai_rate_limit', 'No unsupported root-cause conclusion was generated.'])
+  })
+
   it('performs at most one no-tool grounding correction and returns grounded content', async () => {
     const invalid: AiInvestigatorDraftContent = { ...draftFinding, findings: [{ ...draftFinding.findings[0], pressKey: 'press3', facts: [{ label: 'Production', factIds: ['press3.invented.value'] }], evidenceFactIds: ['press3.invented.value'] }] }
     const corrected: AiInvestigatorDraftContent = { ...draftFinding, findings: [{ ...draftFinding.findings[0], pressKey: 'press3', facts: [{ label: 'Production', factIds: ['press3.production_percent.current'] }], evidenceFactIds: ['press3.production_percent.current'] }] }
