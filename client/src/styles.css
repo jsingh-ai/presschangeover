@@ -2179,7 +2179,7 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
 .synchronized-timeline__event-detail time { color: var(--text-muted); }
 .synchronized-timeline__highlight { position: absolute; z-index: 1; top: 1.8rem; bottom: 0; left: calc(9.5rem + (100% - 9.5rem) * var(--timeline-highlight-start)); width: calc((100% - 9.5rem) * var(--timeline-highlight-width)); min-width: 2px; background: color-mix(in srgb, var(--primary) 9%, transparent); border-inline: 1px solid color-mix(in srgb, var(--primary) 42%, transparent); pointer-events: none; }
 .synchronized-timeline__crosshair { position: absolute; z-index: 6; top: 1.8rem; bottom: 0; left: calc(9.5rem + (100% - 9.5rem) * var(--timeline-position)); width: 1px; background: color-mix(in srgb, var(--text) 50%, transparent); pointer-events: none; }
-.synchronized-timeline__inspection-tooltip { position: fixed; z-index: 2147483000; width: 18rem; max-width: calc(100vw - 1.5rem); max-height: calc(100vh - 1.5rem); overflow: auto; pointer-events: none; }
+.synchronized-timeline__inspection-tooltip { position: fixed; z-index: 2147483000; width: min(46rem, calc(100vw - 1.5rem)); max-width: calc(100vw - 1.5rem); overflow: visible; pointer-events: none; }
 @media (max-width: 600px) {
   .synchronized-timeline__row { grid-template-columns: 6rem minmax(0, 1fr); }
   .synchronized-timeline__axis { margin-left: 6.5rem; }
@@ -2635,12 +2635,20 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
   margin-top: .8rem;
 }
 
-.raw-press-counts span {
+.raw-press-counts span,
+.raw-press-counts button {
   padding: .38rem .55rem;
   border: 1px solid var(--border-subtle, #d8dee8);
   border-radius: 999px;
+  color: var(--text-primary, #172033);
+  background: var(--surface-raised, #fff);
   font-size: .75rem;
 }
+
+.raw-press-counts button { cursor: pointer; }
+.raw-press-counts button:hover { border-color: var(--accent, #3167d5); background: color-mix(in srgb, var(--accent, #3167d5) 7%, var(--surface-raised, #fff)); }
+.raw-press-counts button.is-active { border-color: var(--accent, #3167d5); color: #fff; background: var(--accent, #3167d5); box-shadow: 0 3px 9px color-mix(in srgb, var(--accent, #3167d5) 18%, transparent); }
+.telemetry-event-filter-status { margin: .45rem 0 0; color: var(--text-secondary, #617087); font-size: .72rem; font-weight: 700; }
 
 .raw-occurrence-results {
   display: grid;
@@ -2751,7 +2759,7 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
 }
 
 .raw-inspection-tooltip header span { font-weight: 750; text-transform: uppercase; letter-spacing: .05em; }
-.raw-inspection-tooltip dl { max-height: 17rem; overflow: hidden auto; margin: 0; padding: .35rem .75rem .55rem; }
+.raw-inspection-tooltip dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(10.5rem, 100%), 1fr)); overflow: visible; margin: 0; padding: .35rem .75rem .55rem; }
 .raw-inspection-tooltip dl > div { display: grid; gap: .08rem; padding: .42rem 0; border-bottom: 1px solid color-mix(in srgb, var(--border-subtle, #d8dee8) 70%, transparent); }
 .raw-inspection-tooltip dl > div:last-child { border-bottom: 0; }
 .raw-inspection-tooltip dt { color: var(--text-secondary, #617087); font-size: .68rem; font-weight: 750; }
@@ -3020,6 +3028,7 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
 .raw-pinned-strip { flex-wrap: wrap; border-radius: .75rem .75rem 0 0; }
 .raw-pinned-strip > strong { font-size: .72rem; text-transform: uppercase; letter-spacing: .05em; }
 .raw-pinned-strip > span { color: var(--text-secondary, #617087); font-size: .7rem; }
+.raw-pinned-strip > .raw-fixed-pin { display: inline-flex; align-items: center; padding: .28rem .48rem; border: 1px solid color-mix(in srgb, var(--accent, #3167d5) 42%, var(--border-subtle, #d8dee8)); border-radius: 999px; color: var(--text-primary, #172033); background: color-mix(in srgb, var(--accent, #3167d5) 8%, var(--surface-raised, #fff)); font-weight: 700; white-space: nowrap; }
 .raw-pinned-strip button { display: inline-flex; align-items: center; gap: .35rem; max-width: 15rem; padding: .28rem .48rem; overflow: hidden; border: 1px solid color-mix(in srgb, var(--accent, #3167d5) 42%, var(--border-subtle, #d8dee8)); border-radius: 999px; color: var(--text-primary, #172033); background: color-mix(in srgb, var(--accent, #3167d5) 8%, var(--surface-raised, #fff)); font-size: .68rem; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
 .raw-pinned-strip button span { font-size: .9rem; }
 

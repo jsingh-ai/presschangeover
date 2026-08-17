@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { areaFromPathname, areaPath } from '../src/navigation'
-import { adjacentPreviewOption, reconstructPreviewStateTimeline, TelemetryEventExplorerPage, telemetryEventMarkers, type PreviewOption } from '../src/components/TelemetryEventExplorerPage'
+import { adjacentPreviewOption, filterTelemetryEventOccurrences, reconstructPreviewStateTimeline, TelemetryEventExplorerPage, telemetryEventMarkers, type PreviewOption } from '../src/components/TelemetryEventExplorerPage'
 import type { TelemetryEventOccurrence } from '../src/types/api'
 
 const pageSource = readFileSync(new URL('../src/components/TelemetryEventExplorerPage.tsx', import.meta.url), 'utf8')
@@ -68,6 +68,15 @@ describe('Telemetry Event Explorer UI', () => {
     assert.match(pageSource, /aria-label="Next preview source"/)
     assert.match(pageSource, /disabled=\{options\.length <= 1\}/)
     assert.match(styles, /telemetry-variable-preview__previous/)
+  })
+
+  it('filters occurrence results from the clickable press-count controls', () => {
+    const occurrences = [{ pressKey: 'press5', occurrenceId: 'p5-1' }, { pressKey: 'press3', occurrenceId: 'p3-1' }, { pressKey: 'press5', occurrenceId: 'p5-2' }] as TelemetryEventOccurrence[]
+    assert.deepEqual(filterTelemetryEventOccurrences(occurrences, 'press5').map(({ occurrenceId }) => occurrenceId), ['p5-1', 'p5-2'])
+    assert.equal(filterTelemetryEventOccurrences(occurrences, 'all'), occurrences)
+    assert.match(pageSource, /aria-label="Filter occurrences by press"/)
+    assert.match(pageSource, /setResultPressFilter\(press\.pressKey\)/)
+    assert.match(pageSource, /visibleOccurrences\.map/)
   })
 
   it('applies a custom range explicitly and keeps its loading overlay tied to the current preview request', () => {
@@ -159,5 +168,10 @@ describe('Telemetry Event Explorer UI', () => {
     assert.match(pageSource, /Next/)
     assert.match(pageSource, /raw-investigation-workspace/)
     assert.match(styles, /grid-template-columns: minmax\(0, 2fr\) minmax\(20rem, 1fr\)/)
+    assert.match(pageSource, /raw-fixed-pin">Actual Speed/)
+    assert.match(pageSource, /raw-fixed-pin">Current Roll Length/)
+    assert.match(pageSource, /isAlwaysPinnedCanonical/)
+    assert.match(styles, /synchronized-timeline__inspection-tooltip[^}]*overflow: visible/)
+    assert.match(styles, /raw-inspection-tooltip dl[^}]*overflow: visible/)
   })
 })
