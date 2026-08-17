@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { areaFromPathname, areaPath } from '../src/navigation'
-import { TelemetryEventExplorerPage, telemetryEventMarkers } from '../src/components/TelemetryEventExplorerPage'
+import { adjacentPreviewOption, TelemetryEventExplorerPage, telemetryEventMarkers, type PreviewOption } from '../src/components/TelemetryEventExplorerPage'
 import type { TelemetryEventOccurrence } from '../src/types/api'
 
 const pageSource = readFileSync(new URL('../src/components/TelemetryEventExplorerPage.tsx', import.meta.url), 'utf8')
@@ -50,6 +50,24 @@ describe('Telemetry Event Explorer UI', () => {
     assert.match(pageSource, /250/)
     assert.match(pageSource, /No usable recent history/)
     assert.match(pageSource, /selectedDataKind === 'boolean'/)
+  })
+
+  it('navigates the ordered compatible preview sources in both directions with wraparound', () => {
+    const options: PreviewOption[] = [
+      { pressKey: 'press3', deckNumber: null, label: 'Press 3' },
+      { pressKey: 'press5', deckNumber: 1, label: 'Press 5 · Deck 1' },
+      { pressKey: 'press5', deckNumber: 2, label: 'Press 5 · Deck 2' },
+    ]
+    assert.equal(adjacentPreviewOption(options, options[0], 1), options[1])
+    assert.equal(adjacentPreviewOption(options, options[1], -1), options[0])
+    assert.equal(adjacentPreviewOption(options, options.at(-1), 1), options[0])
+    assert.equal(adjacentPreviewOption(options, options[0], -1), options.at(-1))
+    assert.equal(adjacentPreviewOption([options[0]!], options[0], 1), options[0])
+    assert.equal(adjacentPreviewOption([], undefined, 1), undefined)
+    assert.match(pageSource, /aria-label="Previous preview source"/)
+    assert.match(pageSource, /aria-label="Next preview source"/)
+    assert.match(pageSource, /disabled=\{options\.length <= 1\}/)
+    assert.match(styles, /telemetry-variable-preview__previous/)
   })
 
   it('reuses the synchronized Raw Radius investigation interactions and bounded split layout', () => {

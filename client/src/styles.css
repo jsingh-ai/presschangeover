@@ -2350,6 +2350,10 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
 .telemetry-variable-preview > header > div { display: grid; gap: .12rem; }
 .telemetry-variable-preview > header > div > strong { color: var(--text-strong); font-size: .9rem; }
 .telemetry-variable-preview > header label { min-width: 13rem; }
+.telemetry-preview-source-control { display: flex !important; align-items: end; gap: .3rem !important; }
+.telemetry-preview-source-control label { display: grid; gap: .22rem; color: var(--muted); font-size: .64rem; font-weight: 800; }
+.telemetry-preview-source-control select { width: 100%; min-height: 2.2rem; padding: .38rem .5rem; color: var(--text); background: var(--surface-strong); border: 1px solid var(--border); border-radius: .42rem; font: inherit; }
+.telemetry-preview-source-control button { flex: 0 0 2.2rem; width: 2.2rem; min-height: 2.2rem; padding: 0; font-size: .9rem; }
 .telemetry-variable-preview p { margin: 0; color: var(--muted); font-size: .68rem; }
 .telemetry-variable-preview__identity { display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); gap: .35rem .7rem; align-items: center; padding: .42rem .55rem; border: 1px solid var(--border); border-radius: .45rem; color: var(--muted); background: var(--surface-strong); font-size: .64rem; }
 .telemetry-variable-preview__identity small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2361,6 +2365,8 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
 .telemetry-variable-preview__summary { display: flex; flex-wrap: wrap; gap: .35rem .8rem; padding-top: .45rem; border-top: 1px solid var(--border); color: var(--muted); font-size: .64rem; }
 .telemetry-variable-preview__changes { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; padding-top: .45rem; border-top: 1px solid var(--border); }
 .telemetry-variable-preview__changes > * { padding: .28rem .48rem; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-strong); font-size: .61rem; }
+.telemetry-variable-preview__changes > strong { color: var(--text-strong); background: var(--primary-soft); border-color: color-mix(in srgb, var(--primary) 38%, var(--border)); }
+.telemetry-variable-preview__changes > .telemetry-variable-preview__previous { color: var(--text); background: color-mix(in srgb, var(--surface-strong) 88%, var(--primary-soft)); border-color: var(--border-strong); font-weight: 700; }
 .telemetry-event-setup > .raw-explorer-actions { margin-top: 0; padding-top: .8rem; border-top: 1px solid var(--border); }
 .telemetry-event-setup > .raw-explorer-actions .primary-action { min-height: 2.65rem; padding-inline: 1.15rem; box-shadow: 0 7px 16px color-mix(in srgb, var(--primary) 18%, transparent); }
 .telemetry-event-results { display: grid; gap: .8rem; }
@@ -2390,7 +2396,7 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
 .telemetry-event-browser-rows footer button { min-height: 1.9rem; padding: .28rem .55rem; border-radius: 999px; }
 .telemetry-event-browser-rows footer button.is-active { color: white; background: var(--primary); border-color: var(--primary); }
 @media (max-width: 1050px) { .telemetry-event-setup-grid { grid-template-columns: 1fr; grid-template-rows: none; } .telemetry-event-variable { grid-column: auto; grid-row: auto; } }
-@media (max-width: 700px) { .telemetry-event-rule-fields, .telemetry-event-occurrence-list > button { grid-template-columns: 1fr; } .telemetry-event-results > header, .event-investigation-header, .telemetry-variable-preview > header { display: grid; } .telemetry-variable-preview__identity { grid-template-columns: 1fr; } .telemetry-event-variable { grid-template-columns: 1fr; } .telemetry-event-variable > .raw-choice-row, .telemetry-event-variable > input[type="search"] { grid-column: 1; grid-row: auto; } }
+@media (max-width: 700px) { .telemetry-event-rule-fields, .telemetry-event-occurrence-list > button { grid-template-columns: 1fr; } .telemetry-event-results > header, .event-investigation-header, .telemetry-variable-preview > header { display: grid; } .telemetry-preview-source-control { justify-content: end; } .telemetry-variable-preview__identity { grid-template-columns: 1fr; } .telemetry-event-variable { grid-template-columns: 1fr; } .telemetry-event-variable > .raw-choice-row, .telemetry-event-variable > input[type="search"] { grid-column: 1; grid-row: auto; } }
 
 .raw-explorer-setup,
 .raw-result-summary,
