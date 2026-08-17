@@ -2624,8 +2624,29 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
 }
 
 .raw-occurrence-card__header {
+  width: 100%;
   margin-bottom: .85rem;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
+
+.raw-occurrence-card.is-collapsed {
+  padding-block: .75rem;
+  box-shadow: 0 2px 9px color-mix(in srgb, #101828 5%, transparent);
+}
+
+.raw-occurrence-card.is-collapsed .raw-occurrence-card__header { margin-bottom: 0; }
+
+.raw-occurrence-card.is-expanded .raw-occurrence-card__header { position: sticky; top: .5rem; z-index: 4; padding: .45rem; border-radius: .55rem; background: color-mix(in srgb, var(--surface-raised, #fff) 94%, transparent); backdrop-filter: blur(8px); }
+
+.raw-occurrence-toggle { display: inline-flex; align-items: center; gap: .35rem; margin-top: .25rem; color: var(--accent, #3167d5) !important; font-weight: 700; }
+.raw-occurrence-toggle b { display: inline-block; font-size: 1rem; transition: transform .16s ease; }
+.raw-occurrence-card.is-expanded .raw-occurrence-toggle b { transform: rotate(180deg); }
 
 .raw-occurrence-card__header > div {
   display: grid;
@@ -2651,6 +2672,12 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
   color: var(--text-secondary, #617087);
   background: var(--surface-muted, #f3f6fa);
 }
+
+.raw-occurrence-placeholder span { max-width: 40rem; text-align: center; }
+
+.raw-telemetry-unavailable { display: grid; gap: .4rem; margin: .6rem; padding: .75rem; border: 1px solid color-mix(in srgb, #d97706 38%, var(--border-subtle, #d8dee8)); border-radius: .65rem; background: color-mix(in srgb, #f59e0b 8%, var(--surface-raised, #fff)); }
+.raw-telemetry-unavailable span { color: var(--text-secondary, #617087); font-size: .75rem; }
+.raw-telemetry-unavailable button { justify-self: start; }
 
 .raw-inspection-tooltip {
   overflow: hidden;

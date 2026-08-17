@@ -149,12 +149,15 @@ describe('Raw Radius Code Explorer client', () => {
     assert.match(pageSource, /RawPinButton/)
   })
 
-  it('keeps draft settings unapplied, loads cards incrementally, and caches per-card plots in insertion order', () => {
+  it('keeps draft settings unapplied, loads one opened occurrence at a time, and caches per-card plots in insertion order', () => {
     assert.match(pageSource, /Settings changed · Explore to apply/)
     assert.match(pageSource, /INITIAL_OCCURRENCE_COUNT = 20/)
     assert.match(pageSource, /Load 20 more/)
-    assert.match(pageSource, /IntersectionObserver/)
-    assert.match(pageSource, /new RequestQueue\(2\)/)
+    assert.match(pageSource, /openOccurrenceId/)
+    assert.match(pageSource, /expanded=\{openOccurrenceId === occurrence\.occurrenceId\}/)
+    assert.match(pageSource, /new RequestQueue\(1\)/)
+    assert.match(pageSource, /Other occurrences are paused/)
+    assert.doesNotMatch(pageSource, /IntersectionObserver/)
     assert.match(pageSource, /detailRequested\.current/)
     assert.match(pageSource, /cache\.current\.has\(key\)/)
     assert.match(pageSource, /setPinnedKeys\(\(current\) => current\.includes/)

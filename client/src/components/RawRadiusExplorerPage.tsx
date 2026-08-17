@@ -28,7 +28,7 @@ class RequestQueue {
   }
 }
 
-const detailQueue = new RequestQueue(2)
+const detailQueue = new RequestQueue(1)
 const plotQueue = new RequestQueue(3)
 
 function durationLabel(seconds: number): string {
@@ -314,13 +314,12 @@ function RawUnmappedSignalRow({ signal, selected, pinned, plotting, reviewing, o
   </div>
 }
 
-function OccurrenceCard({ occurrence, lookbackMinutes, contextMinutes }: { occurrence: RawExplorerOccurrence; lookbackMinutes: number; contextMinutes: number }) {
-  const cardRef = useRef<HTMLElement>(null)
-  const [nearViewport, setNearViewport] = useState(false)
+function OccurrenceCard({ occurrence, lookbackMinutes, contextMinutes, expanded, onToggle }: { occurrence: RawExplorerOccurrence; lookbackMinutes: number; contextMinutes: number; expanded: boolean; onToggle: () => void }) {
   const [detail, setDetail] = useState<RawExplorerDetail>()
   const [detailError, setDetailError] = useState<string>()
   const [detailLoading, setDetailLoading] = useState(false)
   const detailRequested = useRef(false)
+  const [detailAttempt, setDetailAttempt] = useState(0)
   const [plotError, setPlotError] = useState<string>()
   const [plotting, setPlotting] = useState<Set<string>>(new Set())
   const cache = useRef(new Map<string, RawExplorerPlotResult>())
@@ -337,22 +336,19 @@ function OccurrenceCard({ occurrence, lookbackMinutes, contextMinutes }: { occur
   const sidebarScrollTop = useRef(0)
 
   useEffect(() => {
-    const element = cardRef.current
-    if (!element) return
-    if (!('IntersectionObserver' in window)) { setNearViewport(true); return }
-    const observer = new IntersectionObserver((entries) => { if (entries.some((entry) => entry.isIntersecting)) { setNearViewport(true); observer.disconnect() } }, { rootMargin: '500px 0px' })
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [])
-
-  useEffect(() => {
-    if (!nearViewport || detailRequested.current) return
+    if (!expanded || detail || detailRequested.current) return
     detailRequested.current = true
     const controller = new AbortController()
-    setDetailLoading(true)
-    void detailQueue.run(() => getRawRadiusOccurrenceDetail(occurrence, lookbackMinutes, controller.signal)).then(setDetail).catch((error) => { if (error?.name !== 'AbortError') setDetailError('This occurrence could not load. Other occurrence cards are unaffected.') }).finally(() => setDetailLoading(false))
-    return () => controller.abort()
-  }, [nearViewport, occurrence, lookbackMinutes])
+    setDetailError(undefined); setDetailLoading(true)
+    void detailQueue.run(() => getRawRadiusOccurrenceDetail(occurrence, lookbackMinutes, controller.signal)).then((next) => { if (!controller.signal.aborted) setDetail(next) }).catch((error) => { detailRequested.current = false; if (error?.name !== 'AbortError') setDetailError('This occurrence could not load. No other occurrence telemetry was requested at the same time.') }).finally(() => { if (!controller.signal.aborted) setDetailLoading(false) })
+    return () => { controller.abort(); detailRequested.current = false; setDetailLoading(false) }
+  }, [expanded, detail, detailAttempt, occurrence, lookbackMinutes])
+
+  function retryDetail() {
+    detailRequested.current = false
+    setDetail(undefined); setDetailError(undefined); setDetailLoading(false)
+    setDetailAttempt((current) => current + 1)
+  }
 
   async function ensureCanonicalHistory(signal: RawExplorerChangedSignal): Promise<boolean> {
     const key = signalKey(signal)
@@ -458,12 +454,11 @@ function OccurrenceCard({ occurrence, lookbackMinutes, contextMinutes }: { occur
   const numericTracks: TimelineNumericTrack[] = [{ id: 'current-roll-length', label: 'Current Roll Length', unit: 'Unit unverified', samples: currentRollSamples, interpolation: 'step', connectObservedGaps: true, holdLastObservation: true, unavailableLabel: 'Current Roll Length unavailable' }, { id: 'actual-speed', label: 'Actual speed', unit: evidenceUnit(detail?.speed.sourceUnit ?? null), samples: speedSamples, interpolation: 'step', connectObservedGaps: true, holdLastObservation: true, unavailableLabel: 'No actual-speed observation is available for this chart context' }, ...histories.filter((item) => item.signalType !== 'state_event').map((history) => ({ id: signalKey(history), label: canonicalLabel(history), unit: rawExplorerEvidenceUnit(history), samples: rawExplorerNumberSamples(history), interpolation: 'step' as const, connectObservedGaps: true, holdLastObservation: true, unavailableLabel: 'No observed value is available for this chart context' })), ...rawHistories.filter((item) => item.dataKind === 'numeric').map((history) => ({ id: rawSignalKey(history), label: rawLabel(history), unit: evidenceUnit(history.sourceUnit), samples: rawUnmappedNumberSamples(history), interpolation: 'step' as const, connectObservedGaps: true, holdLastObservation: true, unavailableLabel: 'No observed raw value is available for this chart context' }))]
   const trackOrder = ['numeric:current-roll-length', 'interval:raw-radius', 'numeric:actual-speed', ...histories.map((history) => `${history.signalType === 'state_event' ? 'interval' : 'numeric'}:${signalKey(history)}`), ...rawHistories.map((history) => `${history.dataKind === 'numeric' ? 'numeric' : 'interval'}:${rawSignalKey(history)}`)]
   const selectedRadiusId = detail?.radiusSegments.find((segment) => segment.kind === 'radius' && segment.startUtc === occurrence.startUtc && segment.endUtc === occurrence.endUtc) ? `${occurrence.pressKey}:${occurrence.startUtc}` : undefined
-  return <article ref={cardRef} className="raw-occurrence-card">
-    <header className="raw-occurrence-card__header"><div><span>{occurrence.displayName} · occurrence {occurrence.pressOccurrenceIndex} of {occurrence.pressOccurrenceCount}</span><h3>{occurrence.eventType} / {occurrence.statusCode} / {occurrence.statusDescription}</h3><small>Change Lookback {lookbackMinutes}m · Chart Context {contextMinutes}m before and after</small></div><div><strong>{durationLabel(occurrence.durationSeconds)}</strong><small>{formatPlantDateTime(occurrence.startUtc)}–{formatPlantDateTime(occurrence.endUtc)} CT</small></div></header>
-    {!nearViewport && <div className="raw-occurrence-placeholder">Telemetry loads as this card approaches the viewport.</div>}
-    {detailLoading && <div className="raw-occurrence-placeholder" role="status">Loading synchronized Radius and telemetry evidence…</div>}
-    {detailError && <div className="scope-progress scope-progress--error" role="alert">{detailError}</div>}
-    {detail && <>
+  return <article className={`raw-occurrence-card ${expanded ? 'is-expanded' : 'is-collapsed'}`}>
+    <button type="button" className="raw-occurrence-card__header" aria-expanded={expanded} onClick={onToggle}><div><span>{occurrence.displayName} · occurrence {occurrence.pressOccurrenceIndex} of {occurrence.pressOccurrenceCount}</span><h3>{occurrence.eventType} / {occurrence.statusCode} / {occurrence.statusDescription}</h3><small>Change Lookback {lookbackMinutes}m · Chart Context {contextMinutes}m before and after</small></div><div><strong>{durationLabel(occurrence.durationSeconds)}</strong><small>{formatPlantDateTime(occurrence.startUtc)}–{formatPlantDateTime(occurrence.endUtc)} CT</small><span className="raw-occurrence-toggle">{expanded ? 'Hide evidence' : 'Open evidence'} <b aria-hidden="true">⌄</b></span></div></button>
+    {expanded && detailLoading && <div className="raw-occurrence-placeholder" role="status"><strong>Scanning this occurrence…</strong><span>Checking the full {lookbackMinutes}-minute telemetry lookback. Other occurrences are paused.</span></div>}
+    {expanded && detailError && <div className="scope-progress scope-progress--error" role="alert"><span>{detailError}</span><button type="button" className="secondary-action" onClick={retryDetail}>Retry evidence</button></div>}
+    {expanded && detail && <>
       <div className={`raw-investigation-workspace${sidebarOpen ? '' : ' is-sidebar-collapsed'}`}>
         <section className="raw-chart-workspace">
           <div className="raw-chart-workspace__sticky">
@@ -478,10 +473,10 @@ function OccurrenceCard({ occurrence, lookbackMinutes, contextMinutes }: { occur
             <div className="raw-browser-tabs" role="tablist" aria-label="Telemetry source"><button type="button" role="tab" aria-selected={sidebarTab === 'all'} onClick={() => setSidebarTab('all')}>All <span>{browserItems.length}</span></button><button type="button" role="tab" aria-selected={sidebarTab === 'canonical'} onClick={() => setSidebarTab('canonical')}>Canonical <span>{canonicalSignals.length}</span></button><button type="button" role="tab" aria-selected={sidebarTab === 'raw'} onClick={() => setSidebarTab('raw')}>Raw <span>{rawSignals.length}</span></button></div>
             <input type="search" aria-label="Search telemetry" value={telemetrySearch} onChange={(event) => setTelemetrySearch(event.target.value)} placeholder="Search name, ID, category, or deck" />
           </div>
-          {!filteredBrowserItems.length && <p className="raw-empty">No telemetry matches this tab and search.</p>}
+          {!filteredBrowserItems.length && <p className="raw-empty">{telemetrySearch.trim() ? 'No telemetry matches this tab and search.' : 'No changed telemetry was found in this lookback for the selected source.'}</p>}
           {sidebarTab !== 'raw' && groups.map((group) => <details className="raw-change-scope" data-scope={group.key} key={group.key}><summary><strong>{group.label}</strong><span>{group.signalCount} changed</span></summary><div className="raw-change-categories">{group.categories.map((category) => <details className="raw-change-category" key={category.label}><summary><strong>{category.label}</strong><span>{category.signals.length}</span></summary>{category.signals.map((signal) => { const id = signalKey(signal); return <CanonicalSignalRow key={id} signal={signal} selected={selectedBrowserKey === id} pinned={pinnedKeys.includes(id)} plotting={plotting.has(id)} onPreview={() => void previewBrowserItem(browserItemFor(id)!)} onPin={() => void togglePinnedItem(browserItemFor(id)!)} /> })}</details>)}</div></details>)}
           {sidebarTab !== 'canonical' && <section className="raw-unmapped-section">
-            {detail.rawTelemetry.status === 'unavailable' && <p className="raw-empty">Raw telemetry is temporarily unavailable. Canonical evidence remains available.</p>}
+            {detail.rawTelemetry.status === 'unavailable' && <div className="raw-telemetry-unavailable" role="status"><strong>Raw/unmapped telemetry did not finish loading.</strong><span>This is not a zero-change result. Canonical evidence remains available, and you can retry this occurrence by itself.</span><button type="button" className="secondary-action" onClick={retryDetail}>Retry raw telemetry</button></div>}
             {rawGroups.categories.map(({ category, signals }) => <details className="raw-unmapped-category" key={category}><summary><strong>{category}</strong><span>{signals.length} changed</span></summary>{signals.map((signal) => { const key = rawSignalKey(signal); return <RawUnmappedSignalRow key={key} signal={signal} selected={selectedBrowserKey === key} pinned={pinnedKeys.includes(key)} plotting={rawPlotting.has(key)} reviewing={reviewing.has(key)} onPreview={() => void previewBrowserItem(browserItemFor(key)!)} onPin={() => void togglePinnedItem(browserItemFor(key)!)} onReview={(status) => void updateReview(signal, status)} /> })}</details>)}
             {!!rawGroups.ignored.length && <details className="raw-unmapped-category raw-ignored"><summary><strong>Ignored</strong><span>{rawGroups.ignored.length} recoverable</span></summary>{rawGroups.ignored.map((signal) => { const key = rawSignalKey(signal); return <RawUnmappedSignalRow key={key} signal={signal} selected={selectedBrowserKey === key} pinned={pinnedKeys.includes(key)} plotting={rawPlotting.has(key)} reviewing={reviewing.has(key)} onPreview={() => void previewBrowserItem(browserItemFor(key)!)} onPin={() => void togglePinnedItem(browserItemFor(key)!)} onReview={(status) => void updateReview(signal, status)} /> })}</details>}
           </section>}
@@ -511,6 +506,7 @@ export function RawRadiusExplorerPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
   const [visibleCount, setVisibleCount] = useState(INITIAL_OCCURRENCE_COUNT)
+  const [openOccurrenceId, setOpenOccurrenceId] = useState<string>()
   const [setupCollapsed, setSetupCollapsed] = useState(false)
   const restoredFromUrl = useRef(false)
 
@@ -534,13 +530,13 @@ export function RawRadiusExplorerPage() {
       if (window.location.pathname !== '/raw-radius-explorer') return
       const restored = setupFromUrl(identities)
       setRange(restored.range); setPhase(restored.phase); setLookback(restored.lookback); setContext(restored.context); setSelectedIdentity(restored.identity); setError(undefined); setVisibleCount(INITIAL_OCCURRENCE_COUNT)
-      if (!restored.identity) { setResult(undefined); setAppliedSignature(undefined); setSetupCollapsed(false); return }
+      if (!restored.identity) { setResult(undefined); setAppliedSignature(undefined); setOpenOccurrenceId(undefined); setSetupCollapsed(false); return }
       try {
         const changeLookbackMinutes = validateRawExplorerWindow(restored.lookback, 'Change Lookback', false)
         const chartContextMinutes = validateRawExplorerWindow(restored.context, 'Chart Context', true)
         setLoading(true)
         void exploreRawRadius({ fromUtc: restored.range.fromUtc, toUtc: restored.range.toUtc, identity: { eventType: restored.identity.eventType, statusCode: restored.identity.statusCode, statusDescription: restored.identity.statusDescription }, changeLookbackMinutes, chartContextMinutes })
-          .then((next) => { setResult(next); setAppliedSignature(setupSignature(restored.range, restored.identity, restored.lookback, restored.context)); setSetupCollapsed(true) })
+          .then((next) => { setResult(next); setOpenOccurrenceId(next.occurrences[0]?.occurrenceId); setAppliedSignature(setupSignature(restored.range, restored.identity, restored.lookback, restored.context)); setSetupCollapsed(true) })
           .catch(() => setError('The restored exploration could not be loaded.'))
           .finally(() => setLoading(false))
       } catch (caught) { setError(caught instanceof Error ? caught.message : 'The restored setup is invalid.') }
@@ -567,7 +563,7 @@ export function RawRadiusExplorerPage() {
       const setup = { fromUtc: range.fromUtc, toUtc: range.toUtc, identity: { eventType: selectedIdentity.eventType, statusCode: selectedIdentity.statusCode, statusDescription: selectedIdentity.statusDescription }, changeLookbackMinutes, chartContextMinutes }
       setLoading(true)
       const next = await exploreRawRadius(setup)
-      setResult(next); setAppliedSignature(draftSignature); setVisibleCount(INITIAL_OCCURRENCE_COUNT); setSetupCollapsed(true)
+      setResult(next); setOpenOccurrenceId(next.occurrences[0]?.occurrenceId); setAppliedSignature(draftSignature); setVisibleCount(INITIAL_OCCURRENCE_COUNT); setSetupCollapsed(true)
       window.history.pushState({}, '', explorerUrl(range, selectedIdentity, changeLookbackMinutes, chartContextMinutes))
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'The raw Radius exploration could not be completed.') }
     finally { setLoading(false) }
@@ -594,7 +590,7 @@ export function RawRadiusExplorerPage() {
     {result && <>
       <section className="panel raw-result-summary"><header><div><span className="eyebrow">Complete selected scope</span><h2>{result.setup.identity.eventType} / {result.setup.identity.statusCode} / {result.setup.identity.statusDescription}</h2><p>{formatPlantDateTime(result.setup.fromUtc)}–{formatPlantDateTime(result.setup.toUtc)} CT</p><p><strong>Change Lookback {result.setup.changeLookbackMinutes} minutes</strong> · <strong>Chart Context {result.setup.chartContextMinutes} minutes before and after</strong></p></div><span>{result.performance.payloadBytes.toLocaleString()} bytes · {Math.round(result.performance.totalMs)} ms</span></header><div className="raw-summary-metrics"><div><strong>{result.summary.totalOccurrences.toLocaleString()}</strong><span>Occurrences</span></div><div><strong>{result.summary.pressesContainingCode}</strong><span>Presses containing code</span></div><div><strong>{durationLabel(result.summary.totalObservedDurationSeconds)}</strong><span>Total observed duration</span></div></div><div className="raw-press-counts">{result.summary.pressCounts.map((press) => <span key={press.pressKey}><strong>{press.displayName}</strong> {press.occurrenceCount}</span>)}</div></section>
       {!result.occurrences.length && <section className="panel raw-empty"><h2>No occurrences found</h2><p>The exact raw identity was not observed in this time range.</p></section>}
-      <section className="raw-occurrence-results" aria-label="Raw Radius occurrences">{visibleOccurrences.map((occurrence) => { const heading = occurrence.pressKey !== previousPress; previousPress = occurrence.pressKey; return <div key={rawExplorerOccurrenceWindowKey(occurrence, result.setup.changeLookbackMinutes, result.setup.chartContextMinutes)}>{heading && <h2 className="raw-press-heading">{occurrence.displayName}<span>{result.summary.pressCounts.find((press) => press.pressKey === occurrence.pressKey)?.occurrenceCount ?? 0} occurrences</span></h2>}<OccurrenceCard occurrence={occurrence} lookbackMinutes={result.setup.changeLookbackMinutes} contextMinutes={result.setup.chartContextMinutes} /></div> })}</section>
+      <section className="raw-occurrence-results" aria-label="Raw Radius occurrences">{visibleOccurrences.map((occurrence) => { const heading = occurrence.pressKey !== previousPress; previousPress = occurrence.pressKey; return <div key={rawExplorerOccurrenceWindowKey(occurrence, result.setup.changeLookbackMinutes, result.setup.chartContextMinutes)}>{heading && <h2 className="raw-press-heading">{occurrence.displayName}<span>{result.summary.pressCounts.find((press) => press.pressKey === occurrence.pressKey)?.occurrenceCount ?? 0} occurrences</span></h2>}<OccurrenceCard occurrence={occurrence} lookbackMinutes={result.setup.changeLookbackMinutes} contextMinutes={result.setup.chartContextMinutes} expanded={openOccurrenceId === occurrence.occurrenceId} onToggle={() => setOpenOccurrenceId((current) => current === occurrence.occurrenceId ? undefined : occurrence.occurrenceId)} /></div> })}</section>
       {visibleCount < result.occurrences.length && <div className="raw-load-more"><button type="button" className="secondary-action" onClick={() => setVisibleCount((current) => Math.min(result.occurrences.length, current + LOAD_MORE_COUNT))}>Load 20 more</button><span>Showing {visibleOccurrences.length} of {result.occurrences.length} occurrences</span></div>}
     </>}
   </div>
