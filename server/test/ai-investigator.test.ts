@@ -10,7 +10,7 @@ import type { TelemetryClient } from '../src/telemetry/telemetry-api-client.js'
 import { parseAiInvestigatorRequest, validateAiInvestigatorDraft, type AiGroundingFact, type AiInvestigatorDraftContent } from '../src/ai-investigator/contracts.js'
 import { groundAiInvestigatorDraft } from '../src/ai-investigator/grounding.js'
 import { AiInvestigatorReadOnlyToolRegistry, AI_INVESTIGATOR_TOOL_NAMES, sanitizeProductionContextIdentity } from '../src/ai-investigator/read-only-tools.js'
-import { AiInvestigatorOrchestrator, type AiInvestigatorModelClient, type AiModelResponse, type AiModelToolChoice } from '../src/ai-investigator/orchestrator.js'
+import { AiInvestigatorOrchestrator, compactInvestigationState, estimateAiInputTokens, safeOpenAiHttpMetadata, type AiInvestigatorLogger, type AiInvestigatorModelClient, type AiModelResponse, type AiModelToolChoice, type ToolEvidence } from '../src/ai-investigator/orchestrator.js'
 
 const start = '2026-08-16T12:00:00.000Z'; const end = '2026-08-17T12:00:00.000Z'
 const request = { scope: { pressKey: null }, range: { startUtc: start, endUtc: end }, analysis: 'discover_unusual_behavior' as const }
@@ -140,7 +140,85 @@ describe('AI Investigator read-only boundary', () => {
     const rateLimit = Object.assign(new Error('Rate limit reached for tokens'), { status: 429, code: 'rate_limit_exceeded', type: 'tokens' })
     const model: AiInvestigatorModelClient = { create: async () => { throw rateLimit } }
     const result = await new AiInvestigatorOrchestrator(config, registry(radiusWithOverview(async () => overview())), model, false).analyze(request)
-    assert.equal(result.status, 'error'); assert.deepEqual(result.limitations, ['openai_rate_limit', 'No unsupported root-cause conclusion was generated.'])
+    assert.equal(result.status, 'error'); assert.equal(result.summary, 'AI Investigator is temporarily rate limited. Try again after the token window resets.'); assert.deepEqual(result.limitations, ['No unsupported root-cause conclusion was generated.'])
+  })
+
+  it('retains grounding facts once without replaying raw tool or model payloads', () => {
+    const fact = groundingFact({ factId: 'press14.production_percent.current', pressKey: 'press14', metric: 'productionPercent', value: 40.7, unit: 'percent', role: 'current', range: { start, end } })
+    const result = { presses: [{ pressKey: 'press14', largeRawField: 'do-not-resend' }], facts: [fact], limitations: ['Bounded evidence.'] }
+    const evidence: ToolEvidence[] = [
+      { name: 'get_fleet_operational_summary', arguments: { start, end, press: 'press14' }, result, durationMs: 1 },
+      { name: 'get_fleet_operational_summary', arguments: { start, end, press: 'press14' }, result, durationMs: 1 },
+    ]
+    const state = compactInvestigationState(evidence); const serialized = JSON.stringify(state)
+    assert.equal(state.collectedTools.length, 1); assert.equal(state.facts.length, 1)
+    assert.match(serialized, /press14\.production_percent\.current/); assert.match(serialized, /"role":"current"/); assert.match(serialized, /"unit":"percent"/); assert.match(serialized, /"usable":true/)
+    assert.doesNotMatch(serialized, /largeRawField|do-not-resend|function_call_output|outputItems/)
+  })
+
+  it('measures a material mocked transcript reduction before deployment', async () => {
+    const tools = registry(radiusWithOverview(async () => overview())); const signal = new AbortController().signal; const baselineStart = '2026-08-15T12:00:00.000Z'
+    const calls = [
+      { name: 'get_fleet_operational_summary', arguments: { start, end, press: 'press3' } },
+      { name: 'compare_press_period', arguments: { press: 'press3', currentStart: start, currentEnd: end, baselineStart, baselineEnd: start } },
+      { name: 'get_press_event_summary', arguments: { press: 'press3', start, end, topN: 5 } },
+    ] as const
+    const fullResults = await Promise.all(calls.map((call) => tools.execute(call.name, call.arguments, { requestId: 'measurement', signal })))
+    const grounded: AiInvestigatorDraftContent = { ...draftFinding, findings: [{ ...draftFinding.findings[0], pressKey: 'press3', facts: [{ label: 'Production', factIds: ['press3.production_percent.current'] }], evidenceFactIds: ['press3.production_percent.current'] }] }
+    const queued = calls.map((call) => responseWithCalls(call)); queued.push({ id: 'measurement-final', outputText: JSON.stringify(grounded), outputItems: [], toolCalls: [] })
+    const observed: Array<{ input: unknown[]; instructions: string; tools: typeof tools.definitions; choice: AiModelToolChoice }> = []; let index = 0
+    const model: AiInvestigatorModelClient = { create: async (input, instructions, definitions, choice) => { observed.push({ input, instructions, tools: definitions, choice }); return queued[index++] } }
+    const result = await new AiInvestigatorOrchestrator(config, tools, model, false).analyze({ ...request, scope: { pressKey: 'press3' } })
+    assert.equal(result.status, 'complete'); assert.equal(observed.length, 4)
+
+    const legacyInputs: unknown[][] = [structuredClone(observed[0].input)]; const evidenceBytes = [0]
+    for (let turn = 0; turn < calls.length; turn += 1) {
+      const next = structuredClone(legacyInputs[turn]); next.push(...queued[turn].outputItems, { type: 'function_call_output', call_id: `call-${turn}`, output: JSON.stringify({ ok: true, result: fullResults[turn] }) })
+      legacyInputs.push(next); evidenceBytes.push(evidenceBytes[turn] + Buffer.byteLength(JSON.stringify(fullResults[turn]), 'utf8'))
+    }
+    const before = observed.map((item, turn) => estimateAiInputTokens(legacyInputs[turn], item.instructions, item.tools, true)); const after = observed.map((item) => estimateAiInputTokens(item.input, item.instructions, item.tools, item.choice === 'none'))
+    const beforeCumulative = before.reduce((sum, value) => sum + value, 0); const afterCumulative = after.reduce((sum, value) => sum + value, 0); const reductionPercent = Math.round((1 - afterCumulative / beforeCumulative) * 1_000) / 10
+    const measurement = { before: { perTurnEstimatedInputTokens: before, cumulativeEstimatedInputTokens: beforeCumulative, evidenceBytes, outputReservations: [1000, 1000, 1000, 4000], cumulativeReservedOutputTokens: 7000 }, after: { perTurnEstimatedInputTokens: after, cumulativeEstimatedInputTokens: afterCumulative, evidenceBytes, modelFacingEvidenceBytes: observed.map((item) => Buffer.byteLength(JSON.stringify(item.input), 'utf8')), outputReservations: [600, 600, 600, 2400], cumulativeReservedOutputTokens: 4200 }, reductionPercent }
+    console.log(`AI_INVESTIGATOR_TOKEN_MEASUREMENT ${JSON.stringify(measurement)}`)
+    assert.ok(reductionPercent >= 30, `expected at least 30% reduction, measured ${reductionPercent}%`)
+  })
+
+  it('captures only allowlisted OpenAI response metadata', () => {
+    const metadata = safeOpenAiHttpMetadata(new Headers({ 'x-request-id': 'req-safe', 'openai-processing-ms': '17', 'x-ratelimit-limit-tokens': '30000', 'x-ratelimit-remaining-tokens': '12000', 'x-ratelimit-reset-tokens': '3s', 'x-ratelimit-limit-requests': '500', 'x-ratelimit-remaining-requests': '499', 'x-ratelimit-reset-requests': '1s', 'x-ratelimit-limit-project-tokens': '60000', 'x-ratelimit-remaining-project-tokens': '42000', 'x-ratelimit-reset-project-tokens': '4s', 'retry-after': '2', authorization: 'Bearer never-log' }))
+    assert.deepEqual(metadata, { requestId: 'req-safe', processingMs: '17', limitTokens: '30000', remainingTokens: '12000', resetTokens: '3s', limitRequests: '500', remainingRequests: '499', resetRequests: '1s', limitProjectTokens: '60000', remainingProjectTokens: '42000', resetProjectTokens: '4s', retryAfter: '2' })
+    assert.doesNotMatch(JSON.stringify(metadata), /authorization|Bearer/)
+  })
+
+  it('logs bounded request measurements, actual usage, and safe response metadata', async () => {
+    const entries: Array<Record<string, unknown>> = []; const logger: AiInvestigatorLogger = { info: (value) => entries.push(JSON.parse(value) as Record<string, unknown>), error: (value) => entries.push(JSON.parse(value) as Record<string, unknown>) }
+    const response = { ...finalResponse, http: { requestId: 'req-safe', processingMs: '12', remainingTokens: '9000', resetTokens: '1s' } }
+    await new AiInvestigatorOrchestrator(config, registry(radiusWithOverview(async () => overview())), modelQueue([response, response]), logger).analyze(request)
+    const requests = entries.filter((item) => item.event === 'ai_investigator_model_request'); const responses = entries.filter((item) => item.event === 'ai_investigator_model_response')
+    assert.deepEqual(requests.map((item) => item.requestNumber), [1, 2]); assert.deepEqual(requests.map((item) => item.maxOutputTokens), [600, 2400])
+    assert.ok(requests.every((item) => typeof item.estimatedInputTokens === 'number' && item.priorModelMessagesIncluded === 0)); assert.equal(responses[0].requestId, 'req-safe'); assert.equal(responses[0].remainingTokens, '9000'); assert.equal(responses[0].cumulativeActualInputTokens, 100)
+  })
+
+  it('retries one genuine 429 only when its reset fits the authoritative 45-second deadline', async () => {
+    let calls = 0; const waits: number[] = []
+    const rateLimit = () => Object.assign(new Error('rate limited'), { status: 429, code: 'rate_limit_exceeded', type: 'tokens', request_id: 'req-rate', headers: new Headers({ 'retry-after': '0', 'x-ratelimit-reset-tokens': '0s' }) })
+    const model: AiInvestigatorModelClient = { create: async () => { calls += 1; if (calls === 1) throw rateLimit(); return finalResponse } }
+    const result = await new AiInvestigatorOrchestrator({ ...config, totalTimeoutMs: 45_000 }, registry(radiusWithOverview(async () => overview())), model, false, () => new Date(), () => 0, async (milliseconds) => { waits.push(milliseconds) }).analyze(request)
+    assert.equal(result.status, 'complete'); assert.equal(calls, 3); assert.deepEqual(waits, [25])
+  })
+
+  it('does not retry a 429 whose reset cannot fit the deadline', async () => {
+    let calls = 0
+    const rateLimit = Object.assign(new Error('rate limited'), { status: 429, code: 'rate_limit_exceeded', type: 'tokens', headers: new Headers({ 'retry-after': '30', 'x-ratelimit-reset-tokens': '30s' }) })
+    const model: AiInvestigatorModelClient = { create: async () => { calls += 1; throw rateLimit } }
+    const result = await new AiInvestigatorOrchestrator({ ...config, totalTimeoutMs: 45_000, openAiTimeoutMs: 20_000 }, registry(radiusWithOverview(async () => overview())), model, false).analyze(request)
+    assert.equal(result.status, 'error'); assert.equal(calls, 1)
+  })
+
+  it('never loops when the single bounded retry also receives 429', async () => {
+    let calls = 0; const rateLimit = Object.assign(new Error('rate limited'), { status: 429, code: 'rate_limit_exceeded', type: 'tokens', headers: new Headers({ 'retry-after': '0' }) })
+    const model: AiInvestigatorModelClient = { create: async () => { calls += 1; throw rateLimit } }
+    const result = await new AiInvestigatorOrchestrator({ ...config, totalTimeoutMs: 45_000 }, registry(radiusWithOverview(async () => overview())), model, false, () => new Date(), () => 0, async () => {}).analyze(request)
+    assert.equal(result.status, 'error'); assert.equal(calls, 2)
   })
 
   it('performs at most one no-tool grounding correction and returns grounded content', async () => {

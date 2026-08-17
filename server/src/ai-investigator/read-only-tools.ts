@@ -33,27 +33,27 @@ const MAX_EVENT_SUMMARY_RANGE_MS = 24 * 60 * 60_000
 const TELEMETRY_SLICE_MS = 2 * 60 * 60_000
 
 const PRESS_SCHEMA = { type: ['string', 'null'], enum: [...RADIUS_PRESS_KEYS, null] }
-const UTC_SCHEMA = { type: 'string', description: 'UTC ISO-8601 timestamp ending in Z.' }
+const UTC_SCHEMA = { type: 'string', description: 'UTC ISO-8601 ending in Z.' }
 
 export const AI_INVESTIGATOR_TOOL_DEFINITIONS: AiInvestigatorToolDefinition[] = [
   {
     type: 'function', name: 'get_fleet_operational_summary', strict: true,
-    description: 'Return compact deterministic Radius operational facts for the fleet or one press. Use this first to identify candidate presses.',
+    description: 'Deterministic Radius facts for the fleet or one press; use first.',
     parameters: { type: 'object', additionalProperties: false, required: ['start', 'end', 'press'], properties: { start: UTC_SCHEMA, end: UTC_SCHEMA, press: PRESS_SCHEMA } },
   },
   {
     type: 'function', name: 'compare_press_period', strict: true,
-    description: 'Compare one press over a current period with one immediately comparable baseline period using deterministic Radius analytics.',
+    description: 'Deterministic current-versus-baseline facts for one press.',
     parameters: { type: 'object', additionalProperties: false, required: ['press', 'currentStart', 'currentEnd', 'baselineStart', 'baselineEnd'], properties: { press: { type: 'string', enum: RADIUS_PRESS_KEYS }, currentStart: UTC_SCHEMA, currentEnd: UTC_SCHEMA, baselineStart: UTC_SCHEMA, baselineEnd: UTC_SCHEMA } },
   },
   {
     type: 'function', name: 'get_press_event_summary', strict: true,
-    description: 'Return a bounded list of important operational episodes, long Radius states, and available Job/Order/Recipe changes for one press.',
+    description: 'Bounded event, Radius-state, and Job/Order/Recipe facts for one press.',
     parameters: { type: 'object', additionalProperties: false, required: ['press', 'start', 'end', 'topN'], properties: { press: { type: 'string', enum: RADIUS_PRESS_KEYS }, start: UTC_SCHEMA, end: UTC_SCHEMA, topN: { type: 'integer', minimum: 1, maximum: 10 } } },
   },
   {
     type: 'function', name: 'get_event_context', strict: true,
-    description: 'Return compact Radius, actual-speed, and Job/Order/Recipe context around one timestamp. The surrounding window is strictly bounded.',
+    description: 'Bounded Radius, actual-speed, and Job/Order/Recipe facts around a timestamp.',
     parameters: { type: 'object', additionalProperties: false, required: ['press', 'timestamp', 'beforeMinutes', 'afterMinutes'], properties: { press: { type: 'string', enum: RADIUS_PRESS_KEYS }, timestamp: UTC_SCHEMA, beforeMinutes: { type: 'integer', minimum: 1, maximum: MAX_EVENT_CONTEXT_MINUTES }, afterMinutes: { type: 'integer', minimum: 1, maximum: MAX_EVENT_CONTEXT_MINUTES } } },
   },
 ]
