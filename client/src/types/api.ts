@@ -797,3 +797,83 @@ export interface RawUnmappedPlotResult {
   signal: RawUnmappedHistory
   performance: { totalMs: number; historianReadCount: number; payloadBytes: number }
 }
+
+export type TelemetryEventSource = { kind: 'canonical'; canonicalId: string } | { kind: 'raw'; pressKey: RadiusPressKey; rawIdentity: string; displayName: string }
+export type TelemetryEventRule = { kind: 'threshold'; operator: '>' | '>=' | '<' | '<='; threshold: number } | { kind: 'delta'; direction: 'increase' | 'decrease' | 'either'; amount: number; windowMinutes: number }
+
+export interface TelemetryEventCatalog {
+  canonicalVariables: Array<{ kind: 'canonical'; canonicalId: string; displayName: string; scope: 'machine' | 'deck'; signalType: RawExplorerSignalType; category: RawExplorerCategory; compatiblePresses: Array<{ pressKey: RadiusPressKey; displayName: string; deckNumbers: number[] }> }>
+  rawVariables: Array<{ kind: 'raw'; pressKey: RadiusPressKey; rawIdentity: string; displayName: string; discoveryCategory: string; sourceUnit: string | null }>
+}
+
+export interface TelemetryEventSearchInput {
+  fromUtc: string
+  toUtc: string
+  source: TelemetryEventSource
+  pressKey: 'all' | RadiusPressKey
+  deckNumber: 'any' | number | null
+  rule: TelemetryEventRule
+  chartContextMinutes: number
+}
+
+export interface TelemetryEventOccurrence {
+  occurrenceId: string
+  sourceKind: 'canonical' | 'raw'
+  pressKey: RadiusPressKey
+  displayName: string
+  deckNumber: number | null
+  canonicalId: string | null
+  rawIdentity: string
+  signalDisplayName: string
+  sourceUnit: string | null
+  canonicalUnitStatus: string | null
+  pressOccurrenceIndex: number
+  pressOccurrenceCount: number
+  startUtc: string
+  endUtc: string
+  durationSeconds: number
+  chartFromUtc: string
+  chartToUtc: string
+  eventType: 'threshold' | 'delta'
+  clippedStart?: boolean
+  clippedEnd: boolean
+  dataGap: boolean
+  entryValue?: number
+  returnValue?: number | null
+  extremeValue?: number
+  extremeAtUtc?: string
+  baselineAtUtc?: string
+  baselineValue?: number
+  triggerAtUtc?: string
+  triggerValue?: number
+  direction?: 'increase' | 'decrease'
+  actualDelta?: number
+  elapsedSeconds?: number
+  maximumExcursion?: number
+  maximumExcursionAtUtc?: string
+}
+
+export interface TelemetryEventSearchResult {
+  setup: TelemetryEventSearchInput
+  summary: { totalOccurrences: number; resolvedSeries: number; compatiblePressesSearched: RadiusPressKey[]; compatibleDecksSearched: number[]; pressCounts: Array<{ pressKey: RadiusPressKey; displayName: string; occurrenceCount: number }> }
+  occurrences: TelemetryEventOccurrence[]
+  performance: { semanticHistoryRequests: number; totalMs: number; payloadBytes: number }
+}
+
+export interface TelemetryEventCanonicalHistory {
+  canonicalId: string
+  deckNumber: number | null
+  mappingStatus: string
+  sourceUnit: string | null
+  canonicalUnitStatus: string | null
+  representation: 'samples' | 'changes'
+  seed: RawTelemetrySample | null
+  samples: RawTelemetrySample[]
+  changes: RawTelemetryChange[]
+}
+
+export interface TelemetryEventDetail {
+  occurrence: TelemetryEventOccurrence
+  primary: { kind: 'canonical'; signal: TelemetryEventCanonicalHistory } | { kind: 'raw'; signal: Omit<RawUnmappedHistory, 'reviewStatus'> }
+  context: RawExplorerDetail
+}

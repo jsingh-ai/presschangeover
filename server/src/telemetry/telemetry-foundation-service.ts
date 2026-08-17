@@ -49,6 +49,13 @@ function signalEvidence(signal: TelemetrySemanticSignalHistory, capability?: Cap
   }
 }
 
+export interface PressSemanticSignalWithIdentity extends PressSemanticSignalEvidence {
+  historianSignalId: number | null
+  rawSignalId: string | null
+  sourceSelector: string | null
+  selectedVariant: string | null
+}
+
 export class TelemetryFoundationService {
   readonly sources: TelemetrySourceRegistry
   readonly capabilities: TelemetryCapabilityRegistry
@@ -74,6 +81,21 @@ export class TelemetryFoundationService {
       toUtc: upstream.toUtc,
       includeSeed: upstream.includeSeed,
       signals: upstream.signals.map((item) => signalEvidence(item, capabilitySet?.capabilities.find(({ canonicalId }) => canonicalId === item.canonicalId))),
+    }
+  }
+
+  /** Internal-only event-search path that retains exact upstream identity. Browser-facing semantic routes keep omitting it. */
+  async semanticHistoryWithIdentity(pressKey: RadiusPressKey, query: TelemetrySemanticHistoryQuery, requestId?: string, signal?: AbortSignal): Promise<Omit<PressSemanticHistoryEvidence, 'signals'> & { signals: PressSemanticSignalWithIdentity[] }> {
+    if (!this.client.querySemanticHistory) throw new TelemetryApiError('unavailable')
+    const resolved = await this.sources.resolve(pressKey, requestId, signal)
+    const [upstream, capabilitySet] = await Promise.all([
+      this.client.querySemanticHistory(resolved.source.id, query, requestId, signal),
+      this.capabilities.get(pressKey, requestId, signal).catch(() => undefined),
+    ])
+    if (upstream.sourceId !== resolved.source.id || upstream.sourceKey.toLowerCase() !== pressKey) throw new TelemetryApiError('invalid_response')
+    return {
+      pressKey, sourceKey: upstream.sourceKey, displayName: upstream.displayName, fromUtc: upstream.fromUtc, toUtc: upstream.toUtc, includeSeed: upstream.includeSeed,
+      signals: upstream.signals.map((item) => ({ ...signalEvidence(item, capabilitySet?.capabilities.find(({ canonicalId }) => canonicalId === item.canonicalId)), historianSignalId: item.historianSignalId, rawSignalId: item.rawSignalId, sourceSelector: item.sourceSelector, selectedVariant: item.selectedVariant })),
     }
   }
 

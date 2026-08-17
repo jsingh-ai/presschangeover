@@ -31,6 +31,11 @@ import type {
   RawTelemetryReview,
   RawTelemetryReviewStatus,
   RawUnmappedPlotResult,
+  TelemetryEventCatalog,
+  TelemetryEventDetail,
+  TelemetryEventOccurrence,
+  TelemetryEventSearchInput,
+  TelemetryEventSearchResult,
 } from '../types/api'
 import type {
   CuratedPhysicalEvidence,
@@ -182,6 +187,28 @@ export function plotRawUnmappedSignal(occurrence: RawExplorerOccurrence, rawIden
 
 export function setRawTelemetryReview(pressKey: RadiusPressKey, rawIdentity: string, reviewStatus: RawTelemetryReviewStatus, signal?: AbortSignal) {
   return sendJson<RawTelemetryReview>('/api/radius/raw-explorer/raw-review', 'PATCH', { pressKey, rawIdentity, reviewStatus }, signal)
+}
+
+export function getTelemetryEventCatalog(fromUtc?: string, toUtc?: string, rawPressKey?: RadiusPressKey, signal?: AbortSignal) {
+  const query = new URLSearchParams()
+  if (rawPressKey && fromUtc && toUtc) { query.set('rawPressKey', rawPressKey); query.set('fromUtc', fromUtc); query.set('toUtc', toUtc) }
+  return getJson<TelemetryEventCatalog>(`/api/telemetry/event-explorer/catalog${query.size ? `?${query}` : ''}`, signal)
+}
+
+export function searchTelemetryEvents(input: TelemetryEventSearchInput, signal?: AbortSignal) {
+  return sendJson<TelemetryEventSearchResult>('/api/telemetry/event-explorer/search', 'POST', input, signal)
+}
+
+export function getTelemetryEventDetail(occurrence: TelemetryEventOccurrence, signal?: AbortSignal) {
+  return sendJson<TelemetryEventDetail>('/api/telemetry/event-explorer/detail', 'POST', { occurrence }, signal)
+}
+
+export function plotTelemetryEventSignal(occurrence: TelemetryEventOccurrence, plottedSignal: RawExplorerSignalIdentity, signal?: AbortSignal) {
+  return sendJson<RawExplorerPlotResult>('/api/telemetry/event-explorer/plot', 'POST', { occurrence, signal: plottedSignal }, signal)
+}
+
+export function plotTelemetryEventRawSignal(occurrence: TelemetryEventOccurrence, rawIdentity: string, signal?: AbortSignal) {
+  return sendJson<RawUnmappedPlotResult>('/api/telemetry/event-explorer/raw-plot', 'POST', { occurrence, rawIdentity }, signal)
 }
 
 export function getActivityAnalysis(fromUtc: string, toUtc: string, selection?: ActivitySelection, pressKey?: RadiusPressKey, signal?: AbortSignal, evidenceOffset = 0) {

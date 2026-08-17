@@ -22,7 +22,7 @@ export const RAW_EXPLORER_LENGTH_CATALOG: readonly EngineeringClueCatalogItem[] 
   { canonicalId: 'production.roll.remaining_length', friendlyName: 'Remaining Roll Length', signalType: 'step_reference', category: 'repeat_other', scope: 'machine' },
 ]
 
-const RAW_EXPLORER_DISCOVERY_CATALOG = [...new Map([...RAW_EXPLORER_LENGTH_CATALOG, ...ENGINEERING_CLUE_CATALOG].map((item) => [item.canonicalId, item])).values()]
+export const RAW_EXPLORER_DISCOVERY_CATALOG = [...new Map([...RAW_EXPLORER_LENGTH_CATALOG, ...ENGINEERING_CLUE_CATALOG].map((item) => [item.canonicalId, item])).values()]
 
 export interface RawExplorerIdentity {
   identity: string

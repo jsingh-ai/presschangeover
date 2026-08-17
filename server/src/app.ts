@@ -27,6 +27,7 @@ import { EngineeringClueAnalysisService, type ClueOccurrenceInput } from './tele
 import { StopRestartAnalysisService, type FleetSpeedContextInput, type RadiusTimingAnalysisInput, type StopRestartAnalysisInput } from './telemetry/stop-restart-analysis-service.js'
 import { RAW_EXPLORER_MAX_WINDOW_MINUTES, RawRadiusExplorerService, type RawExplorerOccurrence, type RawExplorerSetup, type RawExplorerSignalIdentity } from './raw-radius-explorer/raw-radius-explorer-service.js'
 import { RAW_TELEMETRY_REVIEW_STATUSES, type RawTelemetryReviewService, type RawTelemetryReviewStatus } from './raw-radius-explorer/raw-telemetry-review-service.js'
+import { TELEMETRY_EVENT_MAX_CONTEXT_MINUTES, TELEMETRY_EVENT_MAX_RANGE_MS, TelemetryEventExplorerService, type TelemetryEventOccurrence, type TelemetryEventSearchInput } from './telemetry-event-explorer/telemetry-event-explorer-service.js'
 
 const MAX_PHYSICAL_STATE_RANGE_MS = 2 * 60 * 60 * 1_000
 const MAX_RADIUS_RANGE_MS = 31 * 24 * 60 * 60 * 1_000
@@ -326,6 +327,58 @@ function parseRawReviewStatus(value: unknown): RawTelemetryReviewStatus {
   return value as RawTelemetryReviewStatus
 }
 
+function parseTelemetryEventSearch(body: unknown): TelemetryEventSearchInput {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new RequestValidationError('invalid_telemetry_event_search')
+  const raw = body as Record<string, unknown>
+  const fromUtc = parseUtcTimestamp(raw.fromUtc, 'invalid_from_utc'); const toUtc = parseUtcTimestamp(raw.toUtc, 'invalid_to_utc')
+  const rangeMs = Date.parse(toUtc) - Date.parse(fromUtc)
+  if (rangeMs <= 0 || rangeMs > TELEMETRY_EVENT_MAX_RANGE_MS) throw new RequestValidationError('invalid_time_range')
+  if (!raw.source || typeof raw.source !== 'object' || Array.isArray(raw.source)) throw new RequestValidationError('invalid_telemetry_event_source')
+  const sourceRaw = raw.source as Record<string, unknown>
+  let source: TelemetryEventSearchInput['source']
+  if (sourceRaw.kind === 'canonical') {
+    if (typeof sourceRaw.canonicalId !== 'string' || !/^[a-z0-9_.]{1,200}$/.test(sourceRaw.canonicalId)) throw new RequestValidationError('invalid_telemetry_event_source')
+    source = { kind: 'canonical', canonicalId: sourceRaw.canonicalId }
+  } else if (sourceRaw.kind === 'raw') {
+    const rawIdentity = parseRawIdentity(sourceRaw.rawIdentity)
+    if (typeof sourceRaw.displayName !== 'string' || !sourceRaw.displayName.trim() || sourceRaw.displayName.length > 300) throw new RequestValidationError('invalid_telemetry_event_source')
+    source = { kind: 'raw', pressKey: parsePressKey(String(sourceRaw.pressKey ?? '')), rawIdentity, displayName: sourceRaw.displayName }
+  } else throw new RequestValidationError('invalid_telemetry_event_source')
+  const pressKey = raw.pressKey === 'all' ? 'all' : parsePressKey(String(raw.pressKey ?? ''))
+  const deckNumber = raw.deckNumber === 'any' ? 'any' : raw.deckNumber === null ? null : Number(raw.deckNumber)
+  if (deckNumber !== 'any' && deckNumber !== null && (!Number.isSafeInteger(deckNumber) || deckNumber < 1 || deckNumber > 10)) throw new RequestValidationError('invalid_telemetry_event_deck')
+  if (!raw.rule || typeof raw.rule !== 'object' || Array.isArray(raw.rule)) throw new RequestValidationError('invalid_telemetry_event_rule')
+  const ruleRaw = raw.rule as Record<string, unknown>
+  let rule: TelemetryEventSearchInput['rule']
+  if (ruleRaw.kind === 'threshold') {
+    if (!['>', '>=', '<', '<='].includes(String(ruleRaw.operator)) || typeof ruleRaw.threshold !== 'number' || !Number.isFinite(ruleRaw.threshold)) throw new RequestValidationError('invalid_telemetry_event_rule')
+    rule = { kind: 'threshold', operator: ruleRaw.operator as '>' | '>=' | '<' | '<=', threshold: ruleRaw.threshold }
+  } else if (ruleRaw.kind === 'delta') {
+    if (!['increase', 'decrease', 'either'].includes(String(ruleRaw.direction)) || typeof ruleRaw.amount !== 'number' || !Number.isFinite(ruleRaw.amount) || ruleRaw.amount <= 0 || !Number.isSafeInteger(ruleRaw.windowMinutes) || Number(ruleRaw.windowMinutes) < 1 || Number(ruleRaw.windowMinutes) > 1_440) throw new RequestValidationError('invalid_telemetry_event_rule')
+    rule = { kind: 'delta', direction: ruleRaw.direction as 'increase' | 'decrease' | 'either', amount: ruleRaw.amount, windowMinutes: Number(ruleRaw.windowMinutes) }
+  } else throw new RequestValidationError('invalid_telemetry_event_rule')
+  if (!Number.isSafeInteger(raw.chartContextMinutes) || Number(raw.chartContextMinutes) < 0 || Number(raw.chartContextMinutes) > TELEMETRY_EVENT_MAX_CONTEXT_MINUTES) throw new RequestValidationError('invalid_telemetry_event_context')
+  if (source.kind === 'raw' && (pressKey === 'all' || pressKey !== source.pressKey || deckNumber !== null)) throw new RequestValidationError('invalid_telemetry_event_source_scope')
+  return { fromUtc, toUtc, source, pressKey, deckNumber, rule, chartContextMinutes: Number(raw.chartContextMinutes) }
+}
+
+function parseTelemetryEventOccurrence(value: unknown): TelemetryEventOccurrence {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RequestValidationError('invalid_telemetry_event_occurrence')
+  const raw = value as Record<string, unknown>
+  const occurrenceId = typeof raw.occurrenceId === 'string' && raw.occurrenceId.length <= 2_000 ? raw.occurrenceId : undefined
+  const sourceKind = raw.sourceKind === 'canonical' || raw.sourceKind === 'raw' ? raw.sourceKind : undefined
+  const eventType = raw.eventType === 'threshold' || raw.eventType === 'delta' ? raw.eventType : undefined
+  const startUtc = parseUtcTimestamp(raw.startUtc, 'invalid_telemetry_event_occurrence'); const endUtc = parseUtcTimestamp(raw.endUtc, 'invalid_telemetry_event_occurrence')
+  const chartFromUtc = parseUtcTimestamp(raw.chartFromUtc, 'invalid_telemetry_event_occurrence'); const chartToUtc = parseUtcTimestamp(raw.chartToUtc, 'invalid_telemetry_event_occurrence')
+  if (!occurrenceId || !sourceKind || !eventType || Date.parse(endUtc) < Date.parse(startUtc) || Date.parse(chartFromUtc) > Date.parse(startUtc) || Date.parse(chartToUtc) < Date.parse(endUtc) || Date.parse(chartToUtc) - Date.parse(chartFromUtc) > (TELEMETRY_EVENT_MAX_CONTEXT_MINUTES * 2 * 60_000 + TELEMETRY_EVENT_MAX_RANGE_MS)) throw new RequestValidationError('invalid_telemetry_event_occurrence')
+  if (typeof raw.displayName !== 'string' || typeof raw.rawIdentity !== 'string' || !raw.rawIdentity || raw.rawIdentity.length > 2_000 || typeof raw.signalDisplayName !== 'string' || !raw.signalDisplayName || raw.signalDisplayName.length > 300) throw new RequestValidationError('invalid_telemetry_event_occurrence')
+  if (raw.canonicalId !== null && (typeof raw.canonicalId !== 'string' || !/^[a-z0-9_.]{1,200}$/.test(raw.canonicalId))) throw new RequestValidationError('invalid_telemetry_event_occurrence')
+  if (raw.deckNumber !== null && (!Number.isSafeInteger(raw.deckNumber) || Number(raw.deckNumber) < 1 || Number(raw.deckNumber) > 10)) throw new RequestValidationError('invalid_telemetry_event_occurrence')
+  const numeric = (name: string, required = false) => { const candidate = raw[name]; if (candidate === undefined && !required) return undefined; if (typeof candidate !== 'number' || !Number.isFinite(candidate)) throw new RequestValidationError('invalid_telemetry_event_occurrence'); return candidate }
+  for (const name of ['extremeAtUtc', 'baselineAtUtc', 'triggerAtUtc', 'maximumExcursionAtUtc'] as const) if (raw[name] !== undefined) parseUtcTimestamp(raw[name], 'invalid_telemetry_event_occurrence')
+  return { ...(raw as unknown as TelemetryEventOccurrence), occurrenceId, sourceKind, eventType, pressKey: parsePressKey(String(raw.pressKey ?? '')), displayName: raw.displayName, deckNumber: raw.deckNumber === null ? null : Number(raw.deckNumber), canonicalId: raw.canonicalId as string | null, rawIdentity: raw.rawIdentity, signalDisplayName: raw.signalDisplayName, startUtc, endUtc, chartFromUtc, chartToUtc, durationSeconds: numeric('durationSeconds', true)!, pressOccurrenceIndex: numeric('pressOccurrenceIndex', true)!, pressOccurrenceCount: numeric('pressOccurrenceCount', true)!, clippedEnd: Boolean(raw.clippedEnd), dataGap: Boolean(raw.dataGap) }
+}
+
 function cancellationSignal(request: Request, response: Response): AbortSignal {
   const controller = new AbortController()
   request.once('aborted', () => controller.abort())
@@ -385,6 +438,7 @@ export function createApp({
   const engineeringClues = new EngineeringClueAnalysisService(telemetry)
   const stopRestart = new StopRestartAnalysisService(telemetry)
   const rawRadiusExplorer = new RawRadiusExplorerService(radiusService, telemetry, rawTelemetryReviewService)
+  const telemetryEventExplorer = new TelemetryEventExplorerService(telemetry, radiusService, rawRadiusExplorer)
   const observedIdentityCache = new ObservedIdentityCache(
     () => radiusService.getObservedIdentities?.() ?? Promise.resolve([]),
     { onRefreshError: () => { if (logger) logger.error('classification_observed_identity_refresh_unavailable') } },
@@ -575,6 +629,28 @@ export function createApp({
     if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)) throw new RequestValidationError('invalid_raw_explorer_request')
     const raw = request.body as Record<string, unknown>
     response.status(200).json(await rawRadiusExplorer.review(parsePressKey(String(raw.pressKey ?? '')), parseRawIdentity(raw.rawIdentity), parseRawReviewStatus(raw.reviewStatus)))
+  }))
+
+  app.get('/api/telemetry/event-explorer/catalog', asyncRoute(async (request, response) => {
+    const rawPressKey = request.query.rawPressKey === undefined ? undefined : parsePressKey(String(request.query.rawPressKey))
+    const range = rawPressKey ? validateRadiusRange(request.query) : undefined
+    response.status(200).json(await telemetryEventExplorer.catalog(rawPressKey, range?.fromUtc, range?.toUtc, String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.post('/api/telemetry/event-explorer/search', asyncRoute(async (request, response) => {
+    response.status(200).json(await telemetryEventExplorer.search(parseTelemetryEventSearch(request.body), String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.post('/api/telemetry/event-explorer/detail', asyncRoute(async (request, response) => {
+    response.status(200).json(await telemetryEventExplorer.detail(parseTelemetryEventOccurrence(request.body?.occurrence), String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.post('/api/telemetry/event-explorer/plot', asyncRoute(async (request, response) => {
+    response.status(200).json(await telemetryEventExplorer.plot(parseTelemetryEventOccurrence(request.body?.occurrence), parseRawExplorerSignal(request.body?.signal), String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.post('/api/telemetry/event-explorer/raw-plot', asyncRoute(async (request, response) => {
+    response.status(200).json(await telemetryEventExplorer.rawPlot(parseTelemetryEventOccurrence(request.body?.occurrence), parseRawIdentity(request.body?.rawIdentity), String(response.locals.requestId), cancellationSignal(request, response)))
   }))
 
   app.get(

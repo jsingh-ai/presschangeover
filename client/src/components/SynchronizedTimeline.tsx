@@ -32,6 +32,8 @@ export interface TimelineNumericTrack {
   connectObservedGaps?: boolean
   interpolation?: 'linear' | 'step'
   holdLastObservation?: boolean
+  referenceLines?: Array<{ value: number; label: string }>
+  markers?: Array<{ atUtc: string; label: string; kind?: 'start' | 'trigger' | 'extreme' | 'end' | 'baseline' }>
 }
 
 export interface TimelineEvent {
@@ -172,13 +174,14 @@ function timeLabel(value: string, from: number, coordinateMode: TimelineCoordina
   return `${hours ? `${hours}h ` : ''}${minutes ? `${minutes}m ` : ''}${remainder}s`
 }
 
-export function numericPaths(samples: TimedNumericSample[], from: number, span: number, width: number, height: number, connectObservedGaps = false, interpolation: 'linear' | 'step' = 'linear', holdLastObservation = false): { paths: string[]; minimum: number; maximum: number } {
+export function numericPaths(samples: TimedNumericSample[], from: number, span: number, width: number, height: number, connectObservedGaps = false, interpolation: 'linear' | 'step' = 'linear', holdLastObservation = false, referenceValues: number[] = []): { paths: string[]; minimum: number; maximum: number } {
   const to = from + span
   const observed = samples.filter(({ observedAtUtc, value }) => Number.isFinite(Date.parse(observedAtUtc)) && Number.isFinite(value) && Date.parse(observedAtUtc) <= to).sort((left, right) => Date.parse(left.observedAtUtc) - Date.parse(right.observedAtUtc))
   const seed = observed.filter(({ observedAtUtc }) => Date.parse(observedAtUtc) <= from).at(-1)
   const visible = [...(seed ? [seed] : []), ...observed.filter(({ observedAtUtc }) => Date.parse(observedAtUtc) > from)]
-  const minimum = visible.length ? Math.min(...visible.map(({ value }) => value)) : 0
-  const maximum = visible.length ? Math.max(...visible.map(({ value }) => value)) : 0
+  const domainValues = [...visible.map(({ value }) => value), ...referenceValues.filter(Number.isFinite)]
+  const minimum = domainValues.length ? Math.min(...domainValues) : 0
+  const maximum = domainValues.length ? Math.max(...domainValues) : 0
   const valueSpan = Math.max(1, maximum - minimum)
   const medianGap = visible.length > 2 ? [...visible.slice(1).map((item, index) => Date.parse(item.observedAtUtc) - Date.parse(visible[index]!.observedAtUtc))].sort((a, b) => a - b)[Math.floor((visible.length - 1) / 2)] ?? span : span
   const maximumConnectedGap = Math.max(1_000, medianGap * 4)
@@ -221,7 +224,7 @@ export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolut
   const [expandedEventGroups, setExpandedEventGroups] = useState<Set<string>>(() => new Set())
   const canvasRef = useRef<HTMLDivElement>(null)
   const canvasStyle = { '--timeline-min-width': `${minimumCanvasWidth}px` } as CSSProperties
-  const numericGeometry = useMemo(() => numericTracks.map((track) => ({ track, geometry: numericPaths(track.samples, from, span, 1000, 88, track.connectObservedGaps, track.interpolation, track.holdLastObservation) })), [numericTracks, from, span])
+  const numericGeometry = useMemo(() => numericTracks.map((track) => ({ track, geometry: numericPaths(track.samples, from, span, 1000, 88, track.connectObservedGaps, track.interpolation, track.holdLastObservation, track.referenceLines?.map(({ value }) => value)) })), [numericTracks, from, span])
   const eventGeometry = useMemo(() => eventTracks.map((track) => ({ track, clusters: clusterTimelineEvents(track.events, fromUtc, toUtc) })), [eventTracks, fromUtc, toUtc])
   const highlightedGeometry = highlightedRange ? {
     start: Math.min(1, Math.max(0, (Date.parse(highlightedRange.fromUtc) - from) / span)),
@@ -301,6 +304,8 @@ export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolut
           <strong>{track.label}{track.unit ? <small>{track.unit}</small> : null}</strong>
           <div className="synchronized-timeline__numeric" role="img" aria-label={`${track.label}. ${track.samples.length ? `${track.samples.length} observed samples from ${geometry.minimum} to ${geometry.maximum}${track.unit ? ` ${track.unit}` : ''}` : track.unavailableLabel ?? 'No samples in this range'}`}>
             {track.samples.length ? <svg viewBox="0 0 1000 88" preserveAspectRatio="none" aria-hidden="true">{geometry.paths.map((path, index) => <path key={index} d={path} />)}</svg> : <span>{track.unavailableLabel ?? 'No samples in this range'}</span>}
+            {track.referenceLines?.map((line) => { const valueSpan = Math.max(1, geometry.maximum - geometry.minimum); const top = (6 + (geometry.maximum - line.value) / valueSpan * 76) / 88 * 100; return <i key={`${line.label}:${line.value}`} className="synchronized-timeline__reference-line" style={{ top: `${top}%` }} title={line.label}><b>{line.label}</b></i> })}
+            {track.markers?.filter(({ atUtc }) => Date.parse(atUtc) >= from && Date.parse(atUtc) <= to).map((marker) => <i key={`${marker.kind}:${marker.atUtc}:${marker.label}`} className={`synchronized-timeline__numeric-marker synchronized-timeline__numeric-marker--${marker.kind ?? 'event'}`} style={{ left: `${(Date.parse(marker.atUtc) - from) / span * 100}%` }} title={`${marker.label} · ${timeLabel(marker.atUtc, labelOrigin, coordinateMode)}`}><b>{marker.label}</b></i>)}
           </div>
         </div>)}
         {eventGeometry.map(({ track, clusters }) => <div className="synchronized-timeline__row synchronized-timeline__row--events" key={track.id} style={rowOrder('event', track.id)}>
