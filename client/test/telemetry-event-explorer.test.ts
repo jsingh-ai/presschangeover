@@ -131,6 +131,22 @@ describe('Telemetry Event Explorer UI', () => {
     assert.match(pageSource, /Source \$\{preview\.rawIdentity\}/)
   })
 
+  it('keeps regularly recorded scalar values visible when historian quality is bad or invalid', () => {
+    const result = reconstructPreviewStateTimeline({ fromUtc: '2026-08-17T00:00:00.000Z', toUtc: '2026-08-17T00:20:00.000Z', observations: [
+      { atUtc: '2026-08-16T23:59:00.000Z', value: 'ORDER-1', qualityState: 'bad' },
+      { atUtc: '2026-08-17T00:04:00.000Z', value: 'ORDER-1', qualityState: 'bad' },
+      { atUtc: '2026-08-17T00:09:00.000Z', value: 'ORDER-1', qualityState: 'invalid' },
+      { atUtc: '2026-08-17T00:14:00.000Z', value: 'ORDER-2', qualityState: 'bad' },
+      { atUtc: '2026-08-17T00:19:00.000Z', value: 'ORDER-2', qualityState: 'good' },
+    ] })
+    assert.deepEqual(result.intervals.map(({ kind, value, startUtc, endUtc }) => ({ kind, value, startUtc, endUtc })), [
+      { kind: 'state', value: 'ORDER-1', startUtc: '2026-08-17T00:00:00.000Z', endUtc: '2026-08-17T00:14:00.000Z' },
+      { kind: 'state', value: 'ORDER-2', startUtc: '2026-08-17T00:14:00.000Z', endUtc: '2026-08-17T00:20:00.000Z' },
+    ])
+    assert.equal(result.currentValue, 'ORDER-2')
+    assert.equal(result.previousValue, 'ORDER-1')
+  })
+
   it('reuses the synchronized Raw Radius investigation interactions and bounded split layout', () => {
     assert.match(pageSource, /RawExplorerInspectionTooltip/)
     assert.match(pageSource, /SynchronizedTimeline/)

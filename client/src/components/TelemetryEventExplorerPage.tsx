@@ -77,7 +77,7 @@ function samePreviewScalar(left: TelemetryEventScalar, right: TelemetryEventScal
 function usablePreviewObservation(observation: TelemetryEventPreview['observations'][number]) {
   if (!Number.isFinite(Date.parse(observation.atUtc)) || typeof observation.value === 'number' && !Number.isFinite(observation.value)) return false
   const quality = observation.qualityState?.toUpperCase() ?? ''
-  return !['BAD', 'INVALID', 'UNAVAILABLE', 'NO_DATA', 'NODATA'].some((token) => quality.includes(token))
+  return !['UNAVAILABLE', 'NO_DATA', 'NODATA'].some((token) => quality.includes(token))
 }
 
 export function reconstructPreviewStateTimeline(preview: Pick<TelemetryEventPreview, 'fromUtc' | 'toUtc' | 'observations'>): PreviewStateTimeline {
