@@ -70,6 +70,19 @@ describe('Telemetry Event Explorer UI', () => {
     assert.match(styles, /telemetry-variable-preview__previous/)
   })
 
+  it('applies a custom range explicitly and keeps its loading overlay tied to the current preview request', () => {
+    assert.match(pageSource, /function applyCustomRange\(\)/)
+    assert.match(pageSource, /setPreviewRefreshKey\(\(current\) => current \+ 1\)/)
+    assert.match(pageSource, /previewRequestId\.current === requestId/)
+    assert.match(pageSource, /rangeMode === 'custom'/)
+    assert.match(pageSource, /Applying time range/)
+    assert.match(pageSource, /telemetry-find-occurrences/)
+    assert.match(pageSource, /telemetry-occurrence-button/)
+    assert.match(styles, /telemetry-event-range-overlay/)
+    assert.match(styles, /telemetry-preview-source-control button\.telemetry-icon-button/)
+    assert.match(styles, /telemetry-event-custom-range \.telemetry-apply-range/)
+  })
+
   it('reconstructs repeated strings and booleans as proportional distinct-state intervals', () => {
     const at = (minute: number) => `2026-08-17T12:${String(minute).padStart(2, '0')}:00.000Z`
     const state = (minute: number, value: string | boolean) => ({ atUtc: at(minute), value, qualityState: 'GOOD' })

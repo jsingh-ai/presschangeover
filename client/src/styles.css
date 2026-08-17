@@ -2321,8 +2321,22 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
 }
 
 .telemetry-event-explorer-page { display: grid; gap: .9rem; min-width: 0; }
-.telemetry-event-setup { display: grid; gap: .8rem; }
+.telemetry-event-setup { position: relative; display: grid; gap: .8rem; }
 .telemetry-event-setup.is-collapsed { padding-block: .8rem; }
+.telemetry-event-range-overlay { position: absolute; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; gap: .75rem; padding: 1.5rem; color: var(--text); background: color-mix(in srgb, var(--surface) 86%, transparent); border-radius: inherit; backdrop-filter: blur(3px); }
+.telemetry-event-range-overlay > i { width: 1.35rem; height: 1.35rem; border: 3px solid color-mix(in srgb, var(--primary) 22%, var(--border)); border-top-color: var(--primary); border-radius: 50%; animation: scope-progress-spin .75s linear infinite; }
+.telemetry-event-range-overlay > div { display: grid; gap: .14rem; max-width: 28rem; }
+.telemetry-event-range-overlay strong { color: var(--text-strong); font-size: .86rem; }
+.telemetry-event-range-overlay span { color: var(--muted); font-size: .68rem; }
+.telemetry-event-explorer-page .secondary-action, .telemetry-event-explorer-page .primary-action { display: inline-flex; align-items: center; justify-content: center; gap: .42rem; min-height: 2.25rem; padding: .4rem .72rem; border: 1px solid var(--border-strong); border-radius: .48rem; cursor: pointer; font-size: .68rem; font-weight: 850; line-height: 1; }
+.telemetry-event-explorer-page .secondary-action { color: var(--primary); background: var(--surface); }
+.telemetry-event-explorer-page .primary-action { color: var(--primary-contrast, #fff); background: var(--primary); border-color: var(--primary); }
+.telemetry-event-explorer-page .secondary-action:hover:not(:disabled), .telemetry-event-explorer-page .secondary-action:focus-visible, .telemetry-event-explorer-page .primary-action:hover:not(:disabled), .telemetry-event-explorer-page .primary-action:focus-visible { border-color: var(--primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent), 0 7px 15px color-mix(in srgb, var(--primary) 14%, transparent); transform: translateY(-1px); }
+.telemetry-event-explorer-page button:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; transform: none; }
+.telemetry-event-explorer-page button svg { flex: 0 0 auto; width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.telemetry-event-explorer-page .filter-chip { color: var(--muted-strong); background: var(--surface); border: 1px solid var(--border); }
+.telemetry-event-explorer-page .filter-chip:hover, .telemetry-event-explorer-page .filter-chip:focus-visible { color: var(--primary); border-color: var(--primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 14%, transparent); }
+.telemetry-event-explorer-page .filter-chip.active { color: var(--primary-contrast, #fff); background: var(--primary); border-color: var(--primary); box-shadow: 0 4px 10px color-mix(in srgb, var(--primary) 20%, transparent); }
 .telemetry-event-setup-grid { display: grid; grid-template-columns: minmax(20rem, .92fr) minmax(28rem, 1.08fr); grid-template-rows: auto auto auto; align-items: stretch; gap: .7rem .8rem; }
 .telemetry-event-setup-grid fieldset { display: grid; align-content: start; gap: .5rem; min-width: 0; margin: 0; padding: .75rem .8rem .8rem; border: 1px solid var(--border); border-radius: .65rem; background: var(--surface-subtle); }
 .telemetry-event-setup-grid legend { margin-left: .05rem; padding: .05rem .4rem; color: var(--text-strong); background: var(--surface); font-size: .72rem; font-weight: 850; line-height: 1.2; }
@@ -2350,10 +2364,13 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
 .telemetry-variable-preview > header > div { display: grid; gap: .12rem; }
 .telemetry-variable-preview > header > div > strong { color: var(--text-strong); font-size: .9rem; }
 .telemetry-variable-preview > header label { min-width: 13rem; }
-.telemetry-preview-source-control { display: flex !important; align-items: end; gap: .3rem !important; }
+.telemetry-preview-source-control { display: flex !important; align-items: end; gap: 0 !important; overflow: hidden; background: var(--surface); border: 1px solid var(--border-strong); border-radius: .52rem; box-shadow: var(--shadow-sm); }
 .telemetry-preview-source-control label { display: grid; gap: .22rem; color: var(--muted); font-size: .64rem; font-weight: 800; }
-.telemetry-preview-source-control select { width: 100%; min-height: 2.2rem; padding: .38rem .5rem; color: var(--text); background: var(--surface-strong); border: 1px solid var(--border); border-radius: .42rem; font: inherit; }
-.telemetry-preview-source-control button { flex: 0 0 2.2rem; width: 2.2rem; min-height: 2.2rem; padding: 0; font-size: .9rem; }
+.telemetry-preview-source-control select { width: 100%; min-height: 2.2rem; padding: .38rem .5rem; color: var(--text); background: var(--surface-strong); border: 0; border-inline: 1px solid var(--border); border-radius: 0; font: inherit; }
+.telemetry-preview-source-control button.telemetry-icon-button { flex: 0 0 2.45rem; width: 2.45rem; min-height: 3.15rem; padding: .72rem 0 0; color: var(--primary); background: var(--surface); border: 0; border-radius: 0; box-shadow: none; }
+.telemetry-preview-source-control button.telemetry-icon-button:hover:not(:disabled), .telemetry-preview-source-control button.telemetry-icon-button:focus-visible { color: var(--primary-contrast, #fff); background: var(--primary); box-shadow: none; transform: none; }
+.telemetry-event-custom-range { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.telemetry-event-custom-range .telemetry-apply-range { grid-column: 1 / -1; justify-self: end; min-width: 9.25rem; color: var(--primary-contrast, #fff); background: var(--primary); border-color: var(--primary); }
 .telemetry-variable-preview p { margin: 0; color: var(--muted); font-size: .68rem; }
 .telemetry-variable-preview__identity { display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); gap: .35rem .7rem; align-items: center; padding: .42rem .55rem; border: 1px solid var(--border); border-radius: .45rem; color: var(--muted); background: var(--surface-strong); font-size: .64rem; }
 .telemetry-variable-preview__identity small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -2373,6 +2390,7 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
 .telemetry-variable-preview__changes > .telemetry-variable-preview__previous { color: var(--text); background: color-mix(in srgb, var(--surface-strong) 88%, var(--primary-soft)); border-color: var(--border-strong); font-weight: 700; }
 .telemetry-event-setup > .raw-explorer-actions { margin-top: 0; padding-top: .8rem; border-top: 1px solid var(--border); }
 .telemetry-event-setup > .raw-explorer-actions .primary-action { min-height: 2.65rem; padding-inline: 1.15rem; box-shadow: 0 7px 16px color-mix(in srgb, var(--primary) 18%, transparent); }
+.telemetry-find-occurrences { min-width: 10.5rem; }
 .telemetry-event-results { display: grid; gap: .8rem; }
 .telemetry-event-results > header, .event-investigation-header { display: flex; justify-content: space-between; gap: 1rem; align-items: start; }
 .telemetry-event-results h2, .event-investigation-header h2 { margin: .15rem 0; }
@@ -2385,6 +2403,7 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
 .telemetry-event-occurrence-list small { color: var(--muted); font-size: .62rem; }
 .telemetry-event-occurrence-nav { position: sticky; z-index: 7; top: .5rem; display: flex; justify-content: center; align-items: center; gap: 1rem; width: max-content; max-width: 100%; margin-inline: auto; padding: .45rem; background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--border); border-radius: 999px; box-shadow: 0 8px 22px rgba(25,36,56,.12); }
 .telemetry-event-occurrence-nav span { font-size: .7rem; font-weight: 800; }
+.telemetry-event-occurrence-nav .telemetry-occurrence-button { min-width: 6.8rem; border-radius: 999px; }
 .telemetry-event-investigation { display: grid; min-width: 0; gap: .8rem; }
 .event-investigation-header > div:last-child { display: grid; text-align: right; }
 .event-rule-banner { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .75rem; padding: .55rem .7rem; background: var(--primary-soft); border: 1px solid color-mix(in srgb, var(--primary) 35%, var(--border)); border-radius: .48rem; }
