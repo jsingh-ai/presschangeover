@@ -3,7 +3,8 @@ import OpenAI from 'openai'
 import type { ResponseInput, ResponseInputItem, ResponseOutputItem } from 'openai/resources/responses/responses'
 import type { AiInvestigatorConfig } from '../config.js'
 import type { RadiusPressKey } from '../radius/models.js'
-import { AI_INVESTIGATOR_CONTENT_SCHEMA, type AiInvestigatorContent, type AiInvestigatorRequest, type AiInvestigatorResult, validateAiInvestigatorContent } from './contracts.js'
+import { AI_INVESTIGATOR_CONTENT_SCHEMA, type AiGroundingFact, type AiInvestigatorContent, type AiInvestigatorDraftContent, type AiInvestigatorRequest, type AiInvestigatorResult, validateAiInvestigatorDraft } from './contracts.js'
+import { groundAiInvestigatorDraft } from './grounding.js'
 import { AiInvestigatorReadOnlyToolRegistry, type AiInvestigatorToolDefinition, type AiToolResult } from './read-only-tools.js'
 
 export interface AiInvestigatorLogger {
@@ -37,8 +38,7 @@ export class OpenAiResponsesInvestigatorClient implements AiInvestigatorModelCli
       model: this.config.model,
       instructions,
       input: input as ResponseInput,
-      tools,
-      tool_choice: 'auto',
+      ...(tools.length ? { tools, tool_choice: 'auto' as const } : {}),
       include: ['reasoning.encrypted_content'],
       text: { verbosity: 'low', format: { type: 'json_schema', name: 'process_intelligence_investigation', strict: true, schema: AI_INVESTIGATOR_CONTENT_SCHEMA } },
       max_output_tokens: 4_000,
@@ -55,7 +55,8 @@ class AiTimeoutError extends Error {
 
 interface ToolEvidence { name: string; arguments: unknown; result?: AiToolResult; error?: string; durationMs: number }
 
-const SYSTEM_INSTRUCTIONS = `You are the advisory ProcessIntelligence AI Investigator. You may use ONLY the supplied read-only functions. Never claim database, historian, filesystem, network, machine-control, Radius-control, MQTT, acknowledgement, or configuration access. Begin with get_fleet_operational_summary for the requested scope. Identify only materially different candidate presses, then use at most a few follow-up tools. Compare the requested period with the immediately preceding equal-duration baseline where useful. Separate directly calculated FACTS, deterministic COMPARISONS, and cautious INTERPRETATIONS. Never assert a root cause or defect without evidence. Treat unavailable data as a limitation, never as a process event. If baseline evidence is insufficient, say "Insufficient baseline". Return no more than five ranked findings. Links must be relative ProcessIntelligence paths beginning with /raw-radius-explorer, /telemetry-event-explorer, /overview, or /operational-analysis. Do not emit HTML.`
+const SYSTEM_INSTRUCTIONS = `You are the advisory ProcessIntelligence AI Investigator. You may use ONLY the supplied read-only functions. Never claim database, historian, filesystem, network, machine-control, Radius-control, MQTT, acknowledgement, or configuration access. Begin with get_fleet_operational_summary for the requested scope. Identify only materially different candidate presses, then use at most a few follow-up tools. Compare the requested period with the immediately preceding equal-duration baseline where useful. The supplied fact objects are authoritative. Every displayed deterministic fact must cite its exact factId. Never invent or recalculate numeric values, percentages, counts, durations, comparisons, identities, or timestamps; select the server-calculated current/baseline/delta fact IDs together. Do not create free-form timestamp ranges: cite timestamp fact IDs only. Evidence source is server-owned; do not reclassify Radius facts as telemetry. Null or unusable Job/Order/Recipe values are not evidence. Separate directly calculated FACTS, deterministic COMPARISONS, and cautious INTERPRETATIONS. Never assert a root cause or defect without evidence. Do not call behavior flat, unchanged, stable, or immaterial when selected comparison facts show a material change. Treat unavailable data as a limitation, never as a process event. If baseline evidence is insufficient, say "Insufficient baseline". Return no more than five ranked findings. Links must be relative ProcessIntelligence paths beginning with /raw-radius-explorer, /telemetry-event-explorer, /overview, or /operational-analysis. Do not emit HTML.`
+const CORRECTION_INSTRUCTIONS = `${SYSTEM_INSTRUCTIONS} This is the single grounding-correction response. Do not call any tools. Correct or omit each cited invalid finding using only fact IDs already supplied in prior tool results. Return the complete corrected structured response.`
 
 function safeLog(logger: AiInvestigatorLogger | false, level: 'info' | 'error', value: Record<string, unknown>) {
   if (logger) logger[level](JSON.stringify(value))
@@ -86,6 +87,22 @@ function fleetTable(evidence: ToolEvidence[]) {
   return rows.length ? [{ title: 'Deterministic press summary', columns: ['Press', 'Coverage %', 'Production %', 'Interruptions', 'Longest interruption (min)'], rows }] : []
 }
 
+function groundingFacts(evidence: ToolEvidence[]): AiGroundingFact[] {
+  const facts = new Map<string, AiGroundingFact>()
+  for (const item of evidence) {
+    const candidates = item.result?.facts
+    if (!Array.isArray(candidates)) continue
+    for (const candidate of candidates) {
+      if (!candidate || typeof candidate !== 'object' || typeof (candidate as AiGroundingFact).factId !== 'string') continue
+      const fact = candidate as AiGroundingFact
+      const existing = facts.get(fact.factId)
+      if (existing && JSON.stringify(existing) !== JSON.stringify(fact)) throw new Error('conflicting_grounding_fact')
+      facts.set(fact.factId, fact)
+    }
+  }
+  return [...facts.values()]
+}
+
 function partialContent(status: 'partial' | 'timeout' | 'error', evidence: ToolEvidence[], reason: string): AiInvestigatorContent {
   const prefix = status === 'timeout' ? 'Analysis reached its time budget.' : status === 'error' ? 'The AI service could not complete the investigation.' : 'Analysis stopped at its configured exploration limit.'
   return { summary: `${prefix} Safe deterministic evidence collected before it stopped is shown below.`, findings: [], tables: fleetTable(evidence), limitations: [reason, 'No unsupported root-cause conclusion was generated.'] }
@@ -112,12 +129,13 @@ export class AiInvestigatorOrchestrator {
     const deadline = new AbortController(); const deadlineTimer = setTimeout(() => deadline.abort(new AiTimeoutError('overall')), this.config.totalTimeoutMs)
     const signal = requestSignal ? AbortSignal.any([deadline.signal, requestSignal]) : deadline.signal
     const evidence: ToolEvidence[] = []; let toolCallsUsed = 0; let toolRounds = 0
+    let grounding = { acceptedUnchanged: 0, corrected: 0, omitted: 0, correctionAttempted: false }
     let input: unknown[] = [{ role: 'user', content: requestPrompt(request) } satisfies ResponseInputItem]
     safeLog(this.logger, 'info', { event: 'ai_investigator_started', analysisId, scope: request.scope.pressKey ?? 'all', startUtc: request.range.startUtc, endUtc: request.range.endUtc, modelConfigured: true, model: this.config.model })
 
     const finish = (status: AiInvestigatorResult['status'], content: AiInvestigatorContent) => {
-      const completedAt = this.now().toISOString(); const result: AiInvestigatorResult = { analysisId, status, scope: { pressKey: request.scope.pressKey, startUtc: request.range.startUtc, endUtc: request.range.endUtc, analysis: request.analysis }, startedAt, completedAt, elapsedMs: Math.max(0, Date.parse(completedAt) - started.getTime()), toolCallsUsed, ...content }
-      safeLog(this.logger, status === 'error' ? 'error' : 'info', { event: 'ai_investigator_finished', analysisId, status, elapsedMs: result.elapsedMs, toolCallsUsed, toolRounds })
+      const completedAt = this.now().toISOString(); const result: AiInvestigatorResult = { analysisId, status, scope: { pressKey: request.scope.pressKey, startUtc: request.range.startUtc, endUtc: request.range.endUtc, analysis: request.analysis }, startedAt, completedAt, elapsedMs: Math.max(0, Date.parse(completedAt) - started.getTime()), toolCallsUsed, grounding, ...content }
+      safeLog(this.logger, status === 'error' ? 'error' : 'info', { event: 'ai_investigator_finished', analysisId, status, elapsedMs: result.elapsedMs, toolCallsUsed, toolRounds, grounding })
       return result
     }
 
@@ -128,7 +146,28 @@ export class AiInvestigatorOrchestrator {
         input.push(...response.outputItems)
         if (!response.toolCalls.length) {
           if (!response.outputText) throw new Error('empty_ai_investigator_response')
-          return finish('complete', validateAiInvestigatorContent(JSON.parse(response.outputText)))
+          const draft = validateAiInvestigatorDraft(JSON.parse(response.outputText))
+          const facts = groundingFacts(evidence); const tables = fleetTable(evidence)
+          const first = groundAiInvestigatorDraft(draft, facts, request, tables)
+          if (!first.issues.length) {
+            grounding = { acceptedUnchanged: first.content.findings.length, corrected: 0, omitted: 0, correctionAttempted: false }
+            return finish('complete', first.content)
+          }
+          grounding.correctionAttempted = true
+          safeLog(this.logger, 'info', { event: 'ai_investigator_grounding_rejected', analysisId, issueCount: first.issues.length, issues: first.issues.map(({ findingRank, code }) => ({ findingRank, code })) })
+          input.push({ role: 'user', content: JSON.stringify({ groundingCorrectionRequired: true, issues: first.issues.map(({ findingRank, code, detail }) => ({ findingRank, code, detail })), instruction: 'Correct or omit invalid findings. Use only exact supplied fact IDs. Do not call tools.' }) } satisfies ResponseInputItem)
+          const correction = await this.model.create(input, CORRECTION_INSTRUCTIONS, [], signal)
+          safeLog(this.logger, 'info', { event: 'ai_investigator_model_response', analysisId, responseId: correction.id, toolRound: toolRounds, groundingCorrection: true, usage: correction.usage })
+          if (correction.toolCalls.length || !correction.outputText) throw new Error('invalid_grounding_correction')
+          const correctedDraft = validateAiInvestigatorDraft(JSON.parse(correction.outputText))
+          const corrected = groundAiInvestigatorDraft(correctedDraft, facts, request, tables)
+          const unchanged = correctedDraft.findings.filter((item) => first.acceptedRanks.includes(item.rank) && draft.findings.some((original) => original.rank === item.rank && JSON.stringify(original) === JSON.stringify(item))).length
+          grounding = { acceptedUnchanged: unchanged, corrected: corrected.content.findings.length - unchanged, omitted: corrected.omitted, correctionAttempted: true }
+          if (!corrected.issues.length) return finish('complete', corrected.content)
+          const content = corrected.content
+          content.summary = 'Some AI interpretations could not be verified. Only findings grounded in deterministic ProcessIntelligence evidence are shown.'
+          content.limitations = [...content.limitations, 'Some AI interpretations could not be verified against deterministic ProcessIntelligence evidence and were omitted.']
+          return finish('partial', content)
         }
         if (toolRounds >= this.config.maxToolRounds) return finish('partial', partialContent('partial', evidence, `Maximum tool rounds (${this.config.maxToolRounds}) reached.`))
         toolRounds += 1

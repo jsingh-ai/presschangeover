@@ -7,14 +7,16 @@ import type { RadiusOverview } from '../src/radius/models.js'
 import type { RadiusService } from '../src/radius/radius-service.js'
 import type { TelemetryFoundationService } from '../src/telemetry/telemetry-foundation-service.js'
 import type { TelemetryClient } from '../src/telemetry/telemetry-api-client.js'
-import { parseAiInvestigatorRequest, validateAiInvestigatorContent, type AiInvestigatorContent } from '../src/ai-investigator/contracts.js'
-import { AiInvestigatorReadOnlyToolRegistry, AI_INVESTIGATOR_TOOL_NAMES } from '../src/ai-investigator/read-only-tools.js'
+import { parseAiInvestigatorRequest, validateAiInvestigatorDraft, type AiGroundingFact, type AiInvestigatorDraftContent } from '../src/ai-investigator/contracts.js'
+import { groundAiInvestigatorDraft } from '../src/ai-investigator/grounding.js'
+import { AiInvestigatorReadOnlyToolRegistry, AI_INVESTIGATOR_TOOL_NAMES, sanitizeProductionContextIdentity } from '../src/ai-investigator/read-only-tools.js'
 import { AiInvestigatorOrchestrator, type AiInvestigatorModelClient, type AiModelResponse } from '../src/ai-investigator/orchestrator.js'
 
 const start = '2026-08-16T12:00:00.000Z'; const end = '2026-08-17T12:00:00.000Z'
 const request = { scope: { pressKey: null }, range: { startUtc: start, endUtc: end }, analysis: 'discover_unusual_behavior' as const }
 const config: AiInvestigatorConfig = { enabled: true, apiKey: 'test-secret-never-return', model: 'test-model', totalTimeoutMs: 500, toolTimeoutMs: 50, openAiTimeoutMs: 100, maxToolCalls: 8, maxToolRounds: 4, maxParallelTools: 3 }
-const content: AiInvestigatorContent = { summary: 'One bounded finding.', findings: [{ rank: 1, press: 'Press 11', title: 'More interruptions', importance: 'medium', confidence: 'medium', whyItMatters: 'FACT: six interruptions. COMPARISON: one previously. INTERPRETATION: worth review.', facts: [{ label: 'Interruptions', value: '6', comparison: 'Previous period: 1' }], timestamps: ['2026-08-17T10:00:00.000Z'], radiusEvidence: ['B / 82 lasted 18 minutes'], telemetryEvidence: ['Actual Speed fell to 0'], productionContext: { job: '', order: '910877', recipe: 'Recipe A' }, recommendedInvestigation: 'Open the synchronized evidence.', links: [{ label: 'Open Radius Explorer', href: '/raw-radius-explorer' }] }], tables: [{ title: 'Press comparison', columns: ['Press', 'Stops'], rows: [['Press 11', '6']] }], limitations: ['Advisory result.'] }
+const content: AiInvestigatorDraftContent = { summary: 'No material candidates selected.', findings: [], limitations: ['Advisory result.'] }
+const draftFinding: AiInvestigatorDraftContent = { summary: 'One bounded finding.', findings: [{ rank: 1, pressKey: 'press11', title: 'More interruptions', importance: 'medium', confidence: 'medium', whyItMatters: 'The deterministic comparison warrants review.', facts: [{ label: 'Interruptions', factIds: ['press11.interruptions.current', 'press11.interruptions.baseline', 'press11.interruptions.delta'] }], timestampFactIds: [], evidenceFactIds: ['press11.interruptions.current'], productionContextFactIds: { job: null, order: null, recipe: null }, recommendedInvestigation: 'Open the synchronized evidence.', links: [{ label: 'Open Radius Explorer', href: '/raw-radius-explorer' }] }], limitations: ['Advisory result.'] }
 
 function modelQueue(responses: AiModelResponse[]): AiInvestigatorModelClient {
   let index = 0
@@ -90,11 +92,76 @@ describe('AI Investigator read-only boundary', () => {
     assert.equal(roundLimited.status, 'partial'); assert.equal(roundLimited.toolCallsUsed, 1); assert.equal(calls, 2)
   })
 
+  it('performs at most one no-tool grounding correction and returns grounded content', async () => {
+    const invalid: AiInvestigatorDraftContent = { ...draftFinding, findings: [{ ...draftFinding.findings[0], pressKey: 'press3', facts: [{ label: 'Production', factIds: ['press3.invented.value'] }], evidenceFactIds: ['press3.invented.value'] }] }
+    const corrected: AiInvestigatorDraftContent = { ...draftFinding, findings: [{ ...draftFinding.findings[0], pressKey: 'press3', facts: [{ label: 'Production', factIds: ['press3.production_percent.current'] }], evidenceFactIds: ['press3.production_percent.current'] }] }
+    const responses = [responseWithCalls({ name: 'get_fleet_operational_summary', arguments: { start, end, press: null } }), { id: 'invalid', outputText: JSON.stringify(invalid), outputItems: [], toolCalls: [] } satisfies AiModelResponse, { id: 'corrected', outputText: JSON.stringify(corrected), outputItems: [], toolCalls: [] } satisfies AiModelResponse]
+    let index = 0; const toolCounts: number[] = []
+    const model: AiInvestigatorModelClient = { create: async (_input, _instructions, tools) => { toolCounts.push(tools.length); return responses[index++] } }
+    const result = await new AiInvestigatorOrchestrator(config, registry(radiusWithOverview(async () => overview())), model, false).analyze(request)
+    assert.equal(result.status, 'complete'); assert.equal(result.toolCallsUsed, 1)
+    assert.deepEqual(toolCounts, [4, 4, 0]); assert.deepEqual(result.grounding, { acceptedUnchanged: 0, corrected: 1, omitted: 0, correctionAttempted: true })
+    assert.equal(result.findings[0].facts[0].value, '87%')
+  })
+
   it('validates the strict final contract and rejects arbitrary or unsafe output', () => {
-    assert.deepEqual(validateAiInvestigatorContent(content), content)
-    assert.throws(() => validateAiInvestigatorContent({ ...content, html: '<script>' }), /invalid_investigator_response/)
-    assert.throws(() => validateAiInvestigatorContent({ ...content, findings: [{ ...content.findings[0], links: [{ label: 'bad', href: 'https://internal.example' }] }] }), /invalid_investigator_response/)
-    assert.throws(() => validateAiInvestigatorContent({ ...content, tables: [{ title: 'bad', columns: ['a', 'b'], rows: [['one']] }] }), /invalid_investigator_response/)
+    assert.deepEqual(validateAiInvestigatorDraft(content), content)
+    assert.throws(() => validateAiInvestigatorDraft({ ...content, html: '<script>' }), /invalid_investigator_response/)
+    assert.throws(() => validateAiInvestigatorDraft({ ...draftFinding, findings: [{ ...draftFinding.findings[0], links: [{ label: 'bad', href: 'https://internal.example' }] }] }), /invalid_investigator_response/)
+    assert.throws(() => validateAiInvestigatorDraft({ ...draftFinding, findings: [{ ...draftFinding.findings[0], timestampFactIds: ['press11.event.bad'], extra: 'bad' }] }), /invalid_investigator_response/)
+  })
+})
+
+function groundingFact(overrides: Partial<AiGroundingFact> & Pick<AiGroundingFact, 'factId' | 'pressKey' | 'metric' | 'value' | 'role'>): AiGroundingFact {
+  return { press: overrides.pressKey.replace('press', 'Press '), source: 'radius', unit: null, usable: overrides.value !== null, label: overrides.metric, ...overrides }
+}
+
+describe('AI Investigator deterministic grounding', () => {
+  const press14Facts: AiGroundingFact[] = [
+    groundingFact({ factId: 'press14.longest_interruption_minutes.current', pressKey: 'press14', metric: 'longestInterruptionMinutes', value: 384.7, unit: 'minutes', role: 'current' }),
+    groundingFact({ factId: 'press14.longest_interruption_minutes.baseline', pressKey: 'press14', metric: 'longestInterruptionMinutes', value: 549.8, unit: 'minutes', role: 'baseline' }),
+    groundingFact({ factId: 'press14.longest_interruption_minutes.delta', pressKey: 'press14', source: 'comparison', metric: 'longestInterruptionDeltaMinutes', value: -165.1, unit: 'minutes', role: 'delta' }),
+  ]
+
+  it('reconstructs the Press 14 baseline and negative delta without accepting model-owned values', () => {
+    const draft: AiInvestigatorDraftContent = { ...draftFinding, findings: [{ ...draftFinding.findings[0], pressKey: 'press14', facts: [{ label: 'Longest interruption', factIds: press14Facts.map((item) => item.factId) }], evidenceFactIds: ['press14.longest_interruption_minutes.current'] }] }
+    const result = groundAiInvestigatorDraft(draft, press14Facts, request)
+    assert.equal(result.issues.length, 0)
+    assert.equal(result.content.findings[0].facts[0].comparison, 'Current 384.7 min; baseline 549.8 min; change -165.1 min')
+    assert.doesNotMatch(JSON.stringify(result.content), /225\.1|\+165\.1/)
+    const invented = { ...draft, findings: [{ ...draft.findings[0], whyItMatters: 'The baseline was 225.1 min and the interruption increased 159.6 min.' }] }
+    assert.ok(groundAiInvestigatorDraft(invented, press14Facts, request).issues.some((item) => item.code === 'unsupported_numeric_claim'))
+  })
+
+  it('catches Press 6 flat language when interruptions changed from 9 to 14', () => {
+    const facts = [
+      groundingFact({ factId: 'press6.interruptions.current', pressKey: 'press6', metric: 'interruptions', value: 14, unit: 'count', role: 'current' }),
+      groundingFact({ factId: 'press6.interruptions.baseline', pressKey: 'press6', metric: 'interruptions', value: 9, unit: 'count', role: 'baseline' }),
+      groundingFact({ factId: 'press6.interruptions.delta', pressKey: 'press6', source: 'comparison', metric: 'interruptionDelta', value: 5, unit: 'count', role: 'delta' }),
+    ]
+    const draft: AiInvestigatorDraftContent = { ...draftFinding, findings: [{ ...draftFinding.findings[0], pressKey: 'press6', title: 'Essentially flat', whyItMatters: 'No material change was seen.', facts: [{ label: 'Interruptions', factIds: facts.map((item) => item.factId) }], evidenceFactIds: ['press6.interruptions.current'] }] }
+    const result = groundAiInvestigatorDraft(draft, facts, request)
+    assert.equal(result.content.findings.length, 0)
+    assert.ok(result.issues.some((item) => item.code === 'interpretation_contradiction'))
+  })
+
+  it('rejects unknown, malformed timestamp, and cross-press references', () => {
+    const timestamp = groundingFact({ factId: 'press14.event.valid.timestamp', pressKey: 'press14', metric: 'eventTimestamp', value: '2026-08-17T04:00:00.000Z', unit: 'iso8601', role: 'event', timestamp: '2026-08-17T04:00:00.000Z', range: { start, end } })
+    const malformed = { ...timestamp, factId: 'press14.event.bad.timestamp', value: '2026-08-17T4', timestamp: '2026-08-17T4' }
+    const base = { ...draftFinding.findings[0], pressKey: 'press14' as const, facts: [{ label: 'Longest interruption', factIds: press14Facts.map((item) => item.factId) }], evidenceFactIds: ['press14.longest_interruption_minutes.current'] }
+    assert.equal(groundAiInvestigatorDraft({ ...draftFinding, findings: [{ ...base, timestampFactIds: [timestamp.factId] }] }, [...press14Facts, timestamp], request).issues.length, 0)
+    assert.ok(groundAiInvestigatorDraft({ ...draftFinding, findings: [{ ...base, timestampFactIds: [malformed.factId] }] }, [...press14Facts, malformed], request).issues.some((item) => item.code === 'invalid_grounded_timestamp'))
+    assert.ok(groundAiInvestigatorDraft({ ...draftFinding, findings: [{ ...base, facts: [{ label: 'Invented', factIds: ['press14.unknown.fact'] }] }] }, press14Facts, request).issues.some((item) => item.code === 'unknown_fact_id'))
+    assert.ok(groundAiInvestigatorDraft({ ...draftFinding, findings: [{ ...base, facts: [{ label: 'Wrong press', factIds: ['press10.interruptions.current'] }] }] }, [groundingFact({ factId: 'press10.interruptions.current', pressKey: 'press10', metric: 'interruptions', value: 7, role: 'current' })], request).issues.some((item) => item.code === 'cross_press_fact'))
+  })
+
+  it('uses authoritative source buckets and sanitizes unusable production identities', () => {
+    const radius = groundingFact({ factId: 'press14.production_percent.current', pressKey: 'press14', metric: 'productionPercent', value: 37.5, unit: 'percent', role: 'current' })
+    const draft: AiInvestigatorDraftContent = { ...draftFinding, findings: [{ ...draftFinding.findings[0], pressKey: 'press14', facts: [{ label: 'Production', factIds: [radius.factId] }], evidenceFactIds: [radius.factId] }] }
+    const finding = groundAiInvestigatorDraft(draft, [radius], request).content.findings[0]
+    assert.deepEqual(finding.telemetryEvidence, []); assert.deepEqual(finding.radiusEvidence, ['productionPercent: 37.5%'])
+    assert.deepEqual(sanitizeProductionContextIdentity('[0,0,0,0,0,0]'), { value: null, usable: false })
+    assert.deepEqual(sanitizeProductionContextIdentity('0'), { value: '0', usable: true })
   })
 })
 

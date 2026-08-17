@@ -84,7 +84,7 @@ export interface AiInvestigatorFinding {
   confidence: 'high' | 'medium' | 'low'
   whyItMatters: string
   facts: Array<{ label: string; value: string; comparison: string }>
-  timestamps: string[]
+  timestamps: Array<{ label: string; start: string; end: string | null }>
   radiusEvidence: string[]
   telemetryEvidence: string[]
   productionContext: { job: string; order: string; recipe: string }
@@ -100,6 +100,7 @@ export interface AiInvestigatorResult {
   completedAt: string
   elapsedMs: number
   toolCallsUsed: number
+  grounding: { acceptedUnchanged: number; corrected: number; omitted: number; correctionAttempted: boolean }
   summary: string
   findings: AiInvestigatorFinding[]
   tables: Array<{ title: string; columns: string[]; rows: string[][] }>
