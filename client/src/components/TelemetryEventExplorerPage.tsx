@@ -40,23 +40,118 @@ export function adjacentPreviewOption(options: PreviewOption[], selectedOption: 
   return options[(currentIndex + direction + options.length) % options.length]
 }
 
-function collapsedPreviewStates(preview: TelemetryEventPreview) {
-  const states: TelemetryEventPreview['observations'] = []
-  for (const observation of [...preview.observations].sort((left, right) => Date.parse(left.atUtc) - Date.parse(right.atUtc))) {
-    const previous = states.at(-1)
-    if (previous && typeof previous.value === typeof observation.value && Object.is(previous.value, observation.value)) continue
-    states.push(observation)
-  }
-  return states
+const PREVIEW_MINIMUM_SIGNIFICANT_GAP_MS = 330_000
+
+export interface PreviewStateInterval {
+  kind: 'state' | 'gap'
+  startUtc: string
+  endUtc: string
+  durationSeconds: number
+  value?: TelemetryEventScalar
 }
 
-function previewIntervals(preview: TelemetryEventPreview) {
-  const observations = collapsedPreviewStates(preview)
-  return observations.flatMap((observation, index) => {
-    const startUtc = Date.parse(observation.atUtc) < Date.parse(preview.fromUtc) ? preview.fromUtc : observation.atUtc
-    const endUtc = observations[index + 1]?.atUtc ?? preview.toUtc
-    return Date.parse(startUtc) < Date.parse(endUtc) ? [{ id: `preview:${observation.atUtc}`, startUtc, endUtc, label: scalar(observation.value), details: `${scalar(observation.value)} · ${formatPlantDateTime(observation.atUtc)} CT` }] : []
+export interface PreviewStateTimeline {
+  intervals: PreviewStateInterval[]
+  distinctStates: TelemetryEventPreview['observations']
+  currentValue?: TelemetryEventScalar
+  previousValue?: TelemetryEventScalar
+  significantGapMs: number
+}
+
+function samePreviewScalar(left: TelemetryEventScalar, right: TelemetryEventScalar) {
+  return typeof left === typeof right && Object.is(left, right)
+}
+
+function usablePreviewObservation(observation: TelemetryEventPreview['observations'][number]) {
+  if (!Number.isFinite(Date.parse(observation.atUtc)) || typeof observation.value === 'number' && !Number.isFinite(observation.value)) return false
+  const quality = observation.qualityState?.toUpperCase() ?? ''
+  return !['BAD', 'INVALID', 'UNAVAILABLE', 'NO_DATA', 'NODATA'].some((token) => quality.includes(token))
+}
+
+export function reconstructPreviewStateTimeline(preview: Pick<TelemetryEventPreview, 'fromUtc' | 'toUtc' | 'observations'>): PreviewStateTimeline {
+  const fromMs = Date.parse(preview.fromUtc); const toMs = Date.parse(preview.toUtc)
+  const byTimestamp = new Map<number, TelemetryEventPreview['observations'][number]>()
+  for (const observation of preview.observations.filter(usablePreviewObservation).sort((left, right) => Date.parse(left.atUtc) - Date.parse(right.atUtc))) {
+    const at = Date.parse(observation.atUtc)
+    if (at <= toMs) byTimestamp.set(at, { ...observation, atUtc: new Date(at).toISOString() })
+  }
+  const ordered = [...byTimestamp.values()]
+  const seed = ordered.filter(({ atUtc }) => Date.parse(atUtc) < fromMs).at(-1)
+  const inRange = ordered.filter(({ atUtc }) => Date.parse(atUtc) >= fromMs && Date.parse(atUtc) <= toMs)
+  const cadence = [...(seed ? [seed] : []), ...inRange]
+  const gaps = cadence.slice(1).map((observation, index) => Date.parse(observation.atUtc) - Date.parse(cadence[index]!.atUtc)).filter((gap) => gap > 0).sort((left, right) => left - right)
+  const median = gaps.length ? gaps[Math.floor((gaps.length - 1) / 2)]! : 0
+  const significantGapMs = Math.max(PREVIEW_MINIMUM_SIGNIFICANT_GAP_MS, median * 5)
+  const distinctStates: TelemetryEventPreview['observations'] = []
+  for (const observation of cadence) if (!distinctStates.length || !samePreviewScalar(distinctStates.at(-1)!.value, observation.value)) distinctStates.push(observation)
+
+  const intervals: PreviewStateInterval[] = []
+  const addInterval = (kind: PreviewStateInterval['kind'], start: number, end: number, value?: TelemetryEventScalar) => {
+    const boundedStart = Math.max(fromMs, start); const boundedEnd = Math.min(toMs, end)
+    if (boundedEnd > boundedStart) intervals.push({ kind, startUtc: new Date(boundedStart).toISOString(), endUtc: new Date(boundedEnd).toISOString(), durationSeconds: (boundedEnd - boundedStart) / 1_000, ...(kind === 'state' ? { value } : {}) })
+  }
+
+  let activeValue = seed?.value
+  let activeStart = seed ? fromMs : undefined
+  let previousAt = seed ? Date.parse(seed.atUtc) : undefined
+  for (const observation of inRange) {
+    const at = Date.parse(observation.atUtc)
+    if (activeValue === undefined || activeStart === undefined || previousAt === undefined) {
+      addInterval('gap', fromMs, at)
+      activeValue = observation.value; activeStart = at; previousAt = at
+      continue
+    }
+    const hasGap = at - previousAt > significantGapMs
+    if (hasGap) {
+      addInterval('state', activeStart, previousAt, activeValue)
+      addInterval('gap', previousAt, at)
+      activeValue = observation.value; activeStart = at
+    } else if (!samePreviewScalar(activeValue, observation.value)) {
+      addInterval('state', activeStart, at, activeValue)
+      activeValue = observation.value; activeStart = at
+    }
+    previousAt = at
+  }
+  if (activeValue !== undefined && activeStart !== undefined && previousAt !== undefined) {
+    if (toMs - previousAt > significantGapMs) {
+      addInterval('state', activeStart, previousAt, activeValue)
+      addInterval('gap', previousAt, toMs)
+    } else addInterval('state', activeStart, toMs, activeValue)
+  } else addInterval('gap', fromMs, toMs)
+
+  return { intervals, distinctStates, currentValue: distinctStates.at(-1)?.value, previousValue: distinctStates.at(-2)?.value, significantGapMs }
+}
+
+function previewStateTone(value: TelemetryEventScalar) {
+  let hash = 0
+  for (const character of String(value)) hash = ((hash << 5) - hash + character.charCodeAt(0)) | 0
+  return Math.abs(hash) % 3
+}
+
+function previewIntervals(preview: TelemetryEventPreview, timeline: PreviewStateTimeline) {
+  const source = `${preview.displayName}${preview.deckNumber ? ` · Deck ${preview.deckNumber}` : ''}`
+  return timeline.intervals.map((interval, index) => {
+    const time = `${formatPlantDateTime(interval.startUtc)}–${formatPlantDateTime(interval.endUtc)} CT`
+    const details = interval.kind === 'gap'
+      ? `${preview.signalDisplayName}\nData unavailable\n${time}\nDuration ${duration(interval.durationSeconds)}\n${source}\nSource ${preview.rawIdentity}`
+      : `${preview.signalDisplayName}\nValue ${scalar(interval.value)}\nState start ${formatPlantDateTime(interval.startUtc)} CT\nState end ${formatPlantDateTime(interval.endUtc)} CT\nDuration ${duration(interval.durationSeconds)}\n${source}\nSource ${preview.rawIdentity}`
+    return { id: `preview:${interval.kind}:${interval.startUtc}:${index}`, startUtc: interval.startUtc, endUtc: interval.endUtc, label: interval.kind === 'gap' ? 'Data gap' : scalar(interval.value), details, unavailable: interval.kind === 'gap', className: interval.kind === 'state' ? `telemetry-variable-preview__state telemetry-variable-preview__state--${previewStateTone(interval.value!)}` : 'telemetry-variable-preview__gap' }
   })
+}
+
+function PreviewStateInspectionTooltip({ preview, timeline, atUtc }: { preview: TelemetryEventPreview; timeline: PreviewStateTimeline; atUtc: string }) {
+  const at = Date.parse(atUtc)
+  const interval = timeline.intervals.find(({ startUtc, endUtc }, index) => Date.parse(startUtc) <= at && (Date.parse(endUtc) > at || index === timeline.intervals.length - 1 && Date.parse(endUtc) === at))
+  return <div className="raw-inspection-tooltip">
+    <header><span>Selected variable</span><strong>{preview.signalDisplayName}</strong></header>
+    <dl>
+      <div><dt>Value</dt><dd>{interval?.kind === 'state' ? scalar(interval.value) : 'Data unavailable'}</dd></div>
+      <div><dt>State start</dt><dd>{interval ? `${formatPlantDateTime(interval.startUtc)} CT` : 'Unavailable'}</dd></div>
+      <div><dt>State end</dt><dd>{interval ? `${formatPlantDateTime(interval.endUtc)} CT` : 'Unavailable'}</dd></div>
+      <div><dt>Duration</dt><dd>{interval ? duration(interval.durationSeconds) : 'Unavailable'}</dd></div>
+      <div><dt>Source</dt><dd>{preview.displayName}{preview.deckNumber ? ` · Deck ${preview.deckNumber}` : ''}<small>{preview.rawIdentity}</small></dd></div>
+    </dl>
+  </div>
 }
 
 function VariablePreview({ preview, loading, error, options, selectedOption, onOptionChange }: { preview?: TelemetryEventPreview; loading: boolean; error?: string; options: PreviewOption[]; selectedOption?: PreviewOption; onOptionChange: (option: PreviewOption) => void }) {
@@ -64,13 +159,14 @@ function VariablePreview({ preview, loading, error, options, selectedOption, onO
   const numericSamples: TimedNumericSample[] = preview?.observations.flatMap((observation) => typeof observation.value === 'number' && Number.isFinite(observation.value) ? [{ observedAtUtc: observation.atUtc, receivedAtUtc: observation.atUtc, sourceTimestampUtc: observation.atUtc, qualityState: observation.qualityState ?? 'Good', valueKind: Number.isInteger(observation.value) ? 'integer' : 'numeric', value: observation.value }] : []) ?? []
   const numericValues = numericSamples.map(({ value }) => value)
   const recent = preview ? [...preview.observations].sort((left, right) => Date.parse(right.atUtc) - Date.parse(left.atUtc)).slice(0, 5) : []
-  const recentStates = preview ? collapsedPreviewStates(preview).reverse().slice(0, 5) : []
+  const stateTimeline = preview && preview.dataKind !== 'numeric' ? reconstructPreviewStateTimeline(preview) : undefined
+  const recentStates = stateTimeline ? [...stateTimeline.distinctStates].reverse().slice(0, 5) : []
   const latest = preview?.dataKind === 'numeric' ? recent[0] : recentStates[0]
   return <section className="telemetry-variable-preview" aria-live="polite">
     <header><div><span className="eyebrow">Selected variable preview</span><strong>{preview?.signalDisplayName ?? 'Loading recent history…'}</strong></div><div className="telemetry-preview-source-control"><button type="button" className="secondary-action" aria-label="Previous preview source" title="Previous preview source" disabled={options.length <= 1} onClick={() => { const next = adjacentPreviewOption(options, selectedOption, -1); if (next) onOptionChange(next) }}>←</button><label>Preview source<select value={selectedOption ? `${selectedOption.pressKey}:${selectedOption.deckNumber ?? ''}` : ''} onChange={(event) => { const next = options.find((option) => `${option.pressKey}:${option.deckNumber ?? ''}` === event.target.value); if (next) onOptionChange(next) }}>{options.map((option) => <option key={`${option.pressKey}:${option.deckNumber ?? ''}`} value={`${option.pressKey}:${option.deckNumber ?? ''}`}>{option.label}</option>)}</select></label><button type="button" className="secondary-action" aria-label="Next preview source" title="Next preview source" disabled={options.length <= 1} onClick={() => { const next = adjacentPreviewOption(options, selectedOption, 1); if (next) onOptionChange(next) }}>→</button></div></header>
     {loading && <p>Loading a compact recent preview…</p>}
     {error && <p role="alert">{error}</p>}
-    {preview && <><div className="telemetry-variable-preview__identity"><span>{preview.displayName}{preview.deckNumber ? ` · Deck ${preview.deckNumber}` : ''}</span><span>{preview.dataType}{preview.sourceUnit ? ` · ${preview.sourceUnit}` : ''}</span><small title={preview.rawIdentity}>{preview.rawIdentity}</small></div>{!preview.observations.length ? <p>No usable recent history was returned for this source. You can still choose another compatible source.</p> : preview.dataKind === 'numeric' ? <><SynchronizedTimeline fromUtc={preview.fromUtc} toUtc={preview.toUtc} intervalTracks={[]} numericTracks={[{ id: 'variable-preview', label: preview.signalDisplayName, unit: preview.sourceUnit, samples: numericSamples, interpolation: 'step', connectObservedGaps: true, holdLastObservation: true }]} minimumCanvasWidth={420} ariaLabel={`${preview.signalDisplayName} recent preview`} /><div className="telemetry-variable-preview__summary"><span>Latest <strong>{scalar(latest?.value)}</strong></span><span>Minimum <strong>{numericValues.length ? number(Math.min(...numericValues)) : '—'}</strong></span><span>Maximum <strong>{numericValues.length ? number(Math.max(...numericValues)) : '—'}</strong></span><span>{latest ? `${formatPlantDateTime(latest.atUtc)} CT` : 'No timestamp'}</span></div></> : <><SynchronizedTimeline fromUtc={preview.fromUtc} toUtc={preview.toUtc} intervalTracks={[{ id: 'variable-preview-state', label: preview.signalDisplayName, intervals: previewIntervals(preview) }]} minimumCanvasWidth={420} ariaLabel={`${preview.signalDisplayName} recent state preview`} /><div className="telemetry-variable-preview__changes"><strong>Current: {scalar(latest?.value)}</strong><span className="telemetry-variable-preview__previous">Previous: {scalar(recentStates[1]?.value)}</span>{recentStates.slice(1).map((item, index) => <span key={`${item.atUtc}:${index}`}>{scalar(item.value)} → {scalar(recentStates[index]?.value)} · {formatPlantDateTime(recentStates[index]!.atUtc)} CT</span>)}</div></>}</>}
+    {preview && <><div className="telemetry-variable-preview__identity"><span>{preview.displayName}{preview.deckNumber ? ` · Deck ${preview.deckNumber}` : ''}</span><span>{preview.dataType}{preview.sourceUnit ? ` · ${preview.sourceUnit}` : ''}</span><small title={preview.rawIdentity}>{preview.rawIdentity}</small></div>{!preview.observations.length ? <p>No usable recent history was returned for this source. You can still choose another compatible source.</p> : preview.dataKind === 'numeric' ? <><SynchronizedTimeline fromUtc={preview.fromUtc} toUtc={preview.toUtc} intervalTracks={[]} numericTracks={[{ id: 'variable-preview', label: preview.signalDisplayName, unit: preview.sourceUnit, samples: numericSamples, interpolation: 'step', connectObservedGaps: true, holdLastObservation: true }]} minimumCanvasWidth={420} ariaLabel={`${preview.signalDisplayName} recent preview`} /><div className="telemetry-variable-preview__summary"><span>Latest <strong>{scalar(latest?.value)}</strong></span><span>Minimum <strong>{numericValues.length ? number(Math.min(...numericValues)) : '—'}</strong></span><span>Maximum <strong>{numericValues.length ? number(Math.max(...numericValues)) : '—'}</strong></span><span>{latest ? `${formatPlantDateTime(latest.atUtc)} CT` : 'No timestamp'}</span></div></> : <><SynchronizedTimeline fromUtc={preview.fromUtc} toUtc={preview.toUtc} intervalTracks={[{ id: 'variable-preview-state', label: preview.signalDisplayName, intervals: previewIntervals(preview, stateTimeline!) }]} renderInspectionTooltip={(atUtc) => <PreviewStateInspectionTooltip preview={preview} timeline={stateTimeline!} atUtc={atUtc} />} minimumCanvasWidth={420} ariaLabel={`${preview.signalDisplayName} recent state preview`} /><div className="telemetry-variable-preview__changes"><strong>Current: {scalar(stateTimeline?.currentValue)}</strong><span className="telemetry-variable-preview__previous">Previous: {scalar(stateTimeline?.previousValue)}</span>{recentStates.slice(1).map((item, index) => <span key={`${item.atUtc}:${index}`}>{scalar(item.value)} → {scalar(recentStates[index]?.value)} · {formatPlantDateTime(recentStates[index]!.atUtc)} CT</span>)}</div></>}</>}
   </section>
 }
 

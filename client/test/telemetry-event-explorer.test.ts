@@ -4,7 +4,7 @@ import { describe, it } from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { areaFromPathname, areaPath } from '../src/navigation'
-import { adjacentPreviewOption, TelemetryEventExplorerPage, telemetryEventMarkers, type PreviewOption } from '../src/components/TelemetryEventExplorerPage'
+import { adjacentPreviewOption, reconstructPreviewStateTimeline, TelemetryEventExplorerPage, telemetryEventMarkers, type PreviewOption } from '../src/components/TelemetryEventExplorerPage'
 import type { TelemetryEventOccurrence } from '../src/types/api'
 
 const pageSource = readFileSync(new URL('../src/components/TelemetryEventExplorerPage.tsx', import.meta.url), 'utf8')
@@ -68,6 +68,51 @@ describe('Telemetry Event Explorer UI', () => {
     assert.match(pageSource, /aria-label="Next preview source"/)
     assert.match(pageSource, /disabled=\{options\.length <= 1\}/)
     assert.match(styles, /telemetry-variable-preview__previous/)
+  })
+
+  it('reconstructs repeated strings and booleans as proportional distinct-state intervals', () => {
+    const at = (minute: number) => `2026-08-17T12:${String(minute).padStart(2, '0')}:00.000Z`
+    const state = (minute: number, value: string | boolean) => ({ atUtc: at(minute), value, qualityState: 'GOOD' })
+    const strings = reconstructPreviewStateTimeline({ fromUtc: at(0), toUtc: at(50), observations: [state(0, 'A'), state(5, 'A'), state(10, 'A'), state(20, 'B'), state(30, 'B'), state(40, 'A very long categorical value that only fits wide segments'), state(50, 'A very long categorical value that only fits wide segments')] })
+    assert.deepEqual(strings.intervals.map(({ kind, value, startUtc, endUtc, durationSeconds }) => ({ kind, value, startUtc, endUtc, durationSeconds })), [
+      { kind: 'state', value: 'A', startUtc: at(0), endUtc: at(20), durationSeconds: 1_200 },
+      { kind: 'state', value: 'B', startUtc: at(20), endUtc: at(40), durationSeconds: 1_200 },
+      { kind: 'state', value: 'A very long categorical value that only fits wide segments', startUtc: at(40), endUtc: at(50), durationSeconds: 600 },
+    ])
+    assert.equal(strings.currentValue, 'A very long categorical value that only fits wide segments')
+    assert.equal(strings.previousValue, 'B')
+
+    const unchanged = reconstructPreviewStateTimeline({ fromUtc: at(0), toUtc: at(10), observations: [state(0, 'A'), state(5, 'A'), state(10, 'A')] })
+    assert.deepEqual(unchanged.intervals.map(({ kind, value }) => [kind, value]), [['state', 'A']])
+    assert.equal(unchanged.previousValue, undefined)
+
+    const booleans = reconstructPreviewStateTimeline({ fromUtc: at(0), toUtc: at(25), observations: [state(0, false), state(5, false), state(10, true), state(15, true), state(20, false), state(25, false)] })
+    assert.deepEqual(booleans.intervals.map(({ value }) => value), [false, true, false])
+    assert.equal(booleans.currentValue, false)
+    assert.equal(booleans.previousValue, true)
+  })
+
+  it('marks meaningful historian gaps without bridging state and preserves narrow transitions', () => {
+    const at = (minute: number) => `2026-08-17T12:${String(minute).padStart(2, '0')}:00.000Z`
+    const result = reconstructPreviewStateTimeline({ fromUtc: at(0), toUtc: at(30), observations: [
+      { atUtc: at(0), value: 'A', qualityState: 'GOOD' },
+      { atUtc: at(1), value: 'A', qualityState: 'GOOD' },
+      { atUtc: at(2), value: 'B', qualityState: 'GOOD' },
+      { atUtc: at(3), value: 'B', qualityState: 'GOOD' },
+      { atUtc: at(20), value: 'C', qualityState: 'GOOD' },
+      { atUtc: at(21), value: 'C', qualityState: 'GOOD' },
+      { atUtc: at(22), value: 'C', qualityState: 'GOOD' },
+    ] })
+    assert.deepEqual(result.intervals.map(({ kind, value, startUtc, endUtc }) => ({ kind, value, startUtc, endUtc })), [
+      { kind: 'state', value: 'A', startUtc: at(0), endUtc: at(2) },
+      { kind: 'state', value: 'B', startUtc: at(2), endUtc: at(3) },
+      { kind: 'gap', value: undefined, startUtc: at(3), endUtc: at(20) },
+      { kind: 'state', value: 'C', startUtc: at(20), endUtc: at(22) },
+      { kind: 'gap', value: undefined, startUtc: at(22), endUtc: at(30) },
+    ])
+    assert.match(timelineSource, /width >= 4/)
+    assert.match(pageSource, /State start/)
+    assert.match(pageSource, /Source \$\{preview\.rawIdentity\}/)
   })
 
   it('reuses the synchronized Raw Radius investigation interactions and bounded split layout', () => {

@@ -2361,6 +2361,10 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
 .telemetry-variable-preview .synchronized-timeline__axis { margin-bottom: .35rem; }
 .telemetry-variable-preview .synchronized-timeline__row { min-height: 2.35rem; margin-bottom: .2rem; }
 .telemetry-variable-preview .synchronized-timeline__track { min-height: 2.35rem; }
+.telemetry-variable-preview .synchronized-timeline__interval { border-inline-end-color: color-mix(in srgb, var(--surface-strong) 78%, transparent); font-weight: 750; text-overflow: ellipsis; }
+.telemetry-variable-preview .telemetry-variable-preview__state--0 { background: color-mix(in srgb, var(--primary) 76%, var(--text)); }
+.telemetry-variable-preview .telemetry-variable-preview__state--1 { background: color-mix(in srgb, var(--primary) 62%, var(--muted)); }
+.telemetry-variable-preview .telemetry-variable-preview__state--2 { background: color-mix(in srgb, var(--primary) 52%, var(--text-strong)); }
 .telemetry-variable-preview .synchronized-timeline__numeric { height: 4.8rem; }
 .telemetry-variable-preview__summary { display: flex; flex-wrap: wrap; gap: .35rem .8rem; padding-top: .45rem; border-top: 1px solid var(--border); color: var(--muted); font-size: .64rem; }
 .telemetry-variable-preview__changes { display: flex; flex-wrap: wrap; gap: .35rem; align-items: center; padding-top: .45rem; border-top: 1px solid var(--border); }
