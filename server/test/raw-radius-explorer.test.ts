@@ -7,6 +7,8 @@ import type { CapabilityAssessment, PressSemanticSignalEvidence, TelemetryChange
 import type { TelemetryFoundationService } from '../src/telemetry/telemetry-foundation-service.js'
 import { CURRENT_ROLL_LENGTH_CANONICAL_ID, normalizeHistorianNumber, numericSummary, observedRadiusEntrySegments, RawRadiusExplorerService, RAW_EXPLORER_LENGTH_CATALOG, RAW_EXPLORER_MAX_WINDOW_MINUTES, samplesWithSeed, stateSummary, type RawExplorerOccurrence } from '../src/raw-radius-explorer/raw-radius-explorer-service.js'
 import { InMemoryRawTelemetryReviewRepository, RawTelemetryReviewService } from '../src/raw-radius-explorer/raw-telemetry-review-service.js'
+import { ClassifiedRadiusService } from '../src/classification/classified-radius-service.js'
+import type { ClassificationService } from '../src/classification/classification-service.js'
 
 const startUtc = '2026-08-13T12:00:00.000Z'
 const endUtc = '2026-08-13T12:10:00.000Z'
@@ -275,7 +277,8 @@ describe('Raw Radius Code Explorer', () => {
       }
     }
     const telemetry = new Proxy({}, { get: () => { throw new Error('lazy Radius history must not access telemetry') } }) as TelemetryFoundationService
-    const summary = await new RawRadiusExplorerService(source, telemetry).historicalSummary({ occurrence, lookbackDays: 31, maximumOccurrences: 100 })
+    const classified = new ClassifiedRadiusService(source, {} as ClassificationService)
+    const summary = await new RawRadiusExplorerService(classified, telemetry).historicalSummary({ occurrence, lookbackDays: 31, maximumOccurrences: 100 })
     assert.deepEqual(historyInput, { pressKey: 'press3', fromUtc: '2026-07-13T12:00:00.000Z', toUtc: startUtc, identity, maximumOccurrences: 100 })
     assert.equal(summary.supportCount, 4); assert.equal(summary.scope.includes('exact Radius identity'), true)
     assert.equal(summary.metrics.medianDurationMinutes, 2.5); assert.equal(summary.metrics.durationLowerQuartileMinutes, 1); assert.equal(summary.metrics.durationUpperQuartileMinutes, 3)
