@@ -287,4 +287,13 @@ describe('Raw Radius Code Explorer client', () => {
     assert.match(pageSource, /What changed/); assert.match(pageSource, /Radius sequence/); assert.match(pageSource, /Historical context/); assert.match(pageSource, /onToggle=.*loadHistory/)
     assert.match(apiSource, /\/api\/radius\/raw-explorer\/history/); assert.match(pageSource, /raw-browser-tabs/); assert.match(pageSource, /Search telemetry/)
   })
+
+  it('clears every mounted occurrence and report before searching another exact code', () => {
+    assert.match(pageSource, /function searchAnotherCode\(\)/)
+    assert.match(pageSource, /setSelectedIdentity\(undefined\); setResult\(undefined\); setAppliedSignature\(undefined\); setOpenOccurrenceId\(undefined\)/)
+    assert.match(pageSource, /onClick=\{searchAnotherCode\}/)
+    assert.match(pageSource, /getRawRadiusEventLearningReport/)
+    assert.match(pageSource, /<EventLearningReport/)
+    assert.match(apiSource, /\/api\/radius\/raw-explorer\/report/)
+  })
 })

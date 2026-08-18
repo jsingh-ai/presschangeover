@@ -8,6 +8,7 @@ import { detectDeltaEvents, detectThresholdEvents, detectValueChangeEvents, type
 import { IndustrialAnalyticsService } from '../industrial-analytics/industrial-analytics-service.js'
 import { rankRelatedSignals, type BasicHistoricalSummary, type EvidencePhaseSummary } from '../industrial-analytics/explorer-evidence.js'
 import type { IndustrialAnalyticalObservation, IndustrialNumericSample, IndustrialStateSample } from '../industrial-analytics/contracts.js'
+import { aggregateEventFingerprints, buildOccurrenceFingerprint, compareSelectedToTypical, EVENT_LEARNING_LIMITS, telemetryCoverage, type EventLearningOccurrence, type EventLearningReport, type EventLearningSignal } from '../industrial-analytics/event-learning.js'
 
 const TWO_HOURS_MS = 2 * 60 * 60_000
 const REQUEST_CONCURRENCY = 3
@@ -353,6 +354,60 @@ export class TelemetryEventExplorerService {
       ...context.changedSignals.filter((item) => item.canonicalId !== occurrence.canonicalId || item.deckNumber !== occurrence.deckNumber).map((item) => ({ canonicalId: item.canonicalId, deckNumber: item.deckNumber, friendlyName: item.friendlyName, signalType: item.signalType, category: item.category, scope: item.scope, reasonCodes: [item.summary.kind === 'numeric' ? 'DELTA_NEAR_EVENT' as const : 'VALUE_TRANSITION' as const], timingDetail: item.summary.kind === 'numeric' ? `${item.summary.netDelta >= 0 ? '+' : ''}${item.summary.netDelta.toPrecision(3)} before target` : `${item.summary.transitions.length} nearby transition${item.summary.transitions.length === 1 ? '' : 's'}` })),
     ], occurrence.deckNumber, 5)
     return { occurrence, primary, context, evidence: { productionContext, radiusAtEvent: radiusAtEvent?.kind === 'radius' ? { eventType: radiusAtEvent.eventType, statusCode: radiusAtEvent.statusCode, statusDescription: radiusAtEvent.statusDescription } : null, phaseSummary, behavior: observations.find((item) => item.family === 'event_aligned_change' || item.family === 'value_state_transition') ?? null, persistence: observations.find((item) => item.family === 'deviation_persistence') ?? null, contextualEnvelope: observations.find((item) => item.family === 'normal_envelope_departure') ?? null, firstDivergence, suggestedSignals, observationCount: observations.length } }
+  }
+
+  async eventLearningReport(input: { occurrence: TelemetryEventOccurrence; occurrences: TelemetryEventOccurrence[] }, requestId?: string, signal?: AbortSignal): Promise<EventLearningReport> {
+    const started = this.now(); const selected = input.occurrence
+    const detail = await this.detail(selected, requestId, signal, { includeRawTelemetryDiscovery: false })
+    const sameDefinition = (item: TelemetryEventOccurrence) => item.pressKey === selected.pressKey && item.sourceKind === selected.sourceKind && item.rawIdentity === selected.rawIdentity && item.deckNumber === selected.deckNumber && item.eventType === selected.eventType && (selected.eventType !== 'value_change' || item.previousValue === selected.previousValue && item.newValue === selected.newValue)
+    const telemetryFloor = Date.parse(selected.startUtc) - EVENT_LEARNING_LIMITS.telemetryLookbackHours * 60 * 60_000
+    const comparable = input.occurrences.filter(sameDefinition).filter((item) => Date.parse(item.startUtc) >= telemetryFloor && item.occurrenceId !== selected.occurrenceId).sort((a, b) => Date.parse(a.startUtc) - Date.parse(b.startUtc)).slice(-(EVENT_LEARNING_LIMITS.maximumCohortOccurrences - 1))
+    const cohortSource = [...comparable, selected]
+    const occurrences: EventLearningOccurrence[] = cohortSource.map((item) => ({ occurrenceId: item.occurrenceId, startUtc: item.startUtc, endUtc: item.endUtc, label: `${item.signalDisplayName} ${item.eventType.replace('_', ' ')}` }))
+    const candidateIdentities = [
+      ...(selected.sourceKind === 'canonical' && selected.canonicalId ? [{ canonicalId: selected.canonicalId, deckNumber: selected.deckNumber, friendlyName: selected.signalDisplayName, signalType: selected.dataKind === 'numeric' ? 'continuous' as const : 'state_event' as const, category: 'target' }] : []),
+      { canonicalId: 'machine.speed.actual', deckNumber: null, friendlyName: 'Actual Speed', signalType: 'continuous' as const, category: 'speed' },
+      ...detail.context.changedSignals.map((item) => ({ canonicalId: item.canonicalId, deckNumber: item.deckNumber, friendlyName: item.friendlyName, signalType: item.signalType, category: item.category })),
+    ]
+    const uniqueCandidates = [...new Map(candidateIdentities.map((item) => [`${item.canonicalId}:${item.deckNumber ?? ''}`, item])).values()].slice(0, EVENT_LEARNING_LIMITS.maximumCandidateSignals)
+    const selectors: TelemetrySemanticSelector[] = uniqueCandidates.map((item) => ({ canonicalId: item.canonicalId, ...(item.deckNumber === null ? {} : { deckNumber: item.deckNumber }), representation: item.signalType === 'state_event' ? 'changes' : 'samples' }))
+    const contextMs = EVENT_LEARNING_LIMITS.contextMinutes * 60_000
+    const analysisOccurrences = occurrences.map((item) => ({ ...item, endUtc: new Date(Math.min(Date.parse(item.endUtc), Date.parse(item.startUtc) + contextMs)).toISOString() }))
+    const cohortFromUtc = new Date(Math.min(...analysisOccurrences.map((item) => Date.parse(item.startUtc))) - contextMs).toISOString(); const cohortToUtc = new Date(Math.max(...analysisOccurrences.map((item) => Date.parse(item.endUtc))) + contextMs).toISOString()
+    const loaded = await this.history(selected.pressKey, cohortFromUtc, cohortToUtc, selectors, requestId, signal)
+    const definitions = new Map(uniqueCandidates.map((item) => [`${item.canonicalId}:${item.deckNumber ?? ''}`, item]))
+    const signals: EventLearningSignal[] = loaded.signals.flatMap((item) => {
+      const definition = definitions.get(`${item.canonicalId}:${item.deckNumber ?? ''}`); if (!definition) return []
+      return [{ canonicalId: item.canonicalId, deckNumber: item.deckNumber, friendlyName: definition.friendlyName, category: definition.category, signalType: definition.signalType, sourceUnit: item.sourceUnit, valueKind: item.valueKind ?? null, samples: [...(item.seed ? [item.seed] : []), ...item.samples], changes: item.changes }]
+    })
+    const fingerprints = analysisOccurrences.map((occurrence) => buildOccurrenceFingerprint(occurrence, signals)); const selectedFingerprint = fingerprints.find(({ occurrenceId }) => occurrenceId === selected.occurrenceId) ?? buildOccurrenceFingerprint(analysisOccurrences.at(-1)!, signals)
+    const aggregated = aggregateEventFingerprints(fingerprints, signals); const comparison = compareSelectedToTypical(selectedFingerprint, aggregated.findings)
+    const relationships: EventLearningReport['relationships'] = []
+    const targetSignal = selected.canonicalId ? signals.find((item) => item.canonicalId === selected.canonicalId && item.deckNumber === selected.deckNumber) : undefined
+    if (targetSignal) for (const candidate of signals.filter((item) => item !== targetSignal && item.samples.some(({ value }) => typeof value === 'number')).slice(0, 5)) {
+      const left = targetSignal.samples.flatMap((item): IndustrialNumericSample[] => typeof item.value === 'number' ? [{ atUtc: item.observedAtUtc, value: item.value, qualityState: item.qualityState }] : []); const right = candidate.samples.flatMap((item): IndustrialNumericSample[] => typeof item.value === 'number' ? [{ atUtc: item.observedAtUtc, value: item.value, qualityState: item.qualityState }] : [])
+      const levels = this.analytics.numericRelationship({ pressKey: selected.pressKey, leftVariableId: targetSignal.canonicalId, rightVariableId: candidate.canonicalId, range: { start: cohortFromUtc, end: cohortToUtc }, left, right, basis: 'LEVELS' }); const differences = this.analytics.numericRelationship({ pressKey: selected.pressKey, leftVariableId: targetSignal.canonicalId, rightVariableId: candidate.canonicalId, range: { start: cohortFromUtc, end: cohortToUtc }, left, right, basis: 'DIFFERENCES' })
+      for (const result of [levels, differences]) if (result?.qualified) relationships.push({ signal: candidate.friendlyName, mode: result.basis, interpretation: `${result.basis === 'DIFFERENCES' ? 'Change-based' : 'Level-based'} association was observed with ${result.sampleCount} aligned pairs; this is a condition to investigate, not causal evidence.`, metrics: { pearson: result.pearson, spearman: result.spearman, bestLagMinutes: result.bestLagMinutes, bestLagCorrelation: result.bestLagCorrelation, alignedPairCount: result.sampleCount, pairCoveragePercent: result.coveragePercent, temporalCoveragePercent: result.temporalCoveragePercent } })
+    }
+    for (const finding of aggregated.findings.filter((item) => item.kind === 'state' && item.observedOccurrenceCount >= 2).slice(0, 3)) relationships.push({ signal: finding.friendlyName, mode: 'TRANSITION_COOCCURRENCE', interpretation: `${finding.description} was observed in ${finding.observedOccurrenceCount}/${finding.validOccurrenceCount} target events with valid coverage.`, metrics: { occurrenceRate: finding.occurrenceRate, medianRelativeMinutes: finding.medianRelativeMinutes, provenance: finding.provenance } })
+    const target: EventLearningReport['target'] = { signal: selected.signalDisplayName, detector: selected.eventType, press: selected.displayName, deck: selected.deckNumber, durationSeconds: selected.durationSeconds, sourceUnit: selected.sourceUnit }
+    if (selected.eventType === 'threshold') Object.assign(target, { entryValue: selected.entryValue ?? null, extremeValue: selected.extremeValue ?? null, returnValue: selected.returnValue ?? null })
+    if (selected.eventType === 'delta') Object.assign(target, { startingValue: selected.baselineValue ?? null, endingValue: selected.triggerValue ?? null, delta: selected.actualDelta ?? null, direction: selected.direction ?? null, elapsedSeconds: selected.elapsedSeconds ?? null })
+    if (selected.eventType === 'value_change') Object.assign(target, { oldValue: selected.previousValue ?? null, newValue: selected.newValue ?? null, transitionAtUtc: selected.transitionAtUtc ?? selected.startUtc })
+    const selectedFindings = selectedFingerprint.patterns.slice(0, EVENT_LEARNING_LIMITS.maximumFindings)
+    const response: EventLearningReport = {
+      version: 1, reportKind: 'telemetry_event', title: 'Telemetry event learning report', target, selectedOccurrence: occurrences.at(-1)!, recordedTime: { startUtc: selected.startUtc, endUtc: selected.endUtc },
+      physicalTiming: detail.context.evidence.physicalAlignment, productionContext: detail.evidence.productionContext,
+      radiusContext: detail.evidence.radiusAtEvent ? [{ relationship: 'AT_EVENT', ...detail.evidence.radiusAtEvent }] : [],
+      selectedFindings, phaseComparison: selectedFindings.slice(0, 6).map((item) => ({ canonicalId: item.canonicalId, deckNumber: item.deckNumber, friendlyName: item.friendlyName, before: item.phase.before, event: item.phase.event, recovery: item.phase.recovery })),
+      historicalFingerprint: { requestedOccurrences: input.occurrences.filter(sameDefinition).length, qualifiedOccurrences: fingerprints.filter((item) => item.coveredSignalKeys.length > 0).length, excludedOccurrences: Math.max(0, input.occurrences.filter(sameDefinition).length - fingerprints.filter((item) => item.coveredSignalKeys.length > 0).length), radiusCoverage: null, telemetryCoverage: telemetryCoverage(signals), findings: aggregated.findings },
+      typicalSequence: aggregated.typicalSequence, relationships: relationships.sort((a, b) => Number(b.metrics.alignedPairCount ?? b.metrics.occurrenceRate ?? 0) - Number(a.metrics.alignedPairCount ?? a.metrics.occurrenceRate ?? 0)).slice(0, 6), occurrenceComparison: comparison,
+      controls: { status: 'UNAVAILABLE', reason: 'A safe same-context non-target cohort was not available from the bounded explorer result.', comparisons: [] },
+      occurrenceMatrix: fingerprints.map((item) => ({ occurrenceId: item.occurrenceId, startUtc: item.startUtc, patterns: item.patterns.map((pattern) => `${pattern.canonicalId}:${pattern.deckNumber ?? ''}`) })),
+      coverage: { candidateSignals: signals.length, automaticRawSignalScans: 0, limitations: ['Automatic related-signal analysis is canonical-only.', `The cohort is limited to ${EVENT_LEARNING_LIMITS.maximumCohortOccurrences} recent occurrences within ${EVENT_LEARNING_LIMITS.telemetryLookbackHours} hours.`, `Each occurrence analysis window is capped at ${EVENT_LEARNING_LIMITS.contextMinutes} minutes before, during, and after the target.`, 'Associations, ordering, and correlations do not establish causation.', ...(aggregated.typicalSequence.length ? [] : ['A typical sequence requires at least two occurrences and 50% valid-coverage support.'])] },
+      performance: { semanticHistoryRequests: detail.context.performance.semanticHistoryRequests + loaded.requestCount, cohortOccurrences: occurrences.length, totalMs: this.now() - started, payloadBytes: 0 },
+    }
+    response.performance.payloadBytes = Buffer.byteLength(JSON.stringify(response)); return response
   }
 
   historicalSummary(input: { occurrence: TelemetryEventOccurrence; occurrences: TelemetryEventOccurrence[] }): BasicHistoricalSummary {

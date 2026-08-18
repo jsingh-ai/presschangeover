@@ -971,3 +971,33 @@ export interface TelemetryEventDetail {
   context: RawExplorerDetail
   evidence: { productionContext: Array<{ field: string; value: string | number | boolean }>; radiusAtEvent: { eventType: string; statusCode: string | null; statusDescription: string } | null; phaseSummary: EvidencePhaseSummary; behavior: ExplorerAnalyticalObservation | null; persistence: ExplorerAnalyticalObservation | null; contextualEnvelope: ExplorerAnalyticalObservation | null; firstDivergence: ExplorerAnalyticalObservation | null; suggestedSignals: RelatedSignalSuggestion[]; observationCount: number }
 }
+
+export interface EventSignalPattern {
+  canonicalId: string; deckNumber: number | null; friendlyName: string; category: string; sourceUnit: string | null
+  kind: 'numeric' | 'state'; provenance: 'AUTHORITATIVE' | 'INFERRED_LOW_CARDINALITY' | 'NUMERIC'; description: string; direction: 'increase' | 'decrease' | 'transition'
+  magnitude: number | null; oldValue: TelemetryEventScalar | null; newValue: TelemetryEventScalar | null; atUtc: string; relativeMinutes: number; persistenceMinutes: number | null; reason: string; coverageObservations: number
+  phase: { before: string; event: string; recovery: string }
+}
+
+export interface EventFingerprintFinding extends EventSignalPattern {
+  validOccurrenceCount: number; observedOccurrenceCount: number; occurrenceRate: number; medianRelativeMinutes: number; relativeMinutesIqr: { lower: number; upper: number } | null; medianMagnitude: number | null; occurrenceIds: string[]
+}
+
+export interface EventLearningReport {
+  version: 1; reportKind: 'raw_radius' | 'telemetry_event'; title: string
+  target: Record<string, string | number | boolean | null>
+  selectedOccurrence: { occurrenceId: string; startUtc: string; endUtc: string; label: string }
+  recordedTime: { startUtc: string; endUtc: string }; physicalTiming: object
+  productionContext: Array<{ field: string; value: string | number | boolean }>
+  radiusContext: Array<{ relationship: string; eventType: string; statusCode: string | null; statusDescription: string }>
+  selectedFindings: EventSignalPattern[]
+  phaseComparison: Array<{ canonicalId: string; deckNumber: number | null; friendlyName: string; before: string; event: string; recovery: string }>
+  historicalFingerprint: { requestedOccurrences: number; qualifiedOccurrences: number; excludedOccurrences: number; radiusCoverage: { startUtc: string; endUtc: string } | null; telemetryCoverage: { startUtc: string; endUtc: string } | null; findings: EventFingerprintFinding[] }
+  typicalSequence: Array<{ label: string; canonicalId: string; deckNumber: number | null; supportCount: number; validOccurrenceCount: number; medianRelativeMinutes: number; relativeMinutesIqr: { lower: number; upper: number } | null }>
+  relationships: Array<{ signal: string; mode: 'LEVELS' | 'DIFFERENCES' | 'TRANSITION_COOCCURRENCE'; interpretation: string; metrics: Record<string, string | number | boolean | null> }>
+  occurrenceComparison: { common: string[]; exceptions: string[] }
+  controls: { status: 'AVAILABLE' | 'UNAVAILABLE'; reason: string; comparisons: Array<{ label: string; targetRate: number; controlRate: number }> }
+  occurrenceMatrix: Array<{ occurrenceId: string; startUtc: string; patterns: string[] }>
+  coverage: { candidateSignals: number; automaticRawSignalScans: 0; limitations: string[] }
+  performance: { semanticHistoryRequests: number; cohortOccurrences: number; totalMs: number; payloadBytes: number }
+}

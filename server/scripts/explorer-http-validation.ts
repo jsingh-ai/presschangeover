@@ -3,10 +3,12 @@ import { supportsExplorerHttpValidation } from '../src/explorer-validation-capab
 import type { RadiusHealth, RadiusPressKey } from '../src/radius/models.js'
 import type { RawRadiusExplorerService, RawExplorerIdentity, RawExplorerOccurrence, RawExplorerSetup } from '../src/raw-radius-explorer/raw-radius-explorer-service.js'
 import type { TelemetryEventExplorerService, TelemetryEventOccurrence, TelemetryEventSearchInput, TelemetryEventSource } from '../src/telemetry-event-explorer/telemetry-event-explorer-service.js'
+import type { EventLearningReport } from '../src/industrial-analytics/event-learning.js'
 
 type RawExplore = Awaited<ReturnType<RawRadiusExplorerService['explore']>>
 type RawDetail = Awaited<ReturnType<RawRadiusExplorerService['detail']>>
 type RawHistory = Awaited<ReturnType<RawRadiusExplorerService['historicalSummary']>>
+type RawPlot = Awaited<ReturnType<RawRadiusExplorerService['plot']>>
 type TelemetryCatalog = Awaited<ReturnType<TelemetryEventExplorerService['catalog']>>
 type TelemetryPreview = Awaited<ReturnType<TelemetryEventExplorerService['preview']>>
 type TelemetrySearch = Awaited<ReturnType<TelemetryEventExplorerService['search']>>
@@ -86,11 +88,15 @@ export class ProcessIntelligenceExplorerHttpClient {
   rawExplore(input: RawExplorerSetup) { return this.request<RawExplore>('POST', '/api/radius/raw-explorer/explore', input) }
   rawDetail(occurrence: RawExplorerOccurrence, changeLookbackMinutes: number) { return this.request<RawDetail>('POST', '/api/radius/raw-explorer/detail', { occurrence, changeLookbackMinutes, includeRawTelemetryDiscovery: false }) }
   rawHistory(occurrence: RawExplorerOccurrence) { return this.request<RawHistory>('POST', '/api/radius/raw-explorer/history', { occurrence, lookbackDays: 31, maximumOccurrences: 100 }) }
+  rawPlot(occurrence: RawExplorerOccurrence, signal: Parameters<RawRadiusExplorerService['plot']>[0]['signal']) { return this.request<RawPlot>('POST', '/api/radius/raw-explorer/plot', { occurrence, signal }) }
+  rawReport(occurrence: RawExplorerOccurrence) { return this.request<EventLearningReport>('POST', '/api/radius/raw-explorer/report', { occurrence }) }
   telemetryCatalog() { return this.request<TelemetryCatalog>('GET', '/api/telemetry/event-explorer/catalog') }
   telemetryPreview(input: { source: TelemetryEventSource; pressKey: RadiusPressKey; deckNumber: number | null; fromUtc: string; toUtc: string }) { return this.request<TelemetryPreview>('POST', '/api/telemetry/event-explorer/preview', input) }
   telemetrySearch(input: TelemetryEventSearchInput) { return this.request<TelemetrySearch>('POST', '/api/telemetry/event-explorer/search', input) }
   telemetryDetail(occurrence: TelemetryEventOccurrence) { return this.request<TelemetryDetail>('POST', '/api/telemetry/event-explorer/detail', { occurrence, includeRawTelemetryDiscovery: false }) }
   telemetryHistory(occurrence: TelemetryEventOccurrence, occurrences: TelemetryEventOccurrence[]) { return this.request<TelemetryHistory>('POST', '/api/telemetry/event-explorer/history', { occurrence, occurrences: occurrences.slice(0, 500) }) }
+  telemetryPlot(occurrence: TelemetryEventOccurrence, signal: Parameters<TelemetryEventExplorerService['plot']>[1]) { return this.request<RawPlot>('POST', '/api/telemetry/event-explorer/plot', { occurrence, signal }) }
+  telemetryReport(occurrence: TelemetryEventOccurrence, occurrences: TelemetryEventOccurrence[]) { return this.request<EventLearningReport>('POST', '/api/telemetry/event-explorer/report', { occurrence, occurrences: occurrences.slice(0, 500) }) }
 }
 
 function bytes(value: unknown) { return Buffer.byteLength(JSON.stringify(value), 'utf8') }

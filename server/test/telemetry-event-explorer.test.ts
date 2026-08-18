@@ -8,7 +8,7 @@ import type { PressSemanticSignalWithIdentity, TelemetryFoundationService } from
 
 const fromUtc = '2026-08-17T10:00:00.000Z'
 const toUtc = '2026-08-17T10:10:00.000Z'
-const radius = { getHealth: async () => ({ status: 'healthy', configured: true }), getOverview: async () => { throw new Error('unused') }, getPressEpisodes: async () => { throw new Error('unused') }, getEpisode: async () => { throw new Error('unused') } } as RadiusService
+const radius = { getHealth: async () => ({ status: 'healthy', configured: true }), getOverview: async () => { throw new Error('unused') }, getPressEpisodes: async () => { throw new Error('unused') }, getEpisode: async () => { throw new Error('unused') }, getRawTimeline: async (pressKey: string, rangeFromUtc: string, rangeToUtc: string) => ({ pressKey, displayName: 'Press 14', fromUtc: rangeFromUtc, toUtc: rangeToUtc, segments: [] }) } as RadiusService
 
 function history(selector: TelemetrySemanticSelector, pressKey: string): PressSemanticSignalWithIdentity {
   const sample = (minute: number, value: number | boolean | string, valueKind: 'numeric' | 'boolean' | 'string' = 'numeric') => ({ observedAtUtc: `2026-08-17T10:0${minute}:00.000Z`, receivedAtUtc: `2026-08-17T10:0${minute}:00.000Z`, sourceTimestampUtc: `2026-08-17T10:0${minute}:00.000Z`, qualityState: 'GOOD', valueKind, value })
@@ -24,6 +24,7 @@ function fixture() {
       return { pressKey, displayName: pressKey === 'press14' ? 'Press 14' : 'Press 15', capabilities: [{ canonicalId: 'anilox.drive.temperature.actual', state: 'SUPPORTED', deckNumbers: [1, 2], historyQueryable: true, evidenceKind: 'semantic_history' }, { canonicalId: 'production.job', state: 'SUPPORTED', deckNumbers: [], historyQueryable: true, evidenceKind: 'semantic_history' }, { canonicalId: 'deck.active', state: 'SUPPORTED', deckNumbers: [1, 2], historyQueryable: true, evidenceKind: 'semantic_history' }] }
     } },
     semanticHistoryWithIdentity: async (pressKey: string, query: { fromUtc: string; toUtc: string; signals: TelemetrySemanticSelector[] }) => { calls.push({ pressKey, selectors: query.signals, fromUtc: query.fromUtc, toUtc: query.toUtc }); return { signals: query.signals.map((selector) => history(selector, pressKey)) } },
+    semanticHistory: async (pressKey: string, query: { fromUtc: string; toUtc: string; signals: TelemetrySemanticSelector[] }) => ({ signals: query.signals.map((selector) => { const value = history(selector, pressKey); return { canonicalId: value.canonicalId, deckNumber: value.deckNumber, capabilityState: value.capabilityState, observationState: value.observationState, mappingStatus: value.mappingStatus, sourceUnit: value.sourceUnit, canonicalUnitStatus: value.canonicalUnitStatus, representation: value.representation, seed: value.seed, samples: value.samples, changes: value.changes } }) }),
     rawCatalog: async (pressKey: string) => Array.from({ length: 120 }, (_, index) => ({ id: index + 1, sourceId: 1, signalId: `${pressKey}.raw.signal.${String(index).padStart(3, '0')}`, displayName: index === 117 ? 'Late Boolean Flag' : index === 118 ? 'Late Job Name' : index === 119 ? 'Container Payload' : `Raw Signal ${index}`, sourceUnit: index === 0 ? 'degF' : null, valueKind: index === 117 ? 'boolean' : index === 118 ? 'string' : index === 119 ? 'object' : 'numeric', enabled: true })),
     rawHistory: async (pressKey: string, rawIdentity: string, rangeFromUtc: string, rangeToUtc: string) => {
       const index = Number(rawIdentity.split('.').at(-1)); const values: unknown[] = index === 117 ? ['', false, false, true] : index === 118 ? ['ABC', 'ABC', 'XYZ'] : index === 119 ? [{ nested: true }] : index === 116 ? [] : [120, 125, 123]
@@ -98,5 +99,14 @@ describe('Telemetry Event Explorer service', () => {
     const supplied = Array.from({ length: 600 }, (_item, index) => ({ ...selected, occurrenceId: `event-${index}`, durationSeconds: index + 1 }))
     const summary = service.historicalSummary({ occurrence: selected, occurrences: supplied })
     assert.equal(summary.supportCount, 500); assert.equal(summary.metrics.truncatedAt, 500); assert.match(summary.scope, /exact source identity/); assert.doesNotMatch(summary.limitations.join(' '), /cause|control cohort/i)
+  })
+
+  it('builds the canonical-only bounded target-event report through shared fingerprints', async () => {
+    const { service, calls } = fixture(); const result = await service.search({ fromUtc, toUtc, source: { kind: 'canonical', canonicalId: 'anilox.drive.temperature.actual' }, pressKey: 'press14', deckNumber: 1, rule: { kind: 'threshold', operator: '>', threshold: 200 }, chartContextMinutes: 20 }); const selected = result.occurrences[0]!
+    const report = await service.eventLearningReport({ occurrence: selected, occurrences: result.occurrences })
+    assert.equal(report.reportKind, 'telemetry_event'); assert.equal(report.coverage.automaticRawSignalScans, 0); assert.ok(report.performance.payloadBytes > 0)
+    assert.ok(report.performance.cohortOccurrences <= 30); assert.ok(report.coverage.candidateSignals <= 12)
+    assert.ok(calls.every((call) => Date.parse(call.toUtc) - Date.parse(call.fromUtc) <= 2 * 60 * 60_000))
+    assert.match(report.coverage.limitations.join(' '), /canonical-only|do not establish causation/i)
   })
 })

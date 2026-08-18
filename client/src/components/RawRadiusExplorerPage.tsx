@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { DateTime } from 'luxon'
-import { exploreRawRadius, getRawRadiusHistoricalSummary, getRawRadiusIdentities, getRawRadiusOccurrenceDetail, plotRawRadiusSignal, plotRawUnmappedSignal, setRawTelemetryReview } from '../api/process-intelligence-api'
+import { exploreRawRadius, getRawRadiusEventLearningReport, getRawRadiusHistoricalSummary, getRawRadiusIdentities, getRawRadiusOccurrenceDetail, plotRawRadiusSignal, plotRawUnmappedSignal, setRawTelemetryReview } from '../api/process-intelligence-api'
 import { SynchronizedTimeline, type TimelineIntervalItem, type TimelineIntervalTrack, type TimelineNumericTrack } from './SynchronizedTimeline'
 import { createCustomRange, createPresetRange, defaultCustomValues, formatPlantDateTime, formatSelectedRange, PLANT_TIME_ZONE, RangeValidationError, restoreSelectedRange, type SelectedRange } from '../time-ranges'
-import type { BasicHistoricalSummary, RawExplorerCategory, RawExplorerChangedSignal, RawExplorerDetail, RawExplorerIdentity, RawExplorerNumericSummary, RawExplorerOccurrence, RawExplorerPlotResult, RawExplorerResult, RawExplorerSignalHistory, RawExplorerStateSummary, RawRadiusPhase, RawTelemetryReviewStatus, RawTelemetryScalar, RawTelemetryValue, RawUnmappedChangedSignal, RawUnmappedHistory, RawUnmappedPlotResult } from '../types/api'
+import type { BasicHistoricalSummary, EventLearningReport as EventLearningReportContract, EventSignalPattern, RawExplorerCategory, RawExplorerChangedSignal, RawExplorerDetail, RawExplorerIdentity, RawExplorerNumericSummary, RawExplorerOccurrence, RawExplorerPlotResult, RawExplorerResult, RawExplorerSignalHistory, RawExplorerStateSummary, RawRadiusPhase, RawTelemetryReviewStatus, RawTelemetryScalar, RawTelemetryValue, RawUnmappedChangedSignal, RawUnmappedHistory, RawUnmappedPlotResult } from '../types/api'
 import type { TimedNumericSample } from '../types/evidence'
 import { safeEngineeringSourceUnit } from './EngineeringTelemetryInspector'
+import { EventLearningReport } from './EventLearningReport'
 
 const MAX_WINDOW_MINUTES = 1_440
 export const CURRENT_ROLL_LENGTH_CANONICAL_ID = 'production.roll.length.actual'
@@ -339,6 +340,9 @@ function OccurrenceCard({ occurrence, lookbackMinutes, contextMinutes, expanded,
   const [history, setHistory] = useState<BasicHistoricalSummary>()
   const [historyLoading, setHistoryLoading] = useState(false)
   const [historyError, setHistoryError] = useState<string>()
+  const [report, setReport] = useState<EventLearningReportContract>()
+  const [reportLoading, setReportLoading] = useState(false)
+  const [reportError, setReportError] = useState<string>()
   const sidebarRef = useRef<HTMLElement>(null)
   const sidebarScrollTop = useRef(0)
 
@@ -350,6 +354,13 @@ function OccurrenceCard({ occurrence, lookbackMinutes, contextMinutes, expanded,
     void detailQueue.run(() => getRawRadiusOccurrenceDetail(occurrence, lookbackMinutes, controller.signal)).then((next) => { if (!controller.signal.aborted) setDetail(next) }).catch((error) => { detailRequested.current = false; if (error?.name !== 'AbortError') setDetailError('This occurrence could not load. No other occurrence telemetry was requested at the same time.') }).finally(() => { if (!controller.signal.aborted) setDetailLoading(false) })
     return () => { controller.abort(); detailRequested.current = false; setDetailLoading(false) }
   }, [expanded, detail, detailAttempt, occurrence, lookbackMinutes])
+
+  useEffect(() => {
+    if (!expanded || !detail || report || reportLoading) return
+    const controller = new AbortController(); setReportLoading(true); setReportError(undefined)
+    void getRawRadiusEventLearningReport(occurrence, controller.signal).then((value) => { if (!controller.signal.aborted) setReport(value) }).catch((caught) => { if ((caught as Error).name !== 'AbortError') setReportError('The bounded event report could not be generated. Manual evidence remains available above.') }).finally(() => { if (!controller.signal.aborted) setReportLoading(false) })
+    return () => controller.abort()
+  }, [expanded, detail, occurrence, report])
 
   function retryDetail() {
     detailRequested.current = false
@@ -500,6 +511,9 @@ function OccurrenceCard({ occurrence, lookbackMinutes, contextMinutes, expanded,
         {!sidebarOpen && <button type="button" className="raw-telemetry-reopen" onClick={showSidebar}>‹ Telemetry <span>{filteredBrowserItems.length}</span></button>}
       </div>
       <section className="explorer-evidence-panels"><details open><summary>What changed</summary><div className="explorer-phase-grid">{(['before', 'during', 'after'] as const).map((phase) => { const stats = detail.evidence.behavior[phase]; return <div key={phase}><span>{phase}</span><strong>{stats ? `Median ${formatRawExplorerNumber(stats.median)}` : 'Insufficient support'}</strong>{stats && <small>Min {formatRawExplorerNumber(stats.minimum)} · Max {formatRawExplorerNumber(stats.maximum)} · Δ {formatRawExplorerNumber(stats.startEndDelta)}</small>}</div> })}</div></details><details><summary>Radius sequence</summary><div className="explorer-sequence">{detail.evidence.radiusSequence.map((item) => <div key={item.relationship}><span>{item.relationship}</span><strong>{item.eventType} / {item.statusCode ?? '—'} / {item.statusDescription}</strong></div>)}</div></details><details onToggle={(event) => { if (event.currentTarget.open) loadHistory() }}><summary>Historical context</summary>{historyLoading && <p>Loading bounded same-code history…</p>}{historyError && <p role="alert">{historyError}</p>}{history && <div><p>Typical in <strong>{history.supportCount}</strong> comparable recorded occurrences.</p><p>Median duration: {history.metrics.medianDurationMinutes ?? 'Unavailable'} min · Robust middle range: {history.metrics.durationLowerQuartileMinutes ?? '—'}–{history.metrics.durationUpperQuartileMinutes ?? '—'} min</p>{history.metrics.commonPreviousIdentities && <p>Common previous: {String(history.metrics.commonPreviousIdentities)}</p>}{history.metrics.commonNextIdentities && <p>Common next: {String(history.metrics.commonNextIdentities)}</p>}<small>{history.limitations[0]}</small></div>}</details></section>
+      {reportLoading && <div className="event-report-loading" role="status">Building bounded event-learning report…</div>}
+      {reportError && <div className="scope-progress scope-progress--error" role="alert">{reportError}</div>}
+      {report && <EventLearningReport report={report} onPreview={(finding: EventSignalPattern) => { const item = browserItemFor(signalKey(finding)); if (item) void previewBrowserItem(item) }} onPin={(finding: EventSignalPattern) => { const item = browserItemFor(signalKey(finding)); if (item) void togglePinnedItem(item) }} isPinned={(finding) => finding.canonicalId === 'machine.speed.actual' || pinnedKeys.includes(signalKey(finding))} canInspect={(finding) => Boolean(browserItemFor(signalKey(finding)))} />}
       <details className="raw-card-diagnostics"><summary>Request diagnostics</summary><p>{detail.performance.selectorCount} discovery selectors · {detail.performance.semanticHistoryRequests} bounded history requests · {detail.performance.payloadBytes.toLocaleString()} response bytes · {Math.round(detail.performance.totalMs)} ms server time</p></details>
     </>}
   </article>
@@ -586,11 +600,17 @@ export function RawRadiusExplorerPage() {
     finally { setLoading(false) }
   }
 
+  function searchAnotherCode() {
+    setSelectedIdentity(undefined); setResult(undefined); setAppliedSignature(undefined); setOpenOccurrenceId(undefined)
+    setVisibleCount(INITIAL_OCCURRENCE_COUNT); setLoading(false); setError(undefined); setSearch(''); setSetupCollapsed(false)
+    window.history.pushState({}, '', '/raw-radius-explorer')
+  }
+
   const visibleOccurrences = result?.occurrences.slice(0, visibleCount) ?? []
   let previousPress = ''
   return <div className="raw-radius-explorer-page">
     <section className={`panel raw-explorer-setup${setupCollapsed ? ' is-collapsed' : ''}`}>
-      {result && <div className="raw-explorer-setup__collapsed" hidden={!setupCollapsed}><div><span className="eyebrow">Current exploration</span><strong>{result.setup.identity.eventType} / {result.setup.identity.statusCode} / {result.setup.identity.statusDescription}</strong><small>{result.summary.totalOccurrences.toLocaleString()} {result.summary.totalOccurrences === 1 ? 'occurrence' : 'occurrences'} · {formatPlantDateTime(result.setup.fromUtc)}–{formatPlantDateTime(result.setup.toUtc)} CT</small></div><button type="button" className="secondary-action raw-search-another" onClick={() => setSetupCollapsed(false)} aria-expanded={!setupCollapsed} aria-controls="raw-explorer-setup-fields"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 4 4" /></svg><span>Search another code</span></button></div>}
+      {result && <div className="raw-explorer-setup__collapsed" hidden={!setupCollapsed}><div><span className="eyebrow">Current exploration</span><strong>{result.setup.identity.eventType} / {result.setup.identity.statusCode} / {result.setup.identity.statusDescription}</strong><small>{result.summary.totalOccurrences.toLocaleString()} {result.summary.totalOccurrences === 1 ? 'occurrence' : 'occurrences'} · {formatPlantDateTime(result.setup.fromUtc)}–{formatPlantDateTime(result.setup.toUtc)} CT</small></div><button type="button" className="secondary-action raw-search-another" onClick={searchAnotherCode} aria-expanded={!setupCollapsed} aria-controls="raw-explorer-setup-fields"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 4 4" /></svg><span>Search another code</span></button></div>}
       <div id="raw-explorer-setup-fields" hidden={setupCollapsed}>
         <div className="raw-explorer-title"><div><span className="eyebrow">Read-only evidence workspace</span><h1>Raw Radius Code Explorer</h1><p>Choose an exact Radius-recorded state, find every occurrence, then compare its wall-clock context with actual speed and signals that changed immediately before entry.</p></div>{settingsChanged && <span className="settings-changed" role="status">Settings changed · Explore to apply</span>}</div>
         <div className="raw-setup-grid">

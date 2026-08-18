@@ -694,6 +694,10 @@ export function createApp({
     response.status(200).json(await rawRadiusExplorer.historicalSummary({ occurrence: parseRawExplorerOccurrence(raw.occurrence), lookbackDays, maximumOccurrences }))
   }))
 
+  app.post('/api/radius/raw-explorer/report', asyncRoute(async (request, response) => {
+    response.status(200).json(await rawRadiusExplorer.eventLearningReport({ occurrence: parseRawExplorerOccurrence(request.body?.occurrence) }, String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
   app.post('/api/radius/raw-explorer/plot', asyncRoute(async (request, response) => {
     if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)) throw new RequestValidationError('invalid_raw_explorer_request')
     const raw = request.body as Record<string, unknown>
@@ -747,6 +751,11 @@ export function createApp({
   app.post('/api/telemetry/event-explorer/history', asyncRoute(async (request, response) => {
     if (!Array.isArray(request.body?.occurrences) || request.body.occurrences.length > 500) throw new RequestValidationError('invalid_telemetry_event_history_bounds')
     response.status(200).json(telemetryEventExplorer.historicalSummary({ occurrence: parseTelemetryEventOccurrence(request.body?.occurrence), occurrences: request.body.occurrences.map(parseTelemetryEventOccurrence) }))
+  }))
+
+  app.post('/api/telemetry/event-explorer/report', asyncRoute(async (request, response) => {
+    if (!Array.isArray(request.body?.occurrences) || request.body.occurrences.length > 500) throw new RequestValidationError('invalid_telemetry_event_report_bounds')
+    response.status(200).json(await telemetryEventExplorer.eventLearningReport({ occurrence: parseTelemetryEventOccurrence(request.body?.occurrence), occurrences: request.body.occurrences.map(parseTelemetryEventOccurrence) }, String(response.locals.requestId), cancellationSignal(request, response)))
   }))
 
   app.post('/api/telemetry/event-explorer/plot', asyncRoute(async (request, response) => {

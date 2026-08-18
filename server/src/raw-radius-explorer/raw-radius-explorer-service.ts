@@ -9,6 +9,7 @@ import { InMemoryRawTelemetryReviewRepository, RawTelemetryReviewService, type R
 import { buildRadiusPhysicalAlignment, evidenceQuality, rankRelatedSignals, type BasicHistoricalSummary, type EvidencePhaseSummary } from '../industrial-analytics/explorer-evidence.js'
 import { describeIndustrialNumeric } from '../industrial-analytics/industrial-analytics-service.js'
 import { usableProductionContextValue } from '../industrial-analytics/production-context.js'
+import { aggregateEventFingerprints, buildOccurrenceFingerprint, compareSelectedToTypical, EVENT_LEARNING_LIMITS, telemetryCoverage, type EventLearningOccurrence, type EventLearningReport, type EventLearningSignal } from '../industrial-analytics/event-learning.js'
 
 const TWO_HOURS_MS = 2 * 60 * 60_000
 const SELECTOR_BATCH_SIZE = 50
@@ -425,6 +426,57 @@ export class RawRadiusExplorerService {
     }
     response.performance.payloadBytes = Buffer.byteLength(JSON.stringify(response))
     return response
+  }
+
+  async eventLearningReport(input: { occurrence: RawExplorerOccurrence }, requestId?: string, signal?: AbortSignal): Promise<EventLearningReport> {
+    if (!this.radius.getExactIdentityHistory) throw new RadiusUnavailableError()
+    const started = this.now(); const selected = input.occurrence
+    const detail = await this.detail({ occurrence: selected, changeLookbackMinutes: EVENT_LEARNING_LIMITS.contextMinutes }, requestId, signal, { includeRawTelemetryDiscovery: false })
+    const radiusFromUtc = new Date(Date.parse(selected.startUtc) - 31 * 24 * 60 * 60_000).toISOString()
+    const radiusHistory = await this.radius.getExactIdentityHistory({ pressKey: selected.pressKey, fromUtc: radiusFromUtc, toUtc: selected.startUtc, identity: { eventType: selected.eventType, statusCode: selected.statusCode, statusDescription: selected.statusDescription }, maximumOccurrences: 100 })
+    const telemetryFloor = Date.parse(selected.startUtc) - EVENT_LEARNING_LIMITS.telemetryLookbackHours * 60 * 60_000
+    const historical = radiusHistory.occurrences.filter((item) => Date.parse(item.startUtc) >= telemetryFloor && item.startUtc !== selected.startUtc).slice(-(EVENT_LEARNING_LIMITS.maximumCohortOccurrences - 1))
+    const occurrences: EventLearningOccurrence[] = [...historical.map((item, index) => ({ occurrenceId: `history:${item.startUtc}:${index}`, startUtc: item.startUtc, endUtc: item.endUtc, label: exactRadiusLabel(item) })), { occurrenceId: selected.occurrenceId, startUtc: selected.startUtc, endUtc: selected.endUtc, label: exactRadiusLabel(selected) }]
+    const capabilities = await this.telemetry.capabilities.get(selected.pressKey, requestId, signal)
+    const available = this.selectors(capabilities.capabilities)
+    const selectedKeys = new Set(detail.changedSignals.slice(0, EVENT_LEARNING_LIMITS.maximumCandidateSignals - 1).map(signalKey))
+    const candidates = available.filter(({ selector }) => selectedKeys.has(signalKey(selector))).slice(0, EVENT_LEARNING_LIMITS.maximumCandidateSignals - 1)
+    const selectors: TelemetrySemanticSelector[] = [{ canonicalId: 'machine.speed.actual', representation: 'samples' }, ...candidates.map(({ selector }) => selector)]
+    const contextMs = EVENT_LEARNING_LIMITS.contextMinutes * 60_000
+    const analysisOccurrences = occurrences.map((item) => ({ ...item, endUtc: new Date(Math.min(Date.parse(item.endUtc), Date.parse(item.startUtc) + contextMs)).toISOString() }))
+    const cohortFromUtc = new Date(Math.min(...analysisOccurrences.map((item) => Date.parse(item.startUtc))) - contextMs).toISOString()
+    const cohortToUtc = new Date(Math.max(...analysisOccurrences.map((item) => Date.parse(item.endUtc))) + contextMs).toISOString()
+    const loaded = await this.history(selected.pressKey, cohortFromUtc, cohortToUtc, selectors, true, requestId, signal)
+    const definitions = new Map([
+      ['machine.speed.actual:', { friendlyName: 'Actual Speed', category: 'speed', signalType: 'continuous' as const }],
+      ...candidates.map(({ item, selector }) => [signalKey(selector), { friendlyName: item.friendlyName, category: item.category, signalType: item.signalType }] as const),
+    ])
+    const signals: EventLearningSignal[] = loaded.signals.flatMap((item) => {
+      const definition = definitions.get(signalKey(item)); if (!definition) return []
+      return [{ canonicalId: item.canonicalId, deckNumber: item.deckNumber, friendlyName: definition.friendlyName, category: definition.category, signalType: definition.signalType, sourceUnit: item.sourceUnit, valueKind: item.seed?.valueKind ?? item.samples[0]?.valueKind ?? item.changes[0]?.valueKind ?? null, samples: [...(item.seed ? [item.seed] : []), ...item.samples], changes: item.changes }]
+    })
+    const fingerprints = analysisOccurrences.map((occurrence) => buildOccurrenceFingerprint(occurrence, signals))
+    const selectedFingerprint = fingerprints.find(({ occurrenceId }) => occurrenceId === selected.occurrenceId) ?? buildOccurrenceFingerprint(analysisOccurrences.at(-1)!, signals)
+    const aggregated = aggregateEventFingerprints(fingerprints, signals); const comparison = compareSelectedToTypical(selectedFingerprint, aggregated.findings)
+    const selectedFindings = selectedFingerprint.patterns.slice(0, EVENT_LEARNING_LIMITS.maximumFindings)
+    const response: EventLearningReport = {
+      version: 1, reportKind: 'raw_radius', title: 'Radius event learning report',
+      target: { eventType: selected.eventType, statusCode: selected.statusCode, statusDescription: selected.statusDescription, press: selected.displayName, durationSeconds: selected.durationSeconds },
+      selectedOccurrence: occurrences.at(-1)!, recordedTime: { startUtc: selected.startUtc, endUtc: selected.endUtc },
+      physicalTiming: detail.evidence.physicalAlignment,
+      productionContext: detail.evidence.productionContext,
+      radiusContext: detail.evidence.radiusSequence,
+      selectedFindings,
+      phaseComparison: selectedFindings.slice(0, 6).map((item) => ({ canonicalId: item.canonicalId, deckNumber: item.deckNumber, friendlyName: item.friendlyName, before: item.phase.before, event: item.phase.event, recovery: item.phase.recovery })),
+      historicalFingerprint: { requestedOccurrences: radiusHistory.matchingOccurrencesAvailable + 1, qualifiedOccurrences: fingerprints.filter((item) => item.coveredSignalKeys.length > 0).length, excludedOccurrences: Math.max(0, radiusHistory.matchingOccurrencesAvailable + 1 - fingerprints.filter((item) => item.coveredSignalKeys.length > 0).length), radiusCoverage: { startUtc: radiusHistory.examinedFromUtc, endUtc: radiusHistory.examinedToUtc }, telemetryCoverage: telemetryCoverage(signals), findings: aggregated.findings },
+      typicalSequence: aggregated.typicalSequence,
+      relationships: [], occurrenceComparison: comparison,
+      controls: { status: 'UNAVAILABLE', reason: 'Comparable non-target windows were not generated for this bounded V1 Radius report.', comparisons: [] },
+      occurrenceMatrix: fingerprints.map((item) => ({ occurrenceId: item.occurrenceId, startUtc: item.startUtc, patterns: item.patterns.map((pattern) => `${pattern.canonicalId}:${pattern.deckNumber ?? ''}`) })),
+      coverage: { candidateSignals: signals.length, automaticRawSignalScans: 0, limitations: ['Automatic analysis is limited to supported canonical signals.', `Telemetry fingerprints use at most ${EVENT_LEARNING_LIMITS.maximumCohortOccurrences} occurrences within the most recent ${EVENT_LEARNING_LIMITS.telemetryLookbackHours} hours of the selected event.`, `Each occurrence analysis window is capped at ${EVENT_LEARNING_LIMITS.contextMinutes} minutes before, during, and after entry; the recorded duration remains unchanged.`, 'Timing and repeated association do not establish causation.', ...(aggregated.typicalSequence.length ? [] : ['A typical sequence requires at least two occurrences and 50% valid-coverage support.'])] },
+      performance: { semanticHistoryRequests: detail.performance.semanticHistoryRequests + loaded.requestCount, cohortOccurrences: occurrences.length, totalMs: this.now() - started, payloadBytes: 0 },
+    }
+    response.performance.payloadBytes = Buffer.byteLength(JSON.stringify(response)); return response
   }
 
   async historicalSummary(input: { occurrence: RawExplorerOccurrence; lookbackDays?: number; maximumOccurrences?: number }): Promise<BasicHistoricalSummary> {

@@ -85,6 +85,7 @@ describe('Telemetry Event Explorer UI', () => {
     assert.match(pageSource, /setSelectedCanonicalId\(undefined\); setSelectedRaw\(undefined\)/)
     assert.match(pageSource, /setPreviewOption\(undefined\); setPreview\(undefined\); setPreviewLoading\(false\)/)
     assert.match(pageSource, /setEventType\('threshold'\); setOperator\('>'\); setThreshold\('200'\)/)
+    assert.match(pageSource, /setRangeApplyPending\(false\); setPins\(\[\]\)/)
     assert.match(pageSource, /onClick=\{searchAnotherCondition\}>Search another condition/)
   })
 
@@ -189,5 +190,13 @@ describe('Telemetry Event Explorer UI', () => {
     assert.match(pageSource, /Suggested Signals/); assert.match(pageSource, /Preview/); assert.match(pageSource, /Historical occurrences/); assert.match(pageSource, /getTelemetryEventHistoricalSummary/)
     assert.match(pageSource, /Historical\/contextual envelope/); assert.doesNotMatch(pageSource, /Expected But Missing|should have changed but did not/)
     assert.match(pageSource, /raw-browser-tabs/); assert.match(pageSource, /Search signal, category, deck, or raw ID/)
+  })
+
+  it('keys investigation state to the selected occurrence and mounts the report below the unchanged debugger', () => {
+    assert.match(pageSource, /<EventInvestigation key=\{selected\.occurrenceId\}/)
+    assert.match(pageSource, /getTelemetryEventLearningReport/)
+    assert.match(pageSource, /<EventLearningReport/)
+    assert.match(pageSource, /onOpenOccurrence=\{/)
+    assert.match(pageSource, /setLoading\(true\); setPins\(\[\]\); const next = await searchTelemetryEvents/)
   })
 })

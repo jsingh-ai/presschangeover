@@ -3245,3 +3245,61 @@ button.drawer-state-block:hover:not(:disabled) { filter: brightness(1.06); trans
   .explorer-phase-grid { grid-template-columns: 1fr; }
   .explorer-suggestions article { flex-direction: column; }
 }
+/* Deterministic event-learning report. The chart/browser workspace above remains independent. */
+.event-learning-report { margin: 1.4rem 0 0; padding-top: 1.4rem; border-top: 2px solid color-mix(in srgb, var(--accent) 35%, var(--border)); display: grid; gap: 1rem; }
+.event-report-header { display: flex; align-items: end; justify-content: space-between; gap: 1rem; padding: 1.1rem 1.2rem; border-radius: 14px; background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 13%, var(--surface)), var(--surface)); border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border)); }
+.event-report-header h2 { margin: .15rem 0; font-size: 1.55rem; }
+.event-report-header p { margin: 0; color: var(--text-muted); }
+.event-report-performance { display: grid; grid-template-columns: auto auto; gap: .15rem .55rem; white-space: nowrap; }
+.event-report-performance span { color: var(--text-muted); font-size: .78rem; }
+.event-report-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+.event-report-grid.compact { margin-top: .65rem; }
+.event-report-card { min-width: 0; padding: 1rem 1.1rem; border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--surface) 96%, var(--accent)); box-shadow: 0 6px 20px rgb(0 0 0 / 5%); }
+.event-report-card-wide { width: 100%; }
+.event-report-card h3 { margin: 0 0 .7rem; font-size: 1rem; }
+.event-report-card h4 { margin: 0 0 .4rem; }
+.event-report-card p { margin: .4rem 0; }
+.event-report-card ul, .event-report-card ol { margin: .45rem 0; padding-left: 1.25rem; }
+.event-report-card li + li { margin-top: .35rem; }
+.event-report-facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .7rem; }
+.event-report-facts div, .event-report-coverage span { display: flex; flex-direction: column; gap: .2rem; }
+.event-report-facts span, .event-report-card dt { color: var(--text-muted); font-size: .72rem; text-transform: capitalize; }
+.event-report-card dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; margin: .7rem 0 0; }
+.event-report-card dl div { min-width: 0; }
+.event-report-card dd { margin: .1rem 0 0; overflow-wrap: anywhere; }
+.report-caveat { color: var(--text-muted); font-size: .8rem; }
+.event-finding-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem; }
+.event-finding { position: relative; padding: .85rem; border: 1px solid var(--border); border-radius: 9px; background: var(--surface); }
+.event-finding > div:first-child { display: flex; justify-content: space-between; gap: .7rem; }
+.event-finding > div:first-child span, .event-finding small { color: var(--text-muted); font-size: .75rem; }
+.event-finding p { font-size: .9rem; }
+.event-report-actions { display: flex; gap: .45rem; margin-top: .65rem; }
+.event-report-actions .button { padding: .35rem .65rem; }
+.event-report-actions > span { color: var(--text-muted); font-size: .75rem; }
+.event-report-card table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+.event-report-card th, .event-report-card td { padding: .55rem; text-align: left; border-bottom: 1px solid var(--border); vertical-align: top; }
+.event-report-card thead th { color: var(--text-muted); font-size: .72rem; text-transform: uppercase; }
+.event-report-coverage { display: flex; flex-wrap: wrap; gap: .7rem 1.4rem; margin-bottom: .85rem; color: var(--text-muted); font-size: .8rem; }
+.event-report-coverage strong { color: var(--text); font-size: 1rem; }
+.frequency-chart { display: grid; gap: .5rem; }
+.frequency-row { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(180px, 3fr) 110px; align-items: center; gap: .7rem; font-size: .8rem; }
+.frequency-row > span { display: flex; flex-direction: column; }
+.frequency-row small { color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.frequency-row > div { height: 9px; border-radius: 20px; background: color-mix(in srgb, var(--border) 65%, transparent); overflow: hidden; }
+.frequency-row i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.frequency-row > strong { text-align: right; }
+.event-sequence { list-style: none; padding: 0 !important; counter-reset: sequence; }
+.event-sequence li { position: relative; display: flex; flex-direction: column; padding: .55rem .55rem .55rem 2.2rem; border-left: 2px solid color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.event-sequence li::before { counter-increment: sequence; content: counter(sequence); position: absolute; left: -.75rem; top: .5rem; width: 1.4rem; height: 1.4rem; display: grid; place-items: center; border-radius: 50%; background: var(--accent); color: white; font-size: .7rem; }
+.event-sequence span, .relationship-list span { color: var(--text-muted); font-size: .78rem; }
+.relationship-list { list-style: none; padding: 0 !important; }
+.relationship-list li { display: flex; flex-direction: column; padding: .45rem 0; border-bottom: 1px solid var(--border); }
+.occurrence-matrix { margin-top: 1rem; overflow-x: auto; }
+.matrix-row { display: grid; grid-template-columns: minmax(150px, 1fr) repeat(12, 16px); gap: 4px; align-items: center; min-height: 22px; font-size: .74rem; }
+.matrix-row i { width: 12px; height: 12px; border-radius: 3px; background: color-mix(in srgb, var(--border) 72%, transparent); }
+.matrix-row i.present { background: var(--accent); }
+.matrix-head i { height: 4px; }
+.historical-occurrences { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; margin-top: .8rem; }
+.historical-occurrences span { color: var(--text-muted); font-size: .8rem; }
+.event-report-loading { margin: 1rem 0; padding: 1rem; border: 1px dashed var(--border); border-radius: 10px; color: var(--text-muted); }
+@media (max-width: 900px) { .event-report-grid, .event-finding-list { grid-template-columns: 1fr; } .event-report-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .event-report-header { align-items: start; flex-direction: column; } .frequency-row { grid-template-columns: 1fr; } .frequency-row > strong { text-align: left; } }

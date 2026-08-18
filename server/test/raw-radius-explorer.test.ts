@@ -290,4 +290,16 @@ describe('Raw Radius Code Explorer', () => {
     assert.equal(summary.metrics.historyComplete, true); assert.equal(summary.metrics.historyExaminedFromUtc, '2026-08-01T00:00:00.000Z')
     assert.ok(summary.performance!.totalMs >= 0); assert.ok(summary.performance!.payloadBytes > 0); assert.match(summary.limitations.join(' '), /not a correctness standard/)
   })
+
+  it('builds a same-exact-identity report with bounded canonical telemetry and no raw scan', async () => {
+    const source = radiusService(); let exactHistoryCalls = 0; let rawScans = 0; const telemetryCalls: Array<{ fromUtc: string; toUtc: string; signals: TelemetrySemanticSelector[] }> = []
+    source.getExactIdentityHistory = async () => { exactHistoryCalls += 1; return { queryCount: 3, sliceCount: 1, rowsConsidered: 5, matchingOccurrencesAvailable: 1, examinedFromUtc: '2026-08-12T12:00:00.000Z', examinedToUtc: startUtc, historyComplete: true, historyPartialReason: null, occurrences: [{ eventType: 'B', statusCode: '400', statusDescription: 'Recorded B state', startUtc: '2026-08-13T11:00:00.000Z', endUtc: '2026-08-13T11:05:00.000Z', durationSeconds: 300, previousIdentity: null, nextIdentity: null }] } }
+    const speedSamples = ['2026-08-13T10:50:00.000Z', '2026-08-13T10:55:00.000Z', '2026-08-13T11:01:00.000Z', '2026-08-13T11:04:00.000Z', '2026-08-13T11:50:00.000Z', '2026-08-13T11:55:00.000Z', '2026-08-13T12:01:00.000Z', '2026-08-13T12:04:00.000Z'].map((value, index) => sample(value, index % 4 < 2 ? 100 : 60))
+    const telemetry = { capabilities: { get: async () => ({ capabilities: [] }) }, semanticHistory: async (_pressKey: string, query: { fromUtc: string; toUtc: string; signals: TelemetrySemanticSelector[] }) => { telemetryCalls.push(query); return { signals: query.signals.map((selector) => evidence(selector, null, [], speedSamples.filter((item) => Date.parse(item.observedAtUtc) >= Date.parse(query.fromUtc) && Date.parse(item.observedAtUtc) <= Date.parse(query.toUtc)))) } }, rawChanges: async () => { rawScans += 1; throw new Error('must not run') } } as unknown as TelemetryFoundationService
+    const report = await new RawRadiusExplorerService(source, telemetry).eventLearningReport({ occurrence })
+    assert.equal(report.reportKind, 'raw_radius'); assert.equal(exactHistoryCalls, 1); assert.equal(rawScans, 0); assert.equal(report.coverage.automaticRawSignalScans, 0)
+    assert.ok(report.performance.cohortOccurrences <= 30); assert.ok(report.coverage.candidateSignals <= 12); assert.ok(report.performance.payloadBytes > 0)
+    assert.ok(telemetryCalls.every((call) => Date.parse(call.toUtc) - Date.parse(call.fromUtc) <= 2 * 60 * 60_000 && call.signals.length <= 50))
+    assert.deepEqual(report.target, { eventType: 'B', statusCode: '400', statusDescription: 'Recorded B state', press: 'Press 3', durationSeconds: 600 })
+  })
 })
