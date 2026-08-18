@@ -306,7 +306,23 @@ describe('AI Investigator deterministic grounding', () => {
     const draft: AiInvestigatorDraftContent = { ...draftFinding, findings: [{ ...draftFinding.findings[0], pressKey: 'press6', title: 'Essentially flat', whyItMatters: 'No material change was seen.', facts: [{ label: 'Interruptions', factIds: facts.map((item) => item.factId) }], evidenceFactIds: ['press6.interruptions.current'] }] }
     const result = groundAiInvestigatorDraft(draft, facts, request)
     assert.equal(result.content.findings.length, 0)
-    assert.ok(result.issues.some((item) => item.code === 'interpretation_contradiction'))
+    const issue = result.issues.find((item) => item.code === 'interpretation_contradiction')
+    assert.deepEqual({ rule: issue?.rule, factId: issue?.factId, metric: issue?.metric }, { rule: 'generic_flat_material_change', factId: 'press6.interruptions.delta', metric: 'interruptionDelta' })
+  })
+
+  it('allows stable production language when its own comparison is stable and interruption duration changed materially', () => {
+    const facts = [
+      groundingFact({ factId: 'press14.production_percent.current', pressKey: 'press14', metric: 'productionPercent', value: 49.9, unit: 'percent', role: 'current' }),
+      groundingFact({ factId: 'press14.production_percent.baseline', pressKey: 'press14', metric: 'productionPercent', value: 48.9, unit: 'percent', role: 'baseline' }),
+      groundingFact({ factId: 'press14.production_percent.delta', pressKey: 'press14', source: 'comparison', metric: 'productionPercentagePointDelta', value: 1, unit: 'percentage_points', role: 'delta' }),
+      groundingFact({ factId: 'press14.longest_interruption_minutes.current', pressKey: 'press14', metric: 'longestInterruptionMinutes', value: 222.7, unit: 'minutes', role: 'current' }),
+      groundingFact({ factId: 'press14.longest_interruption_minutes.baseline', pressKey: 'press14', metric: 'longestInterruptionMinutes', value: 120, unit: 'minutes', role: 'baseline' }),
+      groundingFact({ factId: 'press14.longest_interruption_minutes.delta', pressKey: 'press14', source: 'comparison', metric: 'longestInterruptionDeltaMinutes', value: 102.7, unit: 'minutes', role: 'delta' }),
+    ]
+    const draft: AiInvestigatorDraftContent = { ...draftFinding, findings: [{ ...draftFinding.findings[0], pressKey: 'press14', title: 'Different operating dimensions moved differently', whyItMatters: 'Production was relatively stable while interruption duration increased.', facts: [{ label: 'Production', factIds: facts.slice(0, 3).map((item) => item.factId) }, { label: 'Longest interruption', factIds: facts.slice(3).map((item) => item.factId) }], evidenceFactIds: ['press14.production_percent.current', 'press14.longest_interruption_minutes.current'] }] }
+    const result = groundAiInvestigatorDraft(draft, facts, request)
+    assert.equal(result.issues.length, 0)
+    assert.equal(result.content.findings.length, 1)
   })
 
   it('rejects unknown, malformed timestamp, and cross-press references', () => {

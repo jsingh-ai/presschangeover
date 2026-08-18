@@ -85,9 +85,11 @@ describe('AI Investigator evidence graph', () => {
     for (const pressKey of ['press14', 'press10', 'press13', 'press6'] as RadiusPressKey[]) {
       const preflight = await buildDiscoveryPreflight(new DiscoveryFixtureExecutor(), { scope: { pressKey }, range: fixtureCurrent, analysis: 'discover_unusual_behavior' }, new AbortController().signal)
       assert.deepEqual({ valid: preflight.evidenceGraph.valid, unresolved: preflight.evidenceGraph.unresolvedReferences, crossPress: preflight.evidenceGraph.crossPressViolations, unusable: preflight.evidenceGraph.unusableAdvertisedFacts }, { valid: true, unresolved: 0, crossPress: 0, unusable: 0 }, pressKey)
+      assertCandidateClosure(preflight, { scope: { pressKey }, range: fixtureCurrent, analysis: 'discover_unusual_behavior' })
     }
     const fleet = await buildDiscoveryPreflight(new DiscoveryFixtureExecutor(), { scope: { pressKey: null }, range: fixtureCurrent, analysis: 'discover_unusual_behavior' }, new AbortController().signal)
     assert.equal(fleet.candidates.length, 5); assert.equal(fleet.evidenceGraph.valid, true); assert.equal(fleet.evidenceGraph.unresolvedReferences, 0); assert.equal(fleet.evidenceGraph.crossPressViolations, 0); assert.equal(fleet.evidenceGraph.unusableAdvertisedFacts, 0)
+    assertCandidateClosure(fleet, { scope: { pressKey: null }, range: fixtureCurrent, analysis: 'discover_unusual_behavior' })
   })
 
   it('validates registered facts for every Industrial Analytics family including Pearson, Spearman, and lag metrics', () => {
@@ -133,3 +135,20 @@ describe('AI Investigator evidence graph', () => {
 })
 
 function inconsistentId() { return 'industrial.family99' }
+
+function assertCandidateClosure(preflight: Awaited<ReturnType<typeof buildDiscoveryPreflight>>, sourceRequest: Parameters<typeof buildDiscoveryPreflight>[1]) {
+  const modelCandidates = (preflight.modelInput.candidates as Array<{ id: string; observations: unknown[][]; facts: unknown[][] }>)
+  for (const candidate of preflight.candidates) {
+    const closure = new Set(candidate.facts.map(({ factId }) => factId))
+    for (const sourceObservation of candidate.observations) for (const factId of sourceObservation.factIds) assert.equal(closure.has(factId), true, `${candidate.pressKey}:${factId}`)
+    const serialized = modelCandidates.find(({ id }) => id === candidate.pressKey)!
+    assert.deepEqual(new Set(serialized.facts.map((item) => item[0])), closure)
+    for (const sourceFact of candidate.facts) {
+      const draft: AiInvestigatorDiscoveryDraftContent = { summary: 'Closure invariant.', findings: [{ candidateId: candidate.pressKey, title: 'Review deterministic evidence', importance: 'medium', confidence: 'medium', factIds: [sourceFact.factId], interpretation: 'The selected evidence merits review.', whyWorthInvestigating: 'It belongs to the authoritative candidate closure.', recommendedInvestigation: 'Inspect the corresponding evidence.' }], limitations: [] }
+      const references = validateDiscoveryReferences(draft, preflight.candidates, preflight.facts)
+      assert.equal(references.issues.length, 0, sourceFact.factId)
+      const grounded = groundAiInvestigatorDraft(expandDiscoveryDraft(references.accepted, preflight.facts), preflight.facts, sourceRequest)
+      assert.equal(grounded.issues.length, 0, sourceFact.factId)
+    }
+  }
+}

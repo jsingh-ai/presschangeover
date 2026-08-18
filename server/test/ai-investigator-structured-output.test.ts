@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { AI_INVESTIGATOR_DISCOVERY_SCHEMA, AI_INVESTIGATOR_DISCOVERY_TEXT_FORMAT, AiInvestigatorValidationError, parseAiInvestigatorDiscoveryDraft, validateAiInvestigatorDiscoveryDraft, type AiGroundingFact, type AiInvestigatorDiscoveryDraftContent } from '../src/ai-investigator/contracts.js'
+import { AI_INVESTIGATOR_DISCOVERY_SCHEMA, AI_INVESTIGATOR_DISCOVERY_TEXT_FORMAT, AiInvestigatorValidationError, aiInvestigatorDiscoveryTextFormat, parseAiInvestigatorDiscoveryDraft, validateAiInvestigatorDiscoveryDraft, type AiGroundingFact, type AiInvestigatorDiscoveryDraftContent } from '../src/ai-investigator/contracts.js'
 import { DISCOVERY_INSTRUCTIONS, DISCOVERY_OUTPUT_TOKENS, expandDiscoveryDraft, validateDiscoveryReferences, type DiscoveryCandidate } from '../src/ai-investigator/discovery.js'
 import { groundAiInvestigatorDraft } from '../src/ai-investigator/grounding.js'
 import { AiInvestigatorOrchestrator, OpenAiResponsesInvestigatorClient, type AiInvestigatorLogger, type AiInvestigatorModelClient } from '../src/ai-investigator/orchestrator.js'
@@ -56,6 +56,9 @@ describe('AI Investigator authoritative structured output', () => {
     assert.equal(root.additionalProperties, false); assert.equal(root.properties.findings.items.additionalProperties, false)
     assert.deepEqual(root.properties.findings.items.required, ['candidateId', 'title', 'importance', 'confidence', 'factIds', 'interpretation', 'whyWorthInvestigating', 'recommendedInvestigation'])
     assert.equal('rank' in root.properties.findings.items.properties, false); assert.equal('pressKey' in root.properties.findings.items.properties, false)
+    const singleCandidate = aiInvestigatorDiscoveryTextFormat(1).schema as { properties: { findings: { maxItems: number } } }
+    assert.equal(singleCandidate.properties.findings.maxItems, 1)
+    assert.equal((AI_INVESTIGATOR_DISCOVERY_SCHEMA as { properties: { findings: { maxItems: number } } }).properties.findings.maxItems, 5)
   })
 
   it('uses the installed SDK parsed Responses result with strict tool-free Structured Outputs', async () => {
@@ -70,10 +73,11 @@ describe('AI Investigator authoritative structured output', () => {
       }), { status: 200, headers: { 'content-type': 'application/json', 'x-request-id': 'req-offline-parsed' } })
     }) as typeof fetch
     const client = new OpenAiResponsesInvestigatorClient(config, fakeFetch)
-    const response = await client.create([{ role: 'user', content: '{}' }], DISCOVERY_INSTRUCTIONS, [], 'none', new AbortController().signal, { structuredOutputSchema: AI_INVESTIGATOR_DISCOVERY_SCHEMA, structuredOutputFormat: AI_INVESTIGATOR_DISCOVERY_TEXT_FORMAT, maxOutputTokens: DISCOVERY_OUTPUT_TOKENS })
+    const dynamicFormat = aiInvestigatorDiscoveryTextFormat(1)
+    const response = await client.create([{ role: 'user', content: '{}' }], DISCOVERY_INSTRUCTIONS, [], 'none', new AbortController().signal, { structuredOutputSchema: dynamicFormat.schema as Record<string, unknown>, structuredOutputFormat: dynamicFormat, maxOutputTokens: DISCOVERY_OUTPUT_TOKENS })
     assert.deepEqual(response.parsedOutput, valid); assert.equal(response.responseStatus, 'completed'); assert.equal(response.http?.requestId, 'req-offline-parsed')
-    const text = sent?.text as { format: { type: string; strict: boolean } }
-    assert.deepEqual({ format: text.format.type, strict: text.format.strict, toolChoice: sent?.tool_choice, store: sent?.store }, { format: 'json_schema', strict: true, toolChoice: 'none', store: false })
+    const text = sent?.text as { format: { type: string; strict: boolean; schema: { properties: { findings: { maxItems: number } } } } }
+    assert.deepEqual({ format: text.format.type, strict: text.format.strict, maxItems: text.format.schema.properties.findings.maxItems, toolChoice: sent?.tool_choice, store: sent?.store }, { format: 'json_schema', strict: true, maxItems: 1, toolChoice: 'none', store: false })
   })
 
   it('retains only safe response metadata when SDK parsing fails', async () => {
@@ -116,11 +120,24 @@ describe('AI Investigator authoritative structured output', () => {
     assert.equal(validateDiscoveryReferences({ ...base, findings: [judgment({ candidateId: 'press15' })] }, [candidate], press14Facts).issues[0].code, 'unknown_candidate_id')
     assert.equal(validateDiscoveryReferences({ ...base, findings: [judgment({ factIds: ['press14.unknown.fact'] })] }, [candidate], press14Facts).issues[0].code, 'unknown_fact_id')
     assert.equal(validateDiscoveryReferences({ ...base, findings: [judgment({ factIds: [crossPress.factId] })] }, [candidate], [...press14Facts, crossPress]).issues[0].code, 'cross_press_fact')
-    assert.equal(validateDiscoveryReferences({ ...base, findings: [judgment(), judgment()] }, [candidate], press14Facts).issues[0].code, 'duplicate_candidate_id')
+    const duplicateReplay = validateDiscoveryReferences({ ...base, findings: [judgment(), judgment({ factIds: ['press14.longest_interruption_minutes.delta'] }), judgment({ factIds: ['press14.interruptions.current'] })] }, [candidate], press14Facts)
+    assert.deepEqual(duplicateReplay.issues.map(({ findingIndex, code, path, candidateId, factId }) => ({ findingIndex, code, path, candidateId, factId })), [
+      { findingIndex: 1, code: 'duplicate_candidate_id', path: 'findings[1].candidateId', candidateId: 'press14', factId: undefined },
+      { findingIndex: 2, code: 'duplicate_candidate_id', path: 'findings[2].candidateId', candidateId: 'press14', factId: undefined },
+    ])
+    assert.equal(duplicateReplay.accepted.findings.length, 1)
     const unusable = { ...press14Facts.find((item) => item.factId === 'press14.production_percent.delta')!, usable: false }
     assert.equal(validateDiscoveryReferences(base, [candidate], [...press14Facts.filter((item) => item.factId !== unusable.factId), unusable]).issues[0].code, 'unusable_fact')
     const invalidSource = { ...press14Facts.find((item) => item.factId === 'press14.production_percent.delta')!, source: 'model' } as unknown as AiGroundingFact
     assert.equal(validateDiscoveryReferences(base, [candidate], [...press14Facts.filter((item) => item.factId !== invalidSource.factId), invalidSource]).issues[0].code, 'invalid_fact_source')
+  })
+
+  it('keeps unavailable production context as a limitation rather than positive finding evidence', () => {
+    const unavailableContext: AiGroundingFact = { ...press14Facts[0]!, factId: 'press14.context.job.unavailable.event', source: 'production_context', metric: 'job', value: null, unit: null, role: 'event', usable: false, label: 'Job' }
+    const draft: AiInvestigatorDiscoveryDraftContent = { summary: 'Context was unavailable.', findings: [judgment({ factIds: [unavailableContext.factId], interpretation: 'Job was unchanged.' })], limitations: ['Job context was unavailable.'] }
+    const result = validateDiscoveryReferences(draft, [candidate], [...press14Facts, unavailableContext])
+    assert.equal(result.accepted.findings.length, 0)
+    assert.deepEqual(result.issues.map(({ code, factId }) => ({ code, factId })), [{ code: 'unusable_fact', factId: unavailableContext.factId }])
   })
 
   it('reconstructs complete UI findings from multiple plausible judgments over the exact Press 14 fact package', () => {
@@ -155,9 +172,13 @@ describe('AI Investigator authoritative structured output', () => {
       const result = await new AiInvestigatorOrchestrator(config, new DiscoveryFixtureExecutor(), model, false).analyzeDiscovery(request)
       assert.equal(result.status, 'error'); assert.match(result.limitations.join(' '), new RegExp(item.reason)); assert.equal(calls, 1)
     }
-    const parsedModel: AiInvestigatorModelClient = { create: async () => ({ id: 'parsed', outputText: '{not used', outputItems: [], toolCalls: [], responseStatus: 'completed', parsedOutput: valid }) }
+    let deployedMaximum: number | undefined
+    const parsedModel: AiInvestigatorModelClient = { create: async (_input, _instructions, _tools, _toolChoice, _signal, options) => {
+      deployedMaximum = ((options?.structuredOutputSchema?.properties as { findings?: { maxItems?: number } } | undefined)?.findings?.maxItems)
+      return { id: 'parsed', outputText: '{not used', outputItems: [], toolCalls: [], responseStatus: 'completed', parsedOutput: valid }
+    } }
     const parsed = await new AiInvestigatorOrchestrator(config, new DiscoveryFixtureExecutor(), parsedModel, false).analyzeDiscovery(request)
-    assert.equal(parsed.status, 'complete'); assert.equal(parsed.findings.length, 1)
+    assert.equal(parsed.status, 'complete'); assert.equal(parsed.findings.length, 1); assert.equal(deployedMaximum, 1)
   })
 
   it('logs sanitized structural diagnostics without retaining generated content', async () => {
@@ -168,5 +189,16 @@ describe('AI Investigator authoritative structured output', () => {
     const entry = entries.find((item) => item.event === 'ai_investigator_validation_failed' && item.validationStage === 'final_schema')
     assert.deepEqual({ path: entry?.path, expected: entry?.expected, receivedType: entry?.receivedType, findingIndex: entry?.findingIndex }, { path: 'findings[0].importance', expected: 'high|medium|low', receivedType: 'string', findingIndex: 0 })
     assert.doesNotMatch(JSON.stringify(entries), /secret summary|urgent/)
+  })
+
+  it('logs only the safe contradiction rule and triggering fact identity', async () => {
+    const entries: Array<Record<string, unknown>> = []; const logger: AiInvestigatorLogger = { info: (line) => entries.push(JSON.parse(line) as Record<string, unknown>), error: (line) => entries.push(JSON.parse(line) as Record<string, unknown>) }
+    const modelDraft: AiInvestigatorDiscoveryDraftContent = { summary: 'Review.', findings: [judgment({ title: 'Secret production wording', interpretation: 'Production was stable in secret prose.', factIds: ['press14.production_percent.delta'] })], limitations: [] }
+    const model: AiInvestigatorModelClient = { create: async () => ({ id: 'semantic-rejection', outputText: '', parsedOutput: modelDraft, outputItems: [], toolCalls: [], responseStatus: 'completed' }) }
+    const result = await new AiInvestigatorOrchestrator(config, new DiscoveryFixtureExecutor(), model, logger).analyzeDiscovery(request)
+    assert.equal(result.status, 'partial'); assert.equal(result.grounding.omitted, 1)
+    const entry = entries.find((item) => item.event === 'ai_investigator_grounding_rejected') as { issues?: Array<Record<string, unknown>> } | undefined
+    assert.deepEqual(entry?.issues, [{ findingRank: 1, code: 'interpretation_contradiction', rule: 'metric_flat_material_change', factId: 'press14.production_percent.delta', metric: 'productionPercentagePointDelta' }])
+    assert.doesNotMatch(JSON.stringify(entries), /Secret production wording|stable in secret prose/)
   })
 })

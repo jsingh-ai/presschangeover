@@ -3,7 +3,7 @@ import OpenAI from 'openai'
 import type { ResponseInput, ResponseInputItem } from 'openai/resources/responses/responses'
 import type { AiInvestigatorConfig } from '../config.js'
 import type { RadiusPressKey } from '../radius/models.js'
-import { AI_INVESTIGATOR_CONTENT_SCHEMA, AI_INVESTIGATOR_DISCOVERY_SCHEMA, AI_INVESTIGATOR_DISCOVERY_TEXT_FORMAT, AiInvestigatorValidationError, parseAiInvestigatorDiscoveryDraft, type AiGroundingFact, type AiInvestigatorContent, type AiInvestigatorDraftContent, type AiInvestigatorRequest, type AiInvestigatorResult, validateAiInvestigatorDiscoveryDraft, validateAiInvestigatorDraft } from './contracts.js'
+import { AI_INVESTIGATOR_CONTENT_SCHEMA, AiInvestigatorValidationError, aiInvestigatorDiscoveryTextFormat, parseAiInvestigatorDiscoveryDraft, type AiGroundingFact, type AiInvestigatorContent, type AiInvestigatorDraftContent, type AiInvestigatorRequest, type AiInvestigatorResult, validateAiInvestigatorDiscoveryDraft, validateAiInvestigatorDraft } from './contracts.js'
 import { buildDiscoveryPreflight, DISCOVERY_CANDIDATE_LIMIT, DISCOVERY_INSTRUCTIONS, DISCOVERY_OUTPUT_TOKENS, DISCOVERY_PROMPT_CACHE_KEY, expandDiscoveryDraft, validateDiscoveryReferences } from './discovery.js'
 import { DiscoveryEvidenceValidationError } from './evidence-graph.js'
 import { groundAiInvestigatorDraft } from './grounding.js'
@@ -387,7 +387,8 @@ export class AiInvestigatorOrchestrator {
       evidence = preflight.evidence
       for (const item of evidence) safeLog(this.logger, 'info', { event: 'ai_investigator_tool', architecture: 'single_synthesis', analysisId, tool: item.name, durationMs: item.durationMs, success: true, payloadBytes: utf8Bytes(item.result) })
       const input: unknown[] = [{ role: 'user', content: JSON.stringify(preflight.modelInput) } satisfies ResponseInputItem]
-      const options: AiModelRequestOptions = { structuredOutputSchema: AI_INVESTIGATOR_DISCOVERY_SCHEMA, structuredOutputFormat: AI_INVESTIGATOR_DISCOVERY_TEXT_FORMAT, structuredOutputName: 'process_intelligence_discovery', maxOutputTokens: DISCOVERY_OUTPUT_TOKENS, promptCacheKey: DISCOVERY_PROMPT_CACHE_KEY }
+      const discoveryFormat = aiInvestigatorDiscoveryTextFormat(preflight.candidates.length)
+      const options: AiModelRequestOptions = { structuredOutputSchema: discoveryFormat.schema as Record<string, unknown>, structuredOutputFormat: discoveryFormat, structuredOutputName: 'process_intelligence_discovery', maxOutputTokens: DISCOVERY_OUTPUT_TOKENS, promptCacheKey: DISCOVERY_PROMPT_CACHE_KEY }
       const payload = buildAiResponsesRequestPayload(this.config.model, input, DISCOVERY_INSTRUCTIONS, [], 'none', options)
       safeLog(this.logger, 'info', { event: 'ai_investigator_model_request', architecture: 'single_synthesis', analysisId, requestNumber: 1, phase: 'final_synthesis', toolsEnabled: false, toolChoice: 'none', availableTools: [], candidateCount: preflight.candidates.length, evidenceGraph: { registeredFacts: preflight.evidenceGraph.registeredFacts, observations: preflight.evidenceGraph.observations, advertisedFactReferences: preflight.evidenceGraph.advertisedFactReferences, modelVisibleFactIds: preflight.evidenceGraph.modelVisibleFactIds, unresolvedReferences: preflight.evidenceGraph.unresolvedReferences, crossPressViolations: preflight.evidenceGraph.crossPressViolations, unusableAdvertisedFacts: preflight.evidenceGraph.unusableAdvertisedFacts }, estimatedInputTokens: Math.ceil(utf8Bytes(payload) / 4), maxOutputTokens: DISCOVERY_OUTPUT_TOKENS, requestBytes: utf8Bytes(payload), modelFacingEvidenceBytes: utf8Bytes(preflight.modelInput), toolResultsIncluded: evidence.length, priorModelMessagesIncluded: 0, priorModelResultsIncluded: 0 })
       let response: AiModelResponse
@@ -426,7 +427,7 @@ export class AiInvestigatorOrchestrator {
       const referenceOmitted = new Set(references.issues.map((issue) => issue.findingIndex)).size
       const grounding = { acceptedUnchanged: grounded.content.findings.length, corrected: 0, omitted: grounded.omitted + referenceOmitted, correctionAttempted: false }
       if (!grounded.issues.length && !references.issues.length) return finish('complete', grounded.content, grounding)
-      if (grounded.issues.length) safeLog(this.logger, 'info', { event: 'ai_investigator_grounding_rejected', architecture: 'single_synthesis', analysisId, issueCount: grounded.issues.length, issues: grounded.issues.map(({ findingRank, code }) => ({ findingRank, code })) })
+      if (grounded.issues.length) safeLog(this.logger, 'info', { event: 'ai_investigator_grounding_rejected', architecture: 'single_synthesis', analysisId, issueCount: grounded.issues.length, issues: grounded.issues.map(({ findingRank, code, rule, factId, metric }) => ({ findingRank, code, rule, factId, metric })) })
       grounded.content.summary = 'Some AI interpretations could not be verified. Only findings grounded in deterministic ProcessIntelligence evidence are shown.'
       grounded.content.limitations = [...grounded.content.limitations, 'Some AI interpretations could not be verified against deterministic ProcessIntelligence evidence and were omitted.']
       return finish('partial', grounded.content, grounding)

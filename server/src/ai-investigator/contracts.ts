@@ -144,6 +144,15 @@ export type AiInvestigatorDiscoveryDraftFinding = AiInvestigatorDiscoveryDraftCo
 export const AI_INVESTIGATOR_DISCOVERY_TEXT_FORMAT = zodTextFormat(AI_INVESTIGATOR_DISCOVERY_RUNTIME_SCHEMA, 'process_intelligence_discovery')
 export const AI_INVESTIGATOR_DISCOVERY_SCHEMA = AI_INVESTIGATOR_DISCOVERY_TEXT_FORMAT.schema as Record<string, unknown>
 
+export function aiInvestigatorDiscoveryTextFormat(maximumFindings: number): typeof AI_INVESTIGATOR_DISCOVERY_TEXT_FORMAT {
+  const maximum = Math.max(0, Math.min(5, Math.trunc(maximumFindings)))
+  const schema = structuredClone(AI_INVESTIGATOR_DISCOVERY_SCHEMA) as {
+    properties: { findings: { maxItems: number } }
+  }
+  schema.properties.findings.maxItems = maximum
+  return { ...AI_INVESTIGATOR_DISCOVERY_TEXT_FORMAT, schema }
+}
+
 export interface AiInvestigatorValidationDiagnostic {
   validationStage: 'final_schema'
   schemaCode: string

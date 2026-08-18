@@ -70,7 +70,8 @@ describe('AI Investigator deterministic discovery preflight', () => {
     assert.equal(result.status, 'complete'); assert.equal(result.findings.length, 1); assert.equal(result.toolCallsUsed, 3)
     assert.equal(observed.length, 1); assert.equal(observed[0].tools, 0)
     assert.deepEqual((observed[0].options as { structuredOutputName: string; maxOutputTokens: number }).structuredOutputName, 'process_intelligence_discovery')
-    assert.equal((observed[0].options as { structuredOutputFormat?: unknown }).structuredOutputFormat, AI_INVESTIGATOR_DISCOVERY_TEXT_FORMAT)
+    const format = (observed[0].options as { structuredOutputFormat?: { type?: string; name?: string; strict?: boolean; schema?: { properties?: { findings?: { maxItems?: number } } } } }).structuredOutputFormat
+    assert.deepEqual({ type: format?.type, name: format?.name, strict: format?.strict, maxItems: format?.schema?.properties?.findings?.maxItems }, { type: 'json_schema', name: 'process_intelligence_discovery', strict: true, maxItems: 1 })
   })
 
   it('stops after the first failed discovery synthesis request without retry or fallback', async () => {
