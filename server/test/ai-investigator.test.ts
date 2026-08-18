@@ -44,6 +44,41 @@ function pressEpisodes(): RadiusPressEpisodes {
   } as unknown as RadiusPressEpisodes
 }
 
+function press14Overview(): RadiusOverview {
+  const fleet = overview()
+  const source = fleet.presses[0]
+  return {
+    ...fleet,
+    presses: [{
+      ...source,
+      pressKey: 'press14',
+      displayName: 'Press 14',
+      radiusMachineId: 214,
+      timelineSegments: source.timelineSegments.map((segment) => ({ ...segment, pressKey: 'press14', displayName: 'Press 14', machineId: 214 })),
+    }],
+    operationalAnalytics: { ...fleet.operationalAnalytics, scopePressKeys: ['press14'] },
+  }
+}
+
+function press14Radius(): RadiusService {
+  const load = async () => press14Overview()
+  return {
+    getHealth: async () => ({ status: 'healthy', configured: true }),
+    getOverview: load,
+    getAnalysisOverview: load,
+    getPressEpisodes: async () => {
+      const fleet = press14Overview(); const press = fleet.presses[0]
+      return {
+        ...pressEpisodes(),
+        press: { pressKey: 'press14', displayName: 'Press 14', machineId: 214 },
+        timelineSegments: press.timelineSegments,
+        operationalAnalytics: fleet.operationalAnalytics,
+      } as RadiusPressEpisodes
+    },
+    getEpisode: async () => { throw new Error('unused') },
+  }
+}
+
 function radiusWithOverview(load: () => Promise<RadiusOverview>): RadiusService {
   return { getHealth: async () => ({ status: 'healthy', configured: true }), getOverview: load, getAnalysisOverview: load, getPressEpisodes: async () => pressEpisodes(), getEpisode: async () => { throw new Error('unused') } }
 }
@@ -296,13 +331,51 @@ describe('AI Investigator deterministic grounding', () => {
 
 const telemetryClient: TelemetryClient = { getHealth: async () => ({ service: 'TelemetryQueryApi', status: 'healthy' }), getDatabaseHealth: async () => ({ service: 'TelemetryQueryApi', database: 'historian', status: 'healthy' }), getSources: async () => [], getPhysicalState: async () => { throw new Error('unused') } }
 
-async function call(path: string, options?: RequestInit, appConfig?: AiInvestigatorConfig, model?: AiInvestigatorModelClient) {
-  const app = createApp({ telemetryClient, logger: false, aiInvestigatorConfig: appConfig, aiInvestigatorModelClient: model })
+async function call(path: string, options?: RequestInit, appConfig?: AiInvestigatorConfig, model?: AiInvestigatorModelClient, radiusService?: RadiusService) {
+  const app = createApp({ telemetryClient, radiusService, logger: false, aiInvestigatorConfig: appConfig, aiInvestigatorModelClient: model })
   const server = app.listen(0, '127.0.0.1'); await new Promise<void>((resolve) => server.once('listening', resolve)); const address = server.address() as AddressInfo
   try { const response = await fetch(`http://127.0.0.1:${address.port}${path}`, options); return { status: response.status, text: await response.text() } } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())) }
 }
 
 describe('AI Investigator HTTP boundary', () => {
+  it('parses one valid Press 14 JSON object and reaches the discovery orchestrator exactly once', async () => {
+    let modelCalls = 0
+    const model: AiInvestigatorModelClient = { create: async (input) => {
+      modelCalls += 1
+      assert.equal(typeof input[0], 'object')
+      return { ...finalResponse, id: 'press14-http-boundary' }
+    } }
+    const press14Request = { ...request, scope: { pressKey: 'press14' as const } }
+    const result = await call('/api/ai-investigator/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(press14Request) }, config, model, press14Radius())
+    assert.equal(result.status, 200)
+    assert.equal((JSON.parse(result.text) as { status: string }).status, 'complete')
+    assert.equal(modelCalls, 1)
+  })
+
+  it('returns invalid_request_body for malformed JSON without reaching the model', async () => {
+    let modelCalls = 0
+    const model: AiInvestigatorModelClient = { create: async () => { modelCalls += 1; return finalResponse } }
+    const result = await call('/api/ai-investigator/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{scope:{pressKey:"press14"}}' }, config, model, press14Radius())
+    assert.equal(result.status, 400)
+    assert.deepEqual(JSON.parse(result.text), { error: 'invalid_request_body' })
+    assert.equal(modelCalls, 0)
+  })
+
+  it('rejects invalid press, range, and analysis schemas without reaching the model', async () => {
+    let modelCalls = 0
+    const model: AiInvestigatorModelClient = { create: async () => { modelCalls += 1; return finalResponse } }
+    const invalidBodies = [
+      { ...request, scope: { pressKey: 'press4' } },
+      { ...request, range: { startUtc: end, endUtc: start } },
+      { ...request, analysis: 'diagnose_root_cause' },
+    ]
+    for (const body of invalidBodies) {
+      const result = await call('/api/ai-investigator/analyze', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }, config, model, press14Radius())
+      assert.equal(result.status, 400)
+    }
+    assert.equal(modelCalls, 0)
+  })
+
   it('starts safely without a key and returns a useful not-configured state', async () => {
     const disabled = { ...config, enabled: false, apiKey: undefined }
     const status = await call('/api/ai-investigator/status', undefined, disabled)

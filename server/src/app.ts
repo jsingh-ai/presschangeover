@@ -98,6 +98,12 @@ class RequestValidationError extends Error {
   }
 }
 
+function isJsonBodyParseError(error: unknown): boolean {
+  if (!(error instanceof SyntaxError) || typeof error !== 'object' || error === null) return false
+  const parseError = error as { status?: unknown; type?: unknown }
+  return parseError.status === 400 && parseError.type === 'entity.parse.failed'
+}
+
 function requestIdFrom(request: Request): string {
   const supplied = request.header('X-Request-Id')
   return supplied && SAFE_REQUEST_ID_PATTERN.test(supplied)
@@ -912,6 +918,12 @@ export function createApp({
       _next: NextFunction,
     ) => {
       const requestId = String(response.locals.requestId)
+
+      if (isJsonBodyParseError(error)) {
+        if (logger) logger.error(`[${requestId}] ${request.method} ${request.path} 400 invalid_request_body`)
+        response.status(400).json({ error: 'invalid_request_body' })
+        return
+      }
 
       if (error instanceof RequestValidationError) {
         response.status(400).json({ error: error.code })
