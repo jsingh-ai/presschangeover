@@ -11,7 +11,7 @@ export const DISCOVERY_OUTPUT_TOKENS = 1_400
 export const DISCOVERY_SELECTED_PRESS_LIMIT = 3
 export const DISCOVERY_OBSERVATION_LIMIT_PER_CANDIDATE = 3
 export const DISCOVERY_PROMPT_CACHE_KEY = 'processintelligence-discovery-v1'
-export const DISCOVERY_INSTRUCTIONS = `You are the advisory ProcessIntelligence AI Investigator. Rank only supplied deterministic candidate ids. All observation metrics and fact values were calculated by the server and are authoritative; never compute statistics, invent, recalculate, or contradict them. Return the candidate press id, supplied fact ids, and concise narrative only. For material comparisons select the current, baseline, and delta ids together. Treat low support or coverage as limitations. Radius states and associations are investigation leads, not proven causes. Return at most five findings, one per press. Do not claim control, database, historian, filesystem, network, configuration, acknowledgement, or root-cause access. No HTML.`
+export const DISCOVERY_INSTRUCTIONS = `You are the advisory ProcessIntelligence AI Investigator. Rank only supplied deterministic candidate ids. Return only model judgment: candidateId, title, importance, confidence, supplied factIds, interpretation, whyWorthInvestigating, recommendedInvestigation, plus the overall summary and limitations. ProcessIntelligence reconstructs all values, units, timestamps, evidence classes, links, and tables. All supplied facts are authoritative; never reproduce, compute, invent, recalculate, or contradict their values. For material comparisons select the supplied current, baseline, and delta ids together. Treat low support or coverage as limitations. Radius states and associations are investigation leads, not proven causes. Return at most one finding per candidate and no more than five total. Do not claim control, database, historian, filesystem, network, configuration, acknowledgement, or root-cause access. No HTML.`
 
 interface FleetRow {
   pressKey: RadiusPressKey
@@ -278,24 +278,57 @@ function groupKey(fact: AiGroundingFact): string {
   return fact.factId.replace(/\.(?:current|baseline|delta)$/, '').replace(/\.(?:timestamp|duration_minutes)$/, '')
 }
 
+export type DiscoveryReferenceIssueCode = 'unknown_candidate_id' | 'duplicate_candidate_id' | 'unknown_fact_id' | 'cross_press_fact' | 'unusable_fact' | 'invalid_fact_source'
+export interface DiscoveryReferenceIssue {
+  validationStage: 'grounding_reference'
+  code: DiscoveryReferenceIssueCode
+  path: string
+  findingIndex: number
+  candidateId: string
+  factId?: string
+}
+
+export function validateDiscoveryReferences(draft: AiInvestigatorDiscoveryDraftContent, candidates: DiscoveryCandidate[], facts: AiGroundingFact[]): { accepted: AiInvestigatorDiscoveryDraftContent; issues: DiscoveryReferenceIssue[] } {
+  const candidateMap = new Map(candidates.map((candidate) => [candidate.pressKey, candidate]))
+  const factMap = new Map(facts.map((fact) => [fact.factId, fact]))
+  const seenCandidates = new Set<string>(); const accepted: AiInvestigatorDiscoveryDraftContent['findings'] = []; const issues: DiscoveryReferenceIssue[] = []
+  draft.findings.forEach((finding, findingIndex) => {
+    const candidate = candidateMap.get(finding.candidateId as RadiusPressKey)
+    const findingIssues: DiscoveryReferenceIssue[] = []
+    if (!candidate) findingIssues.push({ validationStage: 'grounding_reference', code: 'unknown_candidate_id', path: `findings[${findingIndex}].candidateId`, findingIndex, candidateId: finding.candidateId })
+    else if (seenCandidates.has(finding.candidateId)) findingIssues.push({ validationStage: 'grounding_reference', code: 'duplicate_candidate_id', path: `findings[${findingIndex}].candidateId`, findingIndex, candidateId: finding.candidateId })
+    finding.factIds.forEach((factId, factIndex) => {
+      const fact = factMap.get(factId); const path = `findings[${findingIndex}].factIds[${factIndex}]`
+      if (!fact) findingIssues.push({ validationStage: 'grounding_reference', code: 'unknown_fact_id', path, findingIndex, candidateId: finding.candidateId, factId })
+      else if (candidate && fact.pressKey !== candidate.pressKey) findingIssues.push({ validationStage: 'grounding_reference', code: 'cross_press_fact', path, findingIndex, candidateId: finding.candidateId, factId })
+      else if (!fact.usable) findingIssues.push({ validationStage: 'grounding_reference', code: 'unusable_fact', path, findingIndex, candidateId: finding.candidateId, factId })
+      else if (!['radius', 'telemetry', 'production_context', 'comparison', 'coverage'].includes(fact.source)) findingIssues.push({ validationStage: 'grounding_reference', code: 'invalid_fact_source', path, findingIndex, candidateId: finding.candidateId, factId })
+    })
+    issues.push(...findingIssues)
+    if (!findingIssues.length) { accepted.push(finding); seenCandidates.add(finding.candidateId) }
+  })
+  return { accepted: { summary: draft.summary, findings: accepted, limitations: draft.limitations }, issues }
+}
+
 export function expandDiscoveryDraft(draft: AiInvestigatorDiscoveryDraftContent, availableFacts: AiGroundingFact[], availableObservations: IndustrialAnalyticalObservation[] = []): AiInvestigatorDraftContent {
   const factMap = new Map(availableFacts.map((fact) => [fact.factId, fact]))
   return {
     summary: draft.summary,
-    findings: draft.findings.map((finding) => {
+    findings: draft.findings.map((finding, findingIndex) => {
+      const pressKey = finding.candidateId as RadiusPressKey
       const requested = uniqueStrings(finding.factIds).flatMap((id) => factMap.get(id) ? [factMap.get(id)!] : [])
       const unknownIds = uniqueStrings(finding.factIds).filter((id) => !factMap.has(id))
       const comparisonGroups = new Set(requested.filter((fact) => fact.role === 'delta').map(groupKey))
-      const selected = uniqueFacts([...requested, ...availableFacts.filter((fact) => fact.pressKey === finding.pressKey && comparisonGroups.has(groupKey(fact)) && ['current', 'baseline', 'delta'].includes(fact.role))])
+      const selected = uniqueFacts([...requested, ...availableFacts.filter((fact) => fact.pressKey === pressKey && comparisonGroups.has(groupKey(fact)) && ['current', 'baseline', 'delta'].includes(fact.role))])
       const grouped = new Map<string, AiGroundingFact[]>()
       for (const fact of selected) { const key = groupKey(fact); grouped.set(key, [...(grouped.get(key) ?? []), fact]) }
       const contextId = (metric: string) => selected.find((fact) => fact.source === 'production_context' && fact.metric === metric && fact.usable)?.factId ?? null
       const selectedIds = new Set(selected.map(({ factId }) => factId))
-      const observationLinks = availableObservations.filter((observation) => observation.pressKey === finding.pressKey && observation.factIds.some((id) => selectedIds.has(id)) && observation.explorer).map((observation) => observation.explorer!)
-      const links = [...new Map([...observationLinks, { label: 'Inspect Radius evidence', href: `/raw-radius-explorer?press=${finding.pressKey}` }, { label: 'Open press overview', href: `/overview?press=${finding.pressKey}` }].map((link) => [link.href, link])).values()].slice(0, 4)
+      const observationLinks = availableObservations.filter((observation) => observation.pressKey === pressKey && observation.factIds.some((id) => selectedIds.has(id)) && observation.explorer).map((observation) => observation.explorer!)
+      const links = [...new Map([...observationLinks, { label: 'Inspect Radius evidence', href: `/raw-radius-explorer?press=${pressKey}` }, { label: 'Open press overview', href: `/overview?press=${pressKey}` }].map((link) => [link.href, link])).values()].slice(0, 4)
       return {
-        rank: finding.rank, pressKey: finding.pressKey, title: finding.title, importance: finding.importance, confidence: finding.confidence,
-        whyItMatters: finding.interpretation,
+        rank: findingIndex + 1, pressKey, title: finding.title, importance: finding.importance, confidence: finding.confidence,
+        whyItMatters: `${finding.interpretation} ${finding.whyWorthInvestigating}`.trim().slice(0, 700),
         facts: [...grouped.values()].slice(0, 8).map((group) => ({ label: group[0].label, factIds: group.map((fact) => fact.factId).slice(0, 4) })).concat(unknownIds.length ? [{ label: 'Selected evidence', factIds: unknownIds.slice(0, 4) }] : []).slice(0, 8),
         timestampFactIds: selected.filter((fact) => fact.timestamp).map((fact) => fact.factId).slice(0, 8),
         evidenceFactIds: selected.filter((fact) => ['radius', 'telemetry'].includes(fact.source) && fact.usable).map((fact) => fact.factId).slice(0, 12),

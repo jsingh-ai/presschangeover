@@ -1,4 +1,6 @@
 import { RADIUS_PRESS_KEYS, type RadiusPressKey } from '../radius/models.js'
+import { zodTextFormat } from 'openai/helpers/zod'
+import { z } from 'zod'
 
 export const AI_INVESTIGATOR_MAX_RANGE_MS = 7 * 24 * 60 * 60_000
 export const AI_INVESTIGATOR_ANALYSES = ['discover_unusual_behavior'] as const
@@ -94,24 +96,7 @@ export interface AiInvestigatorDraftContent {
   limitations: string[]
 }
 
-export interface AiInvestigatorDiscoveryDraftFinding {
-  rank: number
-  pressKey: RadiusPressKey
-  title: string
-  importance: 'high' | 'medium' | 'low'
-  confidence: 'high' | 'medium' | 'low'
-  interpretation: string
-  factIds: string[]
-  recommendedInvestigation: string
-}
-
-export interface AiInvestigatorDiscoveryDraftContent {
-  summary: string
-  findings: AiInvestigatorDiscoveryDraftFinding[]
-  limitations: string[]
-}
-
-const FACT_ID = { type: 'string', pattern: '^press(?:3|5|6|7|8|9|10|11|12|13|14|15)\\.[a-z0-9_.-]{3,160}$', maxLength: 180 }
+const FACT_ID = { type: 'string', pattern: '^press(?:3|5|6|7|8|9|10|11|12|13|14|15)\\.[A-Za-z0-9_.-]{3,160}$', maxLength: 180 }
 const LINK = { type: 'object', additionalProperties: false, required: ['label', 'href'], properties: { label: { type: 'string', maxLength: 80 }, href: { type: 'string', maxLength: 600 } } }
 
 export const AI_INVESTIGATOR_CONTENT_SCHEMA = {
@@ -135,30 +120,51 @@ export const AI_INVESTIGATOR_CONTENT_SCHEMA = {
   },
 } as const
 
-export const AI_INVESTIGATOR_DISCOVERY_SCHEMA = {
-  type: 'object', additionalProperties: false, required: ['summary', 'findings', 'limitations'],
-  properties: {
-    summary: { type: 'string', maxLength: 900 },
-    findings: { type: 'array', maxItems: 5, items: {
-      type: 'object', additionalProperties: false,
-      required: ['rank', 'pressKey', 'title', 'importance', 'confidence', 'interpretation', 'factIds', 'recommendedInvestigation'],
-      properties: {
-        rank: { type: 'integer', minimum: 1, maximum: 5 }, pressKey: { type: 'string', enum: RADIUS_PRESS_KEYS },
-        title: { type: 'string', maxLength: 140 }, importance: { type: 'string', enum: ['high', 'medium', 'low'] }, confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
-        interpretation: { type: 'string', maxLength: 500 },
-        factIds: { type: 'array', minItems: 1, maxItems: 18, items: FACT_ID },
-        recommendedInvestigation: { type: 'string', maxLength: 400 },
-      },
-    } },
-    limitations: { type: 'array', maxItems: 8, items: { type: 'string', maxLength: 350 } },
-  },
-} as const
+const AI_JUDGMENT_LEVELS = ['high', 'medium', 'low'] as const
+const AI_DISCOVERY_FACT_ID_PATTERN = /^press(?:3|5|6|7|8|9|10|11|12|13|14|15)\.[A-Za-z0-9_.-]{3,160}$/
+
+export const AI_INVESTIGATOR_DISCOVERY_RUNTIME_SCHEMA = z.object({
+  summary: z.string().min(1).max(900),
+  findings: z.array(z.object({
+    candidateId: z.string().min(1).max(64).regex(/^[A-Za-z0-9_.-]+$/),
+    title: z.string().min(1).max(140),
+    importance: z.enum(AI_JUDGMENT_LEVELS),
+    confidence: z.enum(AI_JUDGMENT_LEVELS),
+    factIds: z.array(z.string().regex(AI_DISCOVERY_FACT_ID_PATTERN).max(180)).min(1).max(18),
+    interpretation: z.string().min(1).max(500),
+    whyWorthInvestigating: z.string().min(1).max(500),
+    recommendedInvestigation: z.string().min(1).max(400),
+  }).strict()).max(5),
+  limitations: z.array(z.string().min(1).max(350)).max(8),
+}).strict()
+
+export type AiInvestigatorDiscoveryDraftContent = z.infer<typeof AI_INVESTIGATOR_DISCOVERY_RUNTIME_SCHEMA>
+export type AiInvestigatorDiscoveryDraftFinding = AiInvestigatorDiscoveryDraftContent['findings'][number]
+
+export const AI_INVESTIGATOR_DISCOVERY_TEXT_FORMAT = zodTextFormat(AI_INVESTIGATOR_DISCOVERY_RUNTIME_SCHEMA, 'process_intelligence_discovery')
+export const AI_INVESTIGATOR_DISCOVERY_SCHEMA = AI_INVESTIGATOR_DISCOVERY_TEXT_FORMAT.schema as Record<string, unknown>
+
+export interface AiInvestigatorValidationDiagnostic {
+  validationStage: 'final_schema'
+  schemaCode: string
+  path: string
+  expected?: string
+  receivedType: string
+  findingIndex?: number
+}
+
+export class AiInvestigatorValidationError extends Error {
+  constructor(public readonly diagnostic: AiInvestigatorValidationDiagnostic) {
+    super('structured_output_invalid')
+    this.name = 'AiInvestigatorValidationError'
+  }
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === 'object' && !Array.isArray(value) }
 function exactKeys(value: Record<string, unknown>, expected: string[]): boolean { const keys = Object.keys(value).sort(); const sorted = [...expected].sort(); return keys.length === sorted.length && keys.every((key, index) => key === sorted[index]) }
 function boundedString(value: unknown, maximum: number): value is string { return typeof value === 'string' && value.length <= maximum }
 function stringArray(value: unknown, maximumItems: number, maximumLength: number): value is string[] { return Array.isArray(value) && value.length <= maximumItems && value.every((item) => boundedString(item, maximumLength)) }
-function factId(value: unknown): value is string { return boundedString(value, 180) && /^press(?:3|5|6|7|8|9|10|11|12|13|14|15)\.[a-z0-9_.-]{3,160}$/.test(value) }
+function factId(value: unknown): value is string { return boundedString(value, 180) && /^press(?:3|5|6|7|8|9|10|11|12|13|14|15)\.[A-Za-z0-9_.-]{3,160}$/.test(value) }
 function safeInvestigatorHref(value: string): boolean { return /^\/(?:raw-radius-explorer|telemetry-event-explorer|overview|operational-analysis)(?:\?[A-Za-z0-9%&=._:+-]*)?$/.test(value) }
 
 export function validateAiInvestigatorDraft(value: unknown): AiInvestigatorDraftContent {
@@ -175,15 +181,65 @@ export function validateAiInvestigatorDraft(value: unknown): AiInvestigatorDraft
   return { summary: value.summary, findings, limitations: value.limitations }
 }
 
+function receivedType(value: unknown): string {
+  if (value === undefined) return 'missing'
+  if (value === null) return 'null'
+  if (Array.isArray(value)) return 'array'
+  if (typeof value === 'number' && Number.isInteger(value)) return 'integer'
+  return typeof value
+}
+
+function valueAtPath(value: unknown, path: PropertyKey[]): unknown {
+  let current = value
+  for (const part of path) {
+    if ((typeof part !== 'string' && typeof part !== 'number') || current === null || typeof current !== 'object') return undefined
+    current = (current as Record<PropertyKey, unknown>)[part]
+  }
+  return current
+}
+
+function safePath(path: PropertyKey[]): string {
+  if (!path.length) return '$'
+  return path.reduce<string>((result, part) => {
+    if (typeof part === 'number') return `${result}[${part}]`
+    const name = typeof part === 'string' && /^[A-Za-z][A-Za-z0-9_-]*$/.test(part) ? part : 'field'
+    return result ? `${result}.${name}` : name
+  }, '')
+}
+
+function schemaExpected(issue: z.core.$ZodIssue): string | undefined {
+  const item = issue as z.core.$ZodIssue & { expected?: unknown; maximum?: unknown; minimum?: unknown }
+  if (issue.path.at(-1) === 'importance' || issue.path.at(-1) === 'confidence') return AI_JUDGMENT_LEVELS.join('|')
+  if (issue.code === 'unrecognized_keys') return 'no additional properties'
+  if (issue.code === 'invalid_format') return 'authoritative fact ID'
+  if (issue.code === 'too_big' && typeof item.maximum === 'number') return `maximum ${item.maximum}`
+  if (issue.code === 'too_small' && typeof item.minimum === 'number') return `minimum ${item.minimum}`
+  return typeof item.expected === 'string' ? item.expected : undefined
+}
+
 export function validateAiInvestigatorDiscoveryDraft(value: unknown): AiInvestigatorDiscoveryDraftContent {
-  if (!isRecord(value) || !exactKeys(value, ['summary', 'findings', 'limitations']) || !boundedString(value.summary, 900) || !Array.isArray(value.findings) || value.findings.length > 5 || !stringArray(value.limitations, 8, 350)) throw new Error('invalid_investigator_response')
-  const findings = value.findings.map((candidate): AiInvestigatorDiscoveryDraftFinding => {
-    if (!isRecord(candidate) || !exactKeys(candidate, ['rank', 'pressKey', 'title', 'importance', 'confidence', 'interpretation', 'factIds', 'recommendedInvestigation'])) throw new Error('invalid_investigator_response')
-    if (!Number.isInteger(candidate.rank) || Number(candidate.rank) < 1 || Number(candidate.rank) > 5 || typeof candidate.pressKey !== 'string' || !RADIUS_PRESS_KEYS.includes(candidate.pressKey as RadiusPressKey) || !boundedString(candidate.title, 140) || !['high', 'medium', 'low'].includes(String(candidate.importance)) || !['high', 'medium', 'low'].includes(String(candidate.confidence)) || !boundedString(candidate.interpretation, 500) || !boundedString(candidate.recommendedInvestigation, 400)) throw new Error('invalid_investigator_response')
-    if (!Array.isArray(candidate.factIds) || candidate.factIds.length < 1 || candidate.factIds.length > 18 || !candidate.factIds.every(factId)) throw new Error('invalid_investigator_response')
-    return candidate as unknown as AiInvestigatorDiscoveryDraftFinding
+  const result = AI_INVESTIGATOR_DISCOVERY_RUNTIME_SCHEMA.safeParse(value)
+  if (result.success) return result.data
+  const first = result.error.issues[0]
+  const unrecognized = first.code === 'unrecognized_keys' ? first.keys[0] : undefined
+  const issuePath = [...first.path, ...(typeof unrecognized === 'string' ? [unrecognized] : [])]
+  const target = valueAtPath(value, issuePath)
+  const findingIndex = typeof issuePath[0] === 'string' && issuePath[0] === 'findings' && typeof issuePath[1] === 'number' ? issuePath[1] : undefined
+  throw new AiInvestigatorValidationError({
+    validationStage: 'final_schema',
+    schemaCode: first.code,
+    path: safePath(issuePath),
+    expected: schemaExpected(first),
+    receivedType: first.code === 'unrecognized_keys' ? 'property' : receivedType(target),
+    ...(findingIndex === undefined ? {} : { findingIndex }),
   })
-  return { summary: value.summary, findings, limitations: value.limitations }
+}
+
+export function parseAiInvestigatorDiscoveryDraft(text: string): AiInvestigatorDiscoveryDraftContent {
+  let value: unknown
+  try { value = JSON.parse(text) }
+  catch { throw new AiInvestigatorValidationError({ validationStage: 'final_schema', schemaCode: 'malformed_json', path: '$', expected: 'JSON object', receivedType: 'string' }) }
+  return validateAiInvestigatorDiscoveryDraft(value)
 }
 
 export function parseAiInvestigatorRequest(value: unknown): AiInvestigatorRequest {

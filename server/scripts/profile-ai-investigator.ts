@@ -44,7 +44,7 @@ if (press14.singleSynthesis.estimatedInputTokens > 3_000) throw new Error(`press
 if (allPresses.singleSynthesis.estimatedInputTokens > 6_000) throw new Error(`all_press_discovery_input_budget_exceeded:${allPresses.singleSynthesis.estimatedInputTokens}`)
 if (process.argv.includes('--summary')) console.log(JSON.stringify({
   generatedOffline: report.generatedOffline, openAiCalls: report.openAiCalls,
-  press14: { currentMulti: press14.currentMulti.estimatedInputTokens, optimizedMulti: press14.optimizedMulti.estimatedInputTokens, singleSynthesis: press14.singleSynthesis.estimatedInputTokens, outputTokens: DISCOVERY_OUTPUT_TOKENS, analytics: press14.analytics, performance: press14.performance },
+  press14: { currentMulti: press14.currentMulti.estimatedInputTokens, optimizedMulti: press14.optimizedMulti.estimatedInputTokens, singleSynthesis: press14.singleSynthesis.estimatedInputTokens, exactRequestBytes: press14.singleSynthesis.exactRequestBytes, outputSchemaBytes: press14.singleSynthesis.contributors.find((item) => item.name === 'structured output schema')?.exactBytes ?? 0, outputTokens: DISCOVERY_OUTPUT_TOKENS, analytics: press14.analytics, performance: press14.performance },
   allPresses: { currentMulti: allPresses.currentMulti.estimatedInputTokens, optimizedMulti: allPresses.optimizedMulti.estimatedInputTokens, singleSynthesis: allPresses.singleSynthesis.estimatedInputTokens, outputTokens: DISCOVERY_OUTPUT_TOKENS, analytics: allPresses.analytics, performance: allPresses.performance },
   allPressesCurrentTopContributors: allPresses.topContributors,
   candidatePackages,

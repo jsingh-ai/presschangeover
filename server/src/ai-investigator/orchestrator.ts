@@ -3,8 +3,8 @@ import OpenAI from 'openai'
 import type { ResponseInput, ResponseInputItem } from 'openai/resources/responses/responses'
 import type { AiInvestigatorConfig } from '../config.js'
 import type { RadiusPressKey } from '../radius/models.js'
-import { AI_INVESTIGATOR_CONTENT_SCHEMA, AI_INVESTIGATOR_DISCOVERY_SCHEMA, type AiGroundingFact, type AiInvestigatorContent, type AiInvestigatorDraftContent, type AiInvestigatorRequest, type AiInvestigatorResult, validateAiInvestigatorDiscoveryDraft, validateAiInvestigatorDraft } from './contracts.js'
-import { buildDiscoveryPreflight, DISCOVERY_CANDIDATE_LIMIT, DISCOVERY_INSTRUCTIONS, DISCOVERY_OUTPUT_TOKENS, DISCOVERY_PROMPT_CACHE_KEY, expandDiscoveryDraft } from './discovery.js'
+import { AI_INVESTIGATOR_CONTENT_SCHEMA, AI_INVESTIGATOR_DISCOVERY_SCHEMA, AI_INVESTIGATOR_DISCOVERY_TEXT_FORMAT, AiInvestigatorValidationError, parseAiInvestigatorDiscoveryDraft, type AiGroundingFact, type AiInvestigatorContent, type AiInvestigatorDraftContent, type AiInvestigatorRequest, type AiInvestigatorResult, validateAiInvestigatorDiscoveryDraft, validateAiInvestigatorDraft } from './contracts.js'
+import { buildDiscoveryPreflight, DISCOVERY_CANDIDATE_LIMIT, DISCOVERY_INSTRUCTIONS, DISCOVERY_OUTPUT_TOKENS, DISCOVERY_PROMPT_CACHE_KEY, expandDiscoveryDraft, validateDiscoveryReferences } from './discovery.js'
 import { groundAiInvestigatorDraft } from './grounding.js'
 import { AiInvestigatorReadOnlyToolRegistry, type AiInvestigatorToolDefinition, type AiInvestigatorToolExecutor, type AiToolResult } from './read-only-tools.js'
 
@@ -35,6 +35,11 @@ export interface AiModelResponse {
   toolCalls: AiModelToolCall[]
   usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number }
   http?: AiModelHttpMetadata
+  responseStatus?: string
+  incompleteReason?: string
+  refused?: boolean
+  outputItemTypes?: string[]
+  parsedOutput?: unknown | null
 }
 
 export type AiModelPhase = 'investigation' | 'final_synthesis' | 'grounding_correction'
@@ -42,9 +47,26 @@ export type AiModelToolChoice = 'auto' | 'none'
 
 export interface AiModelRequestOptions {
   structuredOutputSchema?: Record<string, unknown>
+  structuredOutputFormat?: unknown
   structuredOutputName?: string
   maxOutputTokens?: number
   promptCacheKey?: string
+}
+
+class AiModelStructuredOutputError extends Error {
+  constructor(
+    public readonly responseId: string | undefined,
+    public readonly responseStatus: string | undefined,
+    public readonly incompleteReason: string | undefined,
+    public readonly outputItemTypes: string[],
+    public readonly refused: boolean,
+    public readonly usage: AiModelResponse['usage'],
+    public readonly http: AiModelHttpMetadata,
+    public readonly validationDiagnostic: { validationStage: 'sdk_parse'; schemaCode: string; path: string; expected?: string; receivedType: string },
+  ) {
+    super('structured_output_invalid')
+    this.name = 'AiModelStructuredOutputError'
+  }
 }
 
 export interface AiInvestigatorModelClient {
@@ -83,32 +105,84 @@ export function safeOpenAiHttpMetadata(headers: unknown, requestId?: unknown): A
   return metadata
 }
 
+function safeOutputItemTypes(output: unknown): string[] {
+  if (!Array.isArray(output)) return []
+  const types = output.flatMap((item) => {
+    if (!item || typeof item !== 'object') return []
+    const record = item as Record<string, unknown>; const itemType = typeof record.type === 'string' ? record.type : 'unknown'
+    if (itemType !== 'message' || !Array.isArray(record.content)) return [itemType]
+    return [itemType, ...record.content.flatMap((content) => content && typeof content === 'object' && typeof (content as Record<string, unknown>).type === 'string' ? [(content as Record<string, unknown>).type as string] : [])]
+  })
+  return [...new Set(types)]
+}
+
+function safeResponseEnvelope(value: unknown, headers: unknown): Pick<AiModelResponse, 'id' | 'responseStatus' | 'incompleteReason' | 'refused' | 'outputItemTypes' | 'usage' | 'http'> {
+  const record = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  const incomplete = record.incomplete_details && typeof record.incomplete_details === 'object' ? record.incomplete_details as Record<string, unknown> : {}
+  const usage = record.usage && typeof record.usage === 'object' ? record.usage as Record<string, unknown> : {}
+  const outputItemTypes = safeOutputItemTypes(record.output)
+  return {
+    id: typeof record.id === 'string' ? record.id : 'unknown_response',
+    responseStatus: typeof record.status === 'string' ? record.status : undefined,
+    incompleteReason: typeof incomplete.reason === 'string' ? incomplete.reason : undefined,
+    refused: outputItemTypes.includes('refusal'),
+    outputItemTypes,
+    usage: Object.keys(usage).length ? { inputTokens: typeof usage.input_tokens === 'number' ? usage.input_tokens : undefined, outputTokens: typeof usage.output_tokens === 'number' ? usage.output_tokens : undefined, totalTokens: typeof usage.total_tokens === 'number' ? usage.total_tokens : undefined } : undefined,
+    http: safeOpenAiHttpMetadata(headers),
+  }
+}
+
+function safeSdkParseDiagnostic(error: unknown): AiModelStructuredOutputError['validationDiagnostic'] {
+  if (error instanceof SyntaxError) return { validationStage: 'sdk_parse', schemaCode: 'malformed_json', path: '$', expected: 'JSON object', receivedType: 'string' }
+  const issues = error && typeof error === 'object' && Array.isArray((error as { issues?: unknown }).issues) ? (error as { issues: Array<Record<string, unknown>> }).issues : []
+  const issue = issues[0]; const rawPath = Array.isArray(issue?.path) ? issue.path : []
+  const path = rawPath.reduce<string>((result, part) => typeof part === 'number' ? `${result}[${part}]` : `${result ? `${result}.` : ''}${typeof part === 'string' && /^[A-Za-z][A-Za-z0-9_-]*$/.test(part) ? part : 'field'}`, '') || '$'
+  const expected = rawPath.at(-1) === 'importance' || rawPath.at(-1) === 'confidence' ? 'high|medium|low' : typeof issue?.expected === 'string' ? issue.expected : undefined
+  return { validationStage: 'sdk_parse', schemaCode: typeof issue?.code === 'string' ? issue.code : 'sdk_parse_failed', path, expected, receivedType: typeof issue?.received === 'string' ? issue.received : 'unknown' }
+}
+
 export class OpenAiResponsesInvestigatorClient implements AiInvestigatorModelClient {
   private readonly client: OpenAI
 
-  constructor(private readonly config: AiInvestigatorConfig) {
+  constructor(private readonly config: AiInvestigatorConfig, fetchImplementation?: typeof fetch) {
     if (!config.apiKey) throw new Error('ai_investigator_not_configured')
-    this.client = new OpenAI({ apiKey: config.apiKey, timeout: config.openAiTimeoutMs, maxRetries: 0 })
+    this.client = new OpenAI({ apiKey: config.apiKey, timeout: config.openAiTimeoutMs, maxRetries: 0, ...(fetchImplementation ? { fetch: fetchImplementation } : {}) })
   }
 
   async create(input: unknown[], instructions: string, tools: AiInvestigatorToolDefinition[], toolChoice: AiModelToolChoice, signal: AbortSignal, options: AiModelRequestOptions = {}): Promise<AiModelResponse> {
     const payload = buildAiResponsesRequestPayload(this.config.model, input, instructions, tools, toolChoice, options)
-    const wrapped = await this.client.responses.create(payload as never, { signal, timeout: this.config.openAiTimeoutMs, maxRetries: 0 }).withResponse()
+    const requestOptions = { signal, timeout: this.config.openAiTimeoutMs, maxRetries: 0 }
+    if (options.structuredOutputFormat && toolChoice === 'none') {
+      const operation = this.client.responses.parse(payload as never, requestOptions)
+      const rawResponse = await operation.asResponse(); const rawEnvelope = await rawResponse.clone().json().catch(() => undefined)
+      let response
+      try { response = await operation }
+      catch (error) {
+        const envelope = safeResponseEnvelope(rawEnvelope, rawResponse.headers)
+        throw new AiModelStructuredOutputError(envelope.id, envelope.responseStatus, envelope.incompleteReason, envelope.outputItemTypes ?? [], envelope.refused ?? false, envelope.usage, envelope.http ?? {}, safeSdkParseDiagnostic(error))
+      }
+      const toolCalls = response.output.filter((item) => item.type === 'function_call').map((item) => ({ type: 'function_call' as const, callId: item.call_id, name: item.name, arguments: item.arguments }))
+      const outputItemTypes = safeOutputItemTypes(response.output)
+      return { id: response.id, outputText: response.output_text, outputItems: [], toolCalls, parsedOutput: response.output_parsed, responseStatus: response.status, incompleteReason: response.incomplete_details?.reason, refused: outputItemTypes.includes('refusal'), outputItemTypes, usage: response.usage ? { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens, totalTokens: response.usage.total_tokens } : undefined, http: safeOpenAiHttpMetadata(rawResponse.headers) }
+    }
+    const wrapped = await this.client.responses.create(payload as never, requestOptions).withResponse()
     const response = wrapped.data
     const toolCalls = response.output.filter((item) => item.type === 'function_call').map((item) => ({ type: 'function_call' as const, callId: item.call_id, name: item.name, arguments: item.arguments }))
-    return { id: response.id, outputText: response.output_text, outputItems: [], toolCalls, usage: response.usage ? { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens, totalTokens: response.usage.total_tokens } : undefined, http: safeOpenAiHttpMetadata(wrapped.response.headers, wrapped.request_id) }
+    const outputItemTypes = safeOutputItemTypes(response.output)
+    return { id: response.id, outputText: response.output_text, outputItems: [], toolCalls, responseStatus: response.status, incompleteReason: response.incomplete_details?.reason, refused: outputItemTypes.includes('refusal'), outputItemTypes, usage: response.usage ? { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens, totalTokens: response.usage.total_tokens } : undefined, http: safeOpenAiHttpMetadata(wrapped.response.headers, wrapped.request_id) }
   }
 }
 
 export function buildAiResponsesRequestPayload(model: string, input: unknown[], instructions: string, tools: AiInvestigatorToolDefinition[], toolChoice: AiModelToolChoice, options: AiModelRequestOptions = {}) {
   const schema = options.structuredOutputSchema ?? AI_INVESTIGATOR_CONTENT_SCHEMA
+  const format = options.structuredOutputFormat ?? { type: 'json_schema', name: options.structuredOutputName ?? 'process_intelligence_investigation', strict: true, schema }
   return {
     model,
     instructions,
     input: input as ResponseInput,
     ...(tools.length ? { tools } : {}),
     tool_choice: toolChoice,
-    text: toolChoice === 'none' ? { verbosity: 'low', format: { type: 'json_schema', name: options.structuredOutputName ?? 'process_intelligence_investigation', strict: true, schema } } : { verbosity: 'low' },
+    text: toolChoice === 'none' ? { verbosity: 'low', format } : { verbosity: 'low' },
     max_output_tokens: options.maxOutputTokens ?? (toolChoice === 'auto' ? INVESTIGATION_OUTPUT_TOKENS : FINAL_OUTPUT_TOKENS),
     ...(options.promptCacheKey ? { prompt_cache_key: options.promptCacheKey } : {}),
     store: false,
@@ -150,12 +224,26 @@ function errorCode(error: unknown): string {
 
 function safeModelError(error: unknown): Record<string, unknown> {
   if (!error || typeof error !== 'object') return { errorType: typeof error }
-  const candidate = error as { constructor?: { name?: string }; status?: unknown; code?: unknown; type?: unknown; request_id?: unknown; headers?: unknown }
+  const candidate = error as { constructor?: { name?: string }; status?: unknown; code?: unknown; type?: unknown; request_id?: unknown; headers?: unknown; responseId?: unknown; responseStatus?: unknown; incompleteReason?: unknown; outputItemTypes?: unknown; refused?: unknown; usage?: unknown; http?: unknown; validationDiagnostic?: unknown }
+  const usage = candidate.usage && typeof candidate.usage === 'object' ? candidate.usage as Record<string, unknown> : {}
+  const http = candidate.http && typeof candidate.http === 'object' ? candidate.http as Record<string, unknown> : {}
+  const safeHttp = Object.fromEntries(['requestId', 'processingMs', 'limitTokens', 'remainingTokens', 'resetTokens', 'limitRequests', 'remainingRequests', 'resetRequests', 'limitProjectTokens', 'remainingProjectTokens', 'resetProjectTokens', 'retryAfter'].flatMap((key) => typeof http[key] === 'string' ? [[key, http[key]]] : []))
+  const diagnostic = candidate.validationDiagnostic && typeof candidate.validationDiagnostic === 'object' ? candidate.validationDiagnostic as Record<string, unknown> : {}
+  const safeDiagnostic: Record<string, unknown> = Object.fromEntries(['validationStage', 'schemaCode', 'path', 'expected', 'receivedType', 'candidateId', 'factId'].flatMap((key) => typeof diagnostic[key] === 'string' && String(diagnostic[key]).length <= 240 ? [[key, diagnostic[key]]] : []))
+  if (typeof diagnostic.findingIndex === 'number' && Number.isInteger(diagnostic.findingIndex)) safeDiagnostic.findingIndex = diagnostic.findingIndex
   return {
     errorType: candidate.constructor?.name ?? 'Error',
     ...(typeof candidate.status === 'number' ? { status: candidate.status } : {}),
     ...(typeof candidate.code === 'string' ? { code: candidate.code } : {}),
     ...(typeof candidate.type === 'string' ? { type: candidate.type } : {}),
+    ...(typeof candidate.responseId === 'string' && candidate.responseId.length <= 200 ? { responseId: candidate.responseId } : {}),
+    ...(typeof candidate.responseStatus === 'string' ? { responseStatus: candidate.responseStatus } : {}),
+    ...(typeof candidate.incompleteReason === 'string' ? { incompleteReason: candidate.incompleteReason } : {}),
+    ...(Array.isArray(candidate.outputItemTypes) && candidate.outputItemTypes.every((item) => typeof item === 'string') ? { outputItemTypes: candidate.outputItemTypes } : {}),
+    ...(typeof candidate.refused === 'boolean' ? { refused: candidate.refused } : {}),
+    ...(Object.keys(usage).length ? { usage: { inputTokens: typeof usage.inputTokens === 'number' ? usage.inputTokens : undefined, outputTokens: typeof usage.outputTokens === 'number' ? usage.outputTokens : undefined, totalTokens: typeof usage.totalTokens === 'number' ? usage.totalTokens : undefined } } : {}),
+    ...safeDiagnostic,
+    ...safeHttp,
     ...safeOpenAiHttpMetadata(candidate.headers, candidate.request_id),
   }
 }
@@ -293,30 +381,46 @@ export class AiInvestigatorOrchestrator {
       evidence = preflight.evidence
       for (const item of evidence) safeLog(this.logger, 'info', { event: 'ai_investigator_tool', architecture: 'single_synthesis', analysisId, tool: item.name, durationMs: item.durationMs, success: true, payloadBytes: utf8Bytes(item.result) })
       const input: unknown[] = [{ role: 'user', content: JSON.stringify(preflight.modelInput) } satisfies ResponseInputItem]
-      const options: AiModelRequestOptions = { structuredOutputSchema: AI_INVESTIGATOR_DISCOVERY_SCHEMA as unknown as Record<string, unknown>, structuredOutputName: 'process_intelligence_discovery', maxOutputTokens: DISCOVERY_OUTPUT_TOKENS, promptCacheKey: DISCOVERY_PROMPT_CACHE_KEY }
+      const options: AiModelRequestOptions = { structuredOutputSchema: AI_INVESTIGATOR_DISCOVERY_SCHEMA, structuredOutputFormat: AI_INVESTIGATOR_DISCOVERY_TEXT_FORMAT, structuredOutputName: 'process_intelligence_discovery', maxOutputTokens: DISCOVERY_OUTPUT_TOKENS, promptCacheKey: DISCOVERY_PROMPT_CACHE_KEY }
       const payload = buildAiResponsesRequestPayload(this.config.model, input, DISCOVERY_INSTRUCTIONS, [], 'none', options)
-      safeLog(this.logger, 'info', { event: 'ai_investigator_model_request', architecture: 'single_synthesis', analysisId, requestNumber: 1, phase: 'final_synthesis', toolsEnabled: false, toolChoice: 'none', availableTools: [], estimatedInputTokens: Math.ceil(utf8Bytes(payload) / 4), maxOutputTokens: DISCOVERY_OUTPUT_TOKENS, requestBytes: utf8Bytes(payload), modelFacingEvidenceBytes: utf8Bytes(preflight.modelInput), toolResultsIncluded: evidence.length, priorModelMessagesIncluded: 0, priorModelResultsIncluded: 0 })
+      safeLog(this.logger, 'info', { event: 'ai_investigator_model_request', architecture: 'single_synthesis', analysisId, requestNumber: 1, phase: 'final_synthesis', toolsEnabled: false, toolChoice: 'none', availableTools: [], candidateCount: preflight.candidates.length, estimatedInputTokens: Math.ceil(utf8Bytes(payload) / 4), maxOutputTokens: DISCOVERY_OUTPUT_TOKENS, requestBytes: utf8Bytes(payload), modelFacingEvidenceBytes: utf8Bytes(preflight.modelInput), toolResultsIncluded: evidence.length, priorModelMessagesIncluded: 0, priorModelResultsIncluded: 0 })
       let response: AiModelResponse
       try {
         response = await this.model.create(input, DISCOVERY_INSTRUCTIONS, [], 'none', signal, options)
-        safeLog(this.logger, 'info', { event: 'ai_investigator_model_response', architecture: 'single_synthesis', analysisId, requestNumber: 1, responseId: response.id, phase: 'final_synthesis', usage: response.usage, ...response.http })
+        safeLog(this.logger, 'info', { event: 'ai_investigator_model_response', architecture: 'single_synthesis', analysisId, requestNumber: 1, responseId: response.id, phase: 'final_synthesis', responseStatus: response.responseStatus, incompleteReason: response.incompleteReason, refused: response.refused ?? false, outputItemTypes: response.outputItemTypes ?? [], usage: response.usage, ...response.http })
       } catch (error) {
+        if (error instanceof AiModelStructuredOutputError) safeLog(this.logger, 'error', { event: 'ai_investigator_validation_failed', architecture: 'single_synthesis', analysisId, responseId: error.responseId, responseStatus: error.responseStatus, incompleteReason: error.incompleteReason, refused: error.refused, outputItemTypes: error.outputItemTypes, ...error.validationDiagnostic })
         safeLog(this.logger, 'error', { event: 'ai_investigator_model_failure', architecture: 'single_synthesis', analysisId, requestNumber: 1, phase: 'final_synthesis', ...safeModelError(error) })
         throw error
       }
-      if (response.toolCalls.length || !response.outputText) throw new Error('invalid_final_synthesis')
-      const compactDraft = validateAiInvestigatorDiscoveryDraft(JSON.parse(response.outputText))
-      const suppliedPresses = new Set(preflight.candidates.map((candidate) => candidate.pressKey)); const ranks = new Set<number>(); const findingPresses = new Set<string>()
-      for (const finding of compactDraft.findings) {
-        if (!suppliedPresses.has(finding.pressKey) || ranks.has(finding.rank) || findingPresses.has(finding.pressKey)) throw new Error('invalid_investigator_response')
-        ranks.add(finding.rank); findingPresses.add(finding.pressKey)
+      if (response.refused) { safeLog(this.logger, 'error', { event: 'ai_investigator_validation_failed', architecture: 'single_synthesis', analysisId, responseId: response.id, validationStage: 'response_status', schemaCode: 'openai_refusal', path: '$', receivedType: 'refusal', responseStatus: response.responseStatus, outputItemTypes: response.outputItemTypes ?? [] }); throw new Error('openai_refusal') }
+      if (response.responseStatus === 'incomplete') { safeLog(this.logger, 'error', { event: 'ai_investigator_validation_failed', architecture: 'single_synthesis', analysisId, responseId: response.id, validationStage: 'response_status', schemaCode: 'openai_incomplete', path: '$', expected: 'completed', receivedType: 'incomplete', incompleteReason: response.incompleteReason, outputItemTypes: response.outputItemTypes ?? [] }); throw new Error('openai_incomplete') }
+      if (response.toolCalls.length) throw new Error('invalid_final_synthesis')
+      let compactDraft
+      try {
+        if ('parsedOutput' in response) {
+          if (response.parsedOutput === null || response.parsedOutput === undefined) throw new Error('structured_output_missing')
+          compactDraft = validateAiInvestigatorDiscoveryDraft(response.parsedOutput)
+        } else {
+          if (!response.outputText) throw new Error('structured_output_missing')
+          compactDraft = parseAiInvestigatorDiscoveryDraft(response.outputText)
+        }
+        safeLog(this.logger, 'info', { event: 'ai_investigator_validation_passed', architecture: 'single_synthesis', analysisId, responseId: response.id, validationStage: 'final_schema', findingCount: compactDraft.findings.length })
+      } catch (error) {
+        if (error instanceof AiInvestigatorValidationError) safeLog(this.logger, 'error', { event: 'ai_investigator_validation_failed', architecture: 'single_synthesis', analysisId, responseId: response.id, ...error.diagnostic })
+        else safeLog(this.logger, 'error', { event: 'ai_investigator_validation_failed', architecture: 'single_synthesis', analysisId, responseId: response.id, validationStage: 'final_schema', schemaCode: 'structured_output_missing', path: '$', expected: 'parsed object', receivedType: 'missing', outputItemTypes: response.outputItemTypes ?? [] })
+        throw error
       }
-      const expanded = expandDiscoveryDraft(compactDraft, preflight.facts, preflight.candidates.flatMap(({ observations }) => observations))
+      const references = validateDiscoveryReferences(compactDraft, preflight.candidates, preflight.facts)
+      for (const issue of references.issues) safeLog(this.logger, 'error', { event: 'ai_investigator_validation_failed', architecture: 'single_synthesis', analysisId, responseId: response.id, ...issue })
+      if (!references.issues.length) safeLog(this.logger, 'info', { event: 'ai_investigator_validation_passed', architecture: 'single_synthesis', analysisId, responseId: response.id, validationStage: 'grounding_reference', findingCount: references.accepted.findings.length })
+      const expanded = expandDiscoveryDraft(references.accepted, preflight.facts, preflight.candidates.flatMap(({ observations }) => observations))
       expanded.limitations = [...new Set([...expanded.limitations, ...preflight.limitations])]
       const grounded = groundAiInvestigatorDraft(expanded, preflight.facts, request, fleetTable(evidence))
-      const grounding = { acceptedUnchanged: grounded.content.findings.length, corrected: 0, omitted: grounded.omitted, correctionAttempted: false }
-      if (!grounded.issues.length) return finish('complete', grounded.content, grounding)
-      safeLog(this.logger, 'info', { event: 'ai_investigator_grounding_rejected', architecture: 'single_synthesis', analysisId, issueCount: grounded.issues.length, issues: grounded.issues.map(({ findingRank, code }) => ({ findingRank, code })) })
+      const referenceOmitted = new Set(references.issues.map((issue) => issue.findingIndex)).size
+      const grounding = { acceptedUnchanged: grounded.content.findings.length, corrected: 0, omitted: grounded.omitted + referenceOmitted, correctionAttempted: false }
+      if (!grounded.issues.length && !references.issues.length) return finish('complete', grounded.content, grounding)
+      if (grounded.issues.length) safeLog(this.logger, 'info', { event: 'ai_investigator_grounding_rejected', architecture: 'single_synthesis', analysisId, issueCount: grounded.issues.length, issues: grounded.issues.map(({ findingRank, code }) => ({ findingRank, code })) })
       grounded.content.summary = 'Some AI interpretations could not be verified. Only findings grounded in deterministic ProcessIntelligence evidence are shown.'
       grounded.content.limitations = [...grounded.content.limitations, 'Some AI interpretations could not be verified against deterministic ProcessIntelligence evidence and were omitted.']
       return finish('partial', grounded.content, grounding)

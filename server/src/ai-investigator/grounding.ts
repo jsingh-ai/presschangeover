@@ -60,6 +60,8 @@ function comparisonGroupValid(facts: AiGroundingFact[]): boolean {
     productionPercent: 'productionPercentagePointDelta',
     interruptions: 'interruptionDelta',
     longestInterruptionMinutes: 'longestInterruptionDeltaMinutes',
+    radiusDriverDurationMinutes: 'radiusDriverDurationDeltaMinutes',
+    radiusDriverOccurrences: 'radiusDriverOccurrenceDelta',
   }
   return expectedDelta[current.metric] === delta.metric
 }

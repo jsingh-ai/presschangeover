@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { AiInvestigatorConfig } from '../src/config.js'
-import { AI_INVESTIGATOR_DISCOVERY_SCHEMA, validateAiInvestigatorDiscoveryDraft, type AiInvestigatorDiscoveryDraftContent } from '../src/ai-investigator/contracts.js'
+import { AI_INVESTIGATOR_DISCOVERY_SCHEMA, AI_INVESTIGATOR_DISCOVERY_TEXT_FORMAT, validateAiInvestigatorDiscoveryDraft, type AiInvestigatorDiscoveryDraftContent } from '../src/ai-investigator/contracts.js'
 import { buildDiscoveryPreflight, DISCOVERY_INSTRUCTIONS, DISCOVERY_OUTPUT_TOKENS, expandDiscoveryDraft } from '../src/ai-investigator/discovery.js'
 import { groundAiInvestigatorDraft } from '../src/ai-investigator/grounding.js'
 import { buildAiResponsesRequestPayload, AiInvestigatorOrchestrator, type AiInvestigatorModelClient } from '../src/ai-investigator/orchestrator.js'
@@ -19,7 +19,7 @@ describe('AI Investigator deterministic discovery preflight', () => {
     for (const candidateLimit of [3, 5, 12]) {
       const preflight = await buildDiscoveryPreflight(new DiscoveryFixtureExecutor(), request, new AbortController().signal, { candidateLimit })
       assert.equal(preflight.candidates.length, Math.min(candidateLimit, 5))
-      const payload = buildAiResponsesRequestPayload('test-model', [{ role: 'user', content: JSON.stringify(preflight.modelInput) }], DISCOVERY_INSTRUCTIONS, [], 'none', { structuredOutputSchema: AI_INVESTIGATOR_DISCOVERY_SCHEMA as unknown as Record<string, unknown>, structuredOutputName: 'process_intelligence_discovery', maxOutputTokens: DISCOVERY_OUTPUT_TOKENS })
+      const payload = buildAiResponsesRequestPayload('test-model', [{ role: 'user', content: JSON.stringify(preflight.modelInput) }], DISCOVERY_INSTRUCTIONS, [], 'none', { structuredOutputSchema: AI_INVESTIGATOR_DISCOVERY_SCHEMA, structuredOutputFormat: AI_INVESTIGATOR_DISCOVERY_TEXT_FORMAT, structuredOutputName: 'process_intelligence_discovery', maxOutputTokens: DISCOVERY_OUTPUT_TOKENS })
       const profile = profileAiResponsesRequest(payload)
       assert.equal(profile.exactRequestBytes, Buffer.byteLength(JSON.stringify(payload), 'utf8'))
       profiles.push({ candidateLimit, ...profile })
@@ -51,7 +51,7 @@ describe('AI Investigator deterministic discovery preflight', () => {
 
   it('expands the compact model draft into the rich grounded UI contract server-side', async () => {
     const preflight = await buildDiscoveryPreflight(new DiscoveryFixtureExecutor(), { ...request, scope: { pressKey: 'press14' } }, new AbortController().signal)
-    const draft: AiInvestigatorDiscoveryDraftContent = { summary: 'Press 14 has material comparative signals.', findings: [{ rank: 1, pressKey: 'press14', title: 'Production time declined', importance: 'high', confidence: 'high', interpretation: 'The deterministic comparison warrants review.', factIds: ['press14.production_percent.delta', 'press14.longest_interruption_minutes.delta', 'press14.radius_driver.driver1.duration_minutes.current'], recommendedInvestigation: 'Inspect the synchronized Radius episodes.' }], limitations: ['Advisory result.'] }
+    const draft: AiInvestigatorDiscoveryDraftContent = { summary: 'Press 14 has material comparative signals.', findings: [{ candidateId: 'press14', title: 'Production time declined', importance: 'high', confidence: 'high', interpretation: 'The deterministic comparison warrants review.', whyWorthInvestigating: 'The combined changes merit an operator review.', factIds: ['press14.production_percent.delta', 'press14.longest_interruption_minutes.delta', 'press14.radius_driver.driver1.duration_minutes.current'], recommendedInvestigation: 'Inspect the synchronized Radius episodes.' }], limitations: ['Advisory result.'] }
     assert.deepEqual(validateAiInvestigatorDiscoveryDraft(draft), draft)
     const expanded = expandDiscoveryDraft(draft, preflight.facts)
     assert.deepEqual(expanded.findings[0].facts[0].factIds, ['press14.production_percent.delta', 'press14.production_percent.current', 'press14.production_percent.baseline'])
@@ -64,12 +64,13 @@ describe('AI Investigator deterministic discovery preflight', () => {
 
   it('uses exactly one tool-free model synthesis request on the deployed API path', async () => {
     const executor = new DiscoveryFixtureExecutor(); const observed: Array<{ tools: number; options: unknown }> = []
-    const draft: AiInvestigatorDiscoveryDraftContent = { summary: 'One material signal.', findings: [{ rank: 1, pressKey: 'press14', title: 'Production time declined', importance: 'high', confidence: 'high', interpretation: 'The deterministic comparison warrants review.', factIds: ['press14.production_percent.delta'], recommendedInvestigation: 'Inspect Radius episodes.' }], limitations: [] }
+    const draft: AiInvestigatorDiscoveryDraftContent = { summary: 'One material signal.', findings: [{ candidateId: 'press14', title: 'Production time declined', importance: 'high', confidence: 'high', interpretation: 'The deterministic comparison warrants review.', whyWorthInvestigating: 'The change is material enough to prioritize.', factIds: ['press14.production_percent.delta'], recommendedInvestigation: 'Inspect Radius episodes.' }], limitations: [] }
     const model: AiInvestigatorModelClient = { create: async (_input, _instructions, tools, _choice, _signal, options) => { observed.push({ tools: tools.length, options }); return { id: 'offline-model', outputText: JSON.stringify(draft), outputItems: [], toolCalls: [] } } }
     const result = await new AiInvestigatorOrchestrator(config, executor, model, false).analyzeDiscovery({ ...request, scope: { pressKey: 'press14' } })
     assert.equal(result.status, 'complete'); assert.equal(result.findings.length, 1); assert.equal(result.toolCallsUsed, 3)
     assert.equal(observed.length, 1); assert.equal(observed[0].tools, 0)
     assert.deepEqual((observed[0].options as { structuredOutputName: string; maxOutputTokens: number }).structuredOutputName, 'process_intelligence_discovery')
+    assert.equal((observed[0].options as { structuredOutputFormat?: unknown }).structuredOutputFormat, AI_INVESTIGATOR_DISCOVERY_TEXT_FORMAT)
   })
 
   it('stops after the first failed discovery synthesis request without retry or fallback', async () => {
