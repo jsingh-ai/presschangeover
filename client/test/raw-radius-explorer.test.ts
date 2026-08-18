@@ -280,4 +280,11 @@ describe('Raw Radius Code Explorer client', () => {
     assert.match(rawRowSource, />Review<select/)
     assert.doesNotMatch(rawRowSource, /Biggest move/)
   })
+
+  it('adds progressive physical, context, suggestions, phase, sequence, and lazy history evidence without replacing the browser', () => {
+    assert.match(pageSource, /Recorded Radius/); assert.match(pageSource, /Physical change/); assert.match(pageSource, /Not resolved from available telemetry/)
+    assert.match(pageSource, /explorer-context-strip/); assert.match(pageSource, /Suggested Evidence/); assert.match(pageSource, /Preview/); assert.match(pageSource, /Unpin/)
+    assert.match(pageSource, /What changed/); assert.match(pageSource, /Radius sequence/); assert.match(pageSource, /Historical context/); assert.match(pageSource, /onToggle=.*loadHistory/)
+    assert.match(apiSource, /\/api\/radius\/raw-explorer\/history/); assert.match(pageSource, /raw-browser-tabs/); assert.match(pageSource, /Search telemetry/)
+  })
 })

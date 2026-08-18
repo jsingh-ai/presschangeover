@@ -92,4 +92,11 @@ describe('Telemetry Event Explorer service', () => {
     const container = await service.preview({ source: source(119, 'Container Payload'), pressKey: 'press14', deckNumber: null, fromUtc, toUtc })
     assert.equal(container.plottable, false); assert.deepEqual(container.observations, [])
   })
+
+  it('summarizes only matching bounded search occurrences without target-control claims', async () => {
+    const { service } = fixture(); const result = await service.search({ fromUtc, toUtc, source: { kind: 'canonical', canonicalId: 'anilox.drive.temperature.actual' }, pressKey: 'press14', deckNumber: 1, rule: { kind: 'threshold', operator: '>', threshold: 200 }, chartContextMinutes: 20 }); const selected = result.occurrences[0]!
+    const supplied = Array.from({ length: 600 }, (_item, index) => ({ ...selected, occurrenceId: `event-${index}`, durationSeconds: index + 1 }))
+    const summary = service.historicalSummary({ occurrence: selected, occurrences: supplied })
+    assert.equal(summary.supportCount, 500); assert.equal(summary.metrics.truncatedAt, 500); assert.match(summary.scope, /exact source identity/); assert.doesNotMatch(summary.limitations.join(' '), /cause|control cohort/i)
+  })
 })

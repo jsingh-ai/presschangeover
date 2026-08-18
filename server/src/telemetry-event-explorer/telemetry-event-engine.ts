@@ -156,28 +156,6 @@ export function detectThresholdEvents(input: {
   return result
 }
 
-interface DeltaCandidate {
-  direction: 'increase' | 'decrease'
-  baseline: NumericEventObservation
-  actualDelta: number
-  elapsedSeconds: number
-}
-
-function deltaCandidate(history: NumericEventObservation[], current: NumericEventObservation, rule: DeltaRule): DeltaCandidate | undefined {
-  const currentMs = Date.parse(current.atUtc)
-  const floor = currentMs - rule.windowMinutes * 60_000
-  const prior = history.filter((item) => Date.parse(item.atUtc) >= floor && Date.parse(item.atUtc) < currentMs)
-  if (!prior.length) return undefined
-  const minimum = prior.reduce((best, item) => item.value < best.value ? item : best)
-  const maximum = prior.reduce((best, item) => item.value > best.value ? item : best)
-  const increase = current.value - minimum.value
-  const decrease = maximum.value - current.value
-  const candidates: DeltaCandidate[] = []
-  if ((rule.direction === 'increase' || rule.direction === 'either') && increase >= rule.amount) candidates.push({ direction: 'increase', baseline: minimum, actualDelta: increase, elapsedSeconds: (currentMs - Date.parse(minimum.atUtc)) / 1_000 })
-  if ((rule.direction === 'decrease' || rule.direction === 'either') && decrease >= rule.amount) candidates.push({ direction: 'decrease', baseline: maximum, actualDelta: -decrease, elapsedSeconds: (currentMs - Date.parse(maximum.atUtc)) / 1_000 })
-  return candidates.sort((left, right) => Math.abs(right.actualDelta) - Math.abs(left.actualDelta) || Date.parse(left.baseline.atUtc) - Date.parse(right.baseline.atUtc))[0]
-}
-
 export function detectDeltaEvents(input: {
   observations: NumericEventObservation[]
   fromUtc: string
@@ -188,9 +166,9 @@ export function detectDeltaEvents(input: {
   const fromMs = Date.parse(input.fromUtc); const toMs = Date.parse(input.toUtc)
   const values = observations([...(input.seed ? [input.seed] : []), ...input.observations]).filter((item) => Date.parse(item.atUtc) <= toMs)
   const gapLimit = significantGapMs(values)
+  const steps = scanBoundedDeltas({ points: values, windowMinutes: input.rule.windowMinutes, direction: input.rule.direction, minimumAmount: input.rule.amount, referenceMode: 'ROLLING_EXTREME', gapLimitMs: gapLimit })
   const result: DeltaDetection[] = []
   let active: DeltaDetection | undefined
-  let history: NumericEventObservation[] = []
   let previous: NumericEventObservation | undefined
 
   const finish = (endUtc: string, clippedEnd: boolean, dataGap: boolean) => {
@@ -199,28 +177,28 @@ export function detectDeltaEvents(input: {
     result.push(active); active = undefined
   }
 
-  for (const current of values) {
+  for (const step of steps) {
+    const current = step.trigger
     const currentMs = Date.parse(current.atUtc)
-    const hasGap = Boolean(previous && currentMs - Date.parse(previous.atUtc) > gapLimit)
-    if (hasGap) { if (active && previous) finish(previous.atUtc, true, true); history = [] }
-    history = history.filter((item) => currentMs - Date.parse(item.atUtc) <= input.rule.windowMinutes * 60_000)
-    const candidate = currentMs >= fromMs ? deltaCandidate(history, current, input.rule) : undefined
+    const hasGap = step.gapBefore
+    if (hasGap && active && previous) finish(previous.atUtc, true, true)
+    const candidate = currentMs >= fromMs ? step.candidate : null
     if (!candidate) {
       if (active && currentMs >= fromMs) finish(current.atUtc, false, false)
     } else if (!active || active.direction !== candidate.direction) {
       if (active) finish(current.atUtc, false, false)
       active = {
-        startUtc: candidate.baseline.atUtc, endUtc: current.atUtc, durationSeconds: candidate.elapsedSeconds,
-        baselineAtUtc: candidate.baseline.atUtc, baselineValue: candidate.baseline.value,
+        startUtc: candidate.reference.atUtc, endUtc: current.atUtc, durationSeconds: candidate.elapsedSeconds,
+        baselineAtUtc: candidate.reference.atUtc, baselineValue: candidate.reference.value,
         triggerAtUtc: current.atUtc, triggerValue: current.value, direction: candidate.direction,
-        actualDelta: candidate.actualDelta, elapsedSeconds: candidate.elapsedSeconds,
-        maximumExcursion: candidate.actualDelta, maximumExcursionAtUtc: current.atUtc,
+        actualDelta: candidate.delta, elapsedSeconds: candidate.elapsedSeconds,
+        maximumExcursion: candidate.delta, maximumExcursionAtUtc: current.atUtc,
         clippedEnd: false, dataGap: hasGap,
       }
-    } else if (Math.abs(candidate.actualDelta) > Math.abs(active.maximumExcursion)) {
-      active.maximumExcursion = candidate.actualDelta; active.maximumExcursionAtUtc = current.atUtc
+    } else if (Math.abs(candidate.delta) > Math.abs(active.maximumExcursion)) {
+      active.maximumExcursion = candidate.delta; active.maximumExcursionAtUtc = current.atUtc
     }
-    history.push(current); previous = current
+    previous = current
   }
   if (active) finish(input.toUtc, true, false)
   return result
@@ -277,3 +255,4 @@ export function detectValueChangeEvents(input: {
   }
   return result
 }
+import { scanBoundedDeltas } from '../industrial-analytics/bounded-delta.js'

@@ -257,6 +257,41 @@ export interface PressSemanticHistoryEvidence {
   toUtc: string
   includeSeed: boolean
   signals: PressSemanticSignalEvidence[]
+  readDiagnostics?: BoundedTelemetryReadDiagnostics
+}
+
+export interface TelemetryEvidenceGap {
+  canonicalId: string
+  deckNumber: number | null
+  startUtc: string
+  endUtc: string
+  durationMs: number
+}
+
+export interface BoundedTelemetryReadDiagnostics {
+  requestedRange: { start: string; end: string }
+  chunkCount: number
+  telemetryRequests: number
+  cacheHits: number
+  exactCacheHits?: number
+  selectorSubsetCacheHits?: number
+  containedRangeCacheHits?: number
+  containedRangeSelectorSubsetCacheHits?: number
+  cacheHitType?: 'EXACT' | 'SELECTOR_SUBSET' | 'CONTAINED_RANGE' | 'CONTAINED_RANGE_SELECTOR_SUBSET' | null
+  cacheSourceRange?: { start: string; end: string } | null
+  pointsReturned: number
+  pointsRetained: number
+  boundaryDuplicatesRemoved: number
+  gaps: TelemetryEvidenceGap[]
+  requests?: Array<{
+    pressKey: string
+    selectorCount: number
+    selectors: string[]
+    range: { start: string; end: string }
+    chunkIndex: number
+    durationMs: number
+    pointsReturned: number
+  }>
 }
 
 export const PRODUCTION_CONTEXT_FIELDS = ['job', 'order', 'recipe', 'customer', 'material', 'roll'] as const

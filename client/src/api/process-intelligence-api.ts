@@ -41,6 +41,7 @@ import type {
   TelemetryEventSource,
   AiInvestigatorServerStatus,
   AiInvestigatorResult,
+  BasicHistoricalSummary,
 } from '../types/api'
 import type {
   CuratedPhysicalEvidence,
@@ -190,6 +191,10 @@ export function getRawRadiusOccurrenceDetail(occurrence: RawExplorerOccurrence, 
   return sendJson<RawExplorerDetail>('/api/radius/raw-explorer/detail', 'POST', { occurrence, changeLookbackMinutes }, signal)
 }
 
+export function getRawRadiusHistoricalSummary(occurrence: RawExplorerOccurrence, signal?: AbortSignal) {
+  return sendJson<BasicHistoricalSummary>('/api/radius/raw-explorer/history', 'POST', { occurrence, lookbackDays: 31, maximumOccurrences: 100 }, signal)
+}
+
 export function plotRawRadiusSignal(occurrence: RawExplorerOccurrence, plottedSignal: RawExplorerSignalIdentity, signal?: AbortSignal) {
   return sendJson<RawExplorerPlotResult>('/api/radius/raw-explorer/plot', 'POST', { occurrence, signal: plottedSignal }, signal)
 }
@@ -221,6 +226,10 @@ export function searchTelemetryEvents(input: TelemetryEventSearchInput, signal?:
 
 export function getTelemetryEventDetail(occurrence: TelemetryEventOccurrence, signal?: AbortSignal) {
   return sendJson<TelemetryEventDetail>('/api/telemetry/event-explorer/detail', 'POST', { occurrence }, signal)
+}
+
+export function getTelemetryEventHistoricalSummary(occurrence: TelemetryEventOccurrence, occurrences: TelemetryEventOccurrence[], signal?: AbortSignal) {
+  return sendJson<BasicHistoricalSummary>('/api/telemetry/event-explorer/history', 'POST', { occurrence, occurrences: occurrences.slice(0, 500) }, signal)
 }
 
 export function plotTelemetryEventSignal(occurrence: TelemetryEventOccurrence, plottedSignal: RawExplorerSignalIdentity, signal?: AbortSignal) {

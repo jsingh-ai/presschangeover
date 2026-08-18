@@ -1,6 +1,7 @@
 import type { RadiusPressKey } from '../../src/radius/models.js'
 import type { AiGroundingFact } from '../../src/ai-investigator/contracts.js'
 import { AI_INVESTIGATOR_TOOL_DEFINITIONS, type AiInvestigatorToolExecutor, type AiToolExecutionContext, type AiToolResult } from '../../src/ai-investigator/read-only-tools.js'
+import { buildCategoricalTemporalEvidenceProgram, buildNumericTemporalEvidenceProgram } from '../../src/industrial-analytics/temporal-evidence.js'
 
 export const fixtureCurrent = { startUtc: '2026-08-16T12:00:00.000Z', endUtc: '2026-08-17T12:00:00.000Z' }
 export const fixtureBaseline = { startUtc: '2026-08-15T12:00:00.000Z', endUtc: fixtureCurrent.startUtc }
@@ -45,7 +46,7 @@ function fleetResult(period: 'current' | 'baseline', selected: RadiusPressKey | 
   return { range, scope: selected ?? 'all', presses, facts, limitations: ['Unavailable time is separate from operational state.'] }
 }
 
-function eventResult(row: FixtureRow): AiToolResult {
+function eventResult(row: FixtureRow, includeTraces = false): AiToolResult {
   const range = { start: fixtureCurrent.startUtc, end: fixtureCurrent.endUtc }
   const facts: AiGroundingFact[] = []
   for (let index = 0; index < 3; index += 1) {
@@ -57,7 +58,11 @@ function eventResult(row: FixtureRow): AiToolResult {
   ;(['job', 'order', 'recipe'] as const).forEach((field, index) => {
     facts.push({ ...fact(row, field, `${field.toUpperCase()}-${row.pressKey.slice(5)}-${index + 1}`, null, `context.${field}.event${index + 1}.event`, field[0].toUpperCase() + field.slice(1), range, `2026-08-17T02:0${index}:00.000Z`), source: 'production_context' })
   })
-  return { press: row.pressKey.replace('press', 'Press '), pressKey: row.pressKey, range, facts, limitations: ['Broad telemetry scanning is deferred.'] }
+  const event = { start: '2026-08-17T02:00:00.000Z', end: '2026-08-17T02:10:00.000Z' }; const traceRange = { start: '2026-08-17T01:40:00.000Z', end: '2026-08-17T02:30:00.000Z' }
+  const numericTraces = includeTraces ? ['machine.speed.actual', 'ink.temperature.actual', 'web.tension.actual', 'drive.load.actual'].flatMap((canonicalId, signalIndex) => { const trace = buildNumericTemporalEvidenceProgram({ candidateId: row.pressKey, pressKey: row.pressKey, eventId: `${row.pressKey}-event`, canonicalId, unit: null, range: traceRange, event, samples: Array.from({ length: 26 }, (_item, index) => ({ atUtc: new Date(Date.parse(traceRange.start) + index * 2 * 60_000).toISOString(), value: signalIndex * 20 + (index < 10 ? index : index < 18 ? 20 - index : index - 8) })), selectedBecause: ['material bounded Delta', 'temporal proximity'] }); return trace ? [trace] : [] }) : []
+  const stateTrace = includeTraces ? buildCategoricalTemporalEvidenceProgram({ candidateId: row.pressKey, pressKey: row.pressKey, eventId: `${row.pressKey}-event`, canonicalId: 'radius.sequence', datatype: 'radius', range: traceRange, event, samples: [{ atUtc: traceRange.start, value: 'Run Production' }, { atUtc: event.start, value: 'Make Ready' }, { atUtc: event.end, value: 'Run Production' }], selectedBecause: ['candidate Radius sequence'] }) : null
+  const contextTrace = includeTraces ? buildCategoricalTemporalEvidenceProgram({ candidateId: row.pressKey, pressKey: row.pressKey, eventId: `${row.pressKey}-event`, canonicalId: 'production.context.identity', datatype: 'production_context', range: traceRange, event, samples: [{ atUtc: traceRange.start, value: `JOB-${row.pressKey.slice(5)} / RECIPE-1` }, { atUtc: event.start, value: `JOB-${row.pressKey.slice(5)} / RECIPE-2` }, { atUtc: event.end, value: `JOB-${row.pressKey.slice(5)} / RECIPE-2` }], selectedBecause: ['trusted production context'] }) : null
+  return { press: row.pressKey.replace('press', 'Press '), pressKey: row.pressKey, range, facts, temporalEvidencePrograms: [...numericTraces, ...(stateTrace ? [stateTrace] : []), ...(contextTrace ? [contextTrace] : [])], limitations: ['Broad telemetry scanning is deferred.'] }
 }
 
 function round(value: number): number { return Math.round(value * 10) / 10 }
@@ -65,10 +70,11 @@ function round(value: number): number { return Math.round(value * 10) / 10 }
 export class DiscoveryFixtureExecutor implements AiInvestigatorToolExecutor {
   readonly definitions = AI_INVESTIGATOR_TOOL_DEFINITIONS
   readonly calls: Array<{ name: string; arguments: unknown }> = []
+  constructor(private readonly includeTraces = false) {}
   async execute(name: string, rawArguments: unknown, _context: AiToolExecutionContext): Promise<AiToolResult> {
     this.calls.push({ name, arguments: rawArguments }); const args = rawArguments as Record<string, unknown>
     if (name === 'get_fleet_operational_summary') return fleetResult(args.start === fixtureCurrent.startUtc ? 'current' : 'baseline', args.press as RadiusPressKey | null)
-    if (name === 'get_press_event_summary') return eventResult(discoveryRows.find((row) => row.pressKey === args.press)!)
+    if (name === 'get_press_event_summary') return eventResult(discoveryRows.find((row) => row.pressKey === args.press)!, this.includeTraces)
     throw new Error(`fixture_tool_not_implemented:${name}`)
   }
 }

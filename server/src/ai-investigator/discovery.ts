@@ -1,7 +1,9 @@
 import type { RadiusPressKey } from '../radius/models.js'
 import { IndustrialAnalyticsService } from '../industrial-analytics/industrial-analytics-service.js'
 import type { IndustrialAnalyticalObservation, IndustrialBaselineMetricInput } from '../industrial-analytics/contracts.js'
-import type { AiGroundingFact, AiInvestigatorDiscoveryDraftContent, AiInvestigatorDraftContent, AiInvestigatorRequest } from './contracts.js'
+import type { TemporalEvidenceProgram } from '../industrial-analytics/temporal-evidence.js'
+import { evaluateIndustrialCandidates, type IndustrialCandidateEvaluation } from '../industrial-analytics/candidate-evaluation.js'
+import type { AiBaselineProvenance, AiGroundingFact, AiInvestigatorDiscoveryDraftContent, AiInvestigatorDraftContent, AiInvestigatorRequest } from './contracts.js'
 import { DiscoveryFactRegistry, radiusDriverIdentity, registerRadiusDriverDurationComparison, requireValidDiscoveryEvidenceGraph, type DiscoveryEvidenceGraphResult } from './evidence-graph.js'
 import type { AiInvestigatorToolExecutor, AiToolResult } from './read-only-tools.js'
 
@@ -10,8 +12,12 @@ export const DISCOVERY_EVENT_LIMIT = 3
 export const DISCOVERY_OUTPUT_TOKENS = 1_400
 export const DISCOVERY_SELECTED_PRESS_LIMIT = 3
 export const DISCOVERY_OBSERVATION_LIMIT_PER_CANDIDATE = 3
+export const DISCOVERY_SELECTED_MODEL_TELEMETRY_TRACE_LIMIT = 3
+export const DISCOVERY_SELECTED_MODEL_TRACE_LIMIT = 5
+export const DISCOVERY_MODEL_NUMERIC_LANDMARK_LIMIT = 8
+export const DISCOVERY_MODEL_NUMERIC_SEGMENT_LIMIT = 4
 export const DISCOVERY_PROMPT_CACHE_KEY = 'processintelligence-discovery-v1'
-export const DISCOVERY_INSTRUCTIONS = `You are the advisory ProcessIntelligence AI Investigator. Rank only supplied deterministic candidate ids. Return only model judgment: candidateId, title, importance, confidence, supplied factIds, interpretation, whyWorthInvestigating, recommendedInvestigation, plus the overall summary and limitations. ProcessIntelligence reconstructs all values, units, timestamps, evidence classes, links, and tables. All supplied facts are authoritative; never reproduce, compute, invent, recalculate, or contradict their values. For material comparisons select the supplied current, baseline, and delta ids together. Treat low support or coverage as limitations. Radius states and associations are investigation leads, not proven causes. Return at most one finding per candidate and no more than five total. Do not claim control, database, historian, filesystem, network, configuration, acknowledgement, or root-cause access. No HTML.`
+export const DISCOVERY_INSTRUCTIONS = `You are the advisory ProcessIntelligence AI Investigator. Rank only supplied deterministic candidate ids. Return only model judgment: candidateId, title, importance, confidence, supplied factIds, supplied traceIds, interpretation, whyWorthInvestigating, recommendedInvestigation, plus the overall summary and limitations. ProcessIntelligence reconstructs all values, units, timestamps, evidence classes, links, and tables. All supplied facts are authoritative; never reproduce, compute, invent, recalculate, or contradict their values. A trace permits qualitative interpretation of the supplied bounded temporal shape, not new numeric claims or root-cause claims. For material comparisons select the supplied current, baseline, and delta ids together. Treat gaps, low support, cadence ambiguity, or coverage as limitations. Radius states and associations are investigation leads, not proven causes. Return at most one finding per candidate and no more than five total. Do not claim control, database, historian, filesystem, network, configuration, acknowledgement, or root-cause access. No HTML.`
 
 interface FleetRow {
   pressKey: RadiusPressKey
@@ -34,6 +40,7 @@ export interface DiscoveryCandidate {
   longestDelta: number | null
   observations: IndustrialAnalyticalObservation[]
   facts: AiGroundingFact[]
+  traces?: TemporalEvidenceProgram[]
 }
 
 export interface DiscoveryPreflight {
@@ -47,6 +54,7 @@ export interface DiscoveryPreflight {
   performance: { dataServiceQueries: number; preflightMs: number }
   evidenceGraph: DiscoveryEvidenceGraphResult
   modelInput: Record<string, unknown>
+  instrumentation: { sectionTokenContributions: Array<{ section: string; bytes: number; approximateTokens: number }>; detailedWindows: unknown[]; baselineSearches: unknown[]; relationshipQualifications: unknown[]; runtimeBreakdowns: unknown[]; rawTelemetryScans: number; tracesCreated: number; signalsScanned: number; signalsSelected: number; boundedTelemetry: { telemetryRequests: number; chunkCount: number; cacheHits: number; exactCacheHits: number; selectorSubsetCacheHits: number; containedRangeCacheHits: number; containedRangeSelectorSubsetCacheHits: number; pointsReturned: number; pointsRetained: number; requests: unknown[] }; evaluation: IndustrialCandidateEvaluation }
 }
 
 function round(value: number): number { return Math.round(value * 10) / 10 }
@@ -117,13 +125,17 @@ function eventObservations(result: AiToolResult): IndustrialAnalyticalObservatio
   return Array.isArray(analytics.observations) ? analytics.observations.filter((item): item is IndustrialAnalyticalObservation => Boolean(item) && typeof item === 'object' && typeof (item as IndustrialAnalyticalObservation).observationId === 'string') : []
 }
 
+function eventTraces(result: AiToolResult): TemporalEvidenceProgram[] {
+  return Array.isArray(result.temporalEvidencePrograms) ? result.temporalEvidencePrograms.filter((item): item is TemporalEvidenceProgram => Boolean(item) && typeof item === 'object' && typeof (item as TemporalEvidenceProgram).traceId === 'string') : []
+}
+
 function analyticsCount(result: AiToolResult, key: 'calculatedCount' | 'retainedCount'): number {
   if (!result.industrialAnalytics || typeof result.industrialAnalytics !== 'object') return 0
   const value = (result.industrialAnalytics as Record<string, unknown>)[key]
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
-const FAMILY_PRIORITY: Record<IndustrialAnalyticalObservation['family'], number> = { event_aligned_change: 7, radius_sequence_deviation: 6, baseline_deviation: 5, value_state_transition: 4, numeric_relationship: 3, robust_numeric_change: 2, cross_press_comparison: 1 }
+const FAMILY_PRIORITY: Record<IndustrialAnalyticalObservation['family'], number> = { first_divergence: 14, contextual_telemetry_baseline: 13, contextual_baseline: 12, deviation_persistence: 11, normal_envelope_departure: 10, speed_recovery: 9, radius_telemetry_alignment: 8, event_aligned_change: 7, radius_sequence_deviation: 6, baseline_deviation: 5, value_state_transition: 4, numeric_relationship: 3, robust_numeric_change: 2, cross_press_comparison: 1 }
 function observationMagnitude(observation: IndustrialAnalyticalObservation): number { return Math.max(0, ...Object.values(observation.magnitudeInputs).filter((value): value is number => typeof value === 'number' && Number.isFinite(value)).map(Math.abs)) }
 function rankObservations(observations: IndustrialAnalyticalObservation[]): IndustrialAnalyticalObservation[] {
   return [...new Map(observations.filter((item) => item.support.adequate && item.material && item.factIds.length > 0).map((item) => [item.observationId, item])).values()]
@@ -132,11 +144,18 @@ function rankObservations(observations: IndustrialAnalyticalObservation[]): Indu
 
 const MODEL_METRICS: Record<IndustrialAnalyticalObservation['family'], string[]> = {
   baseline_deviation: ['label', 'unit', 'current', 'baseline', 'delta'],
-  robust_numeric_change: ['unit', 'median', 'startEndDelta', 'largestDelta', 'standardDeviation'],
-  event_aligned_change: ['unit', 'beforeMedian', 'eventMedian', 'afterMedian', 'beforeToEventDelta'],
+  robust_numeric_change: ['unit', 'median', 'evaluatedDeltaWindowsMinutes', 'strongestDeltaWindowMinutes', 'largestEventExplorerDelta', 'deltaEventCount'],
+  event_aligned_change: ['unit', 'beforeMedian', 'eventMedian', 'afterMedian', 'beforeToEventDelta', 'eventSlopePerMinute'],
+  contextual_baseline: ['metric', 'unit', 'current', 'baselineMedian', 'delta', 'baselineType', 'matchingDimensions', 'sampleCount', 'fallbackLevel'],
+  contextual_telemetry_baseline: ['feature', 'unit', 'current', 'historicalMedian', 'historicalMad', 'delta', 'standardizedDelta', 'baselineType', 'matchingDimensions', 'sampleCount', 'fallbackLevel'],
+  speed_recovery: ['unit', 'speedBefore', 'minimumSpeed', 'accelerationAttempts', 'failedAccelerations', 'maximumRecoveredSpeed', 'timeToSustainedSpeedMinutes'],
+  normal_envelope_departure: ['unit', 'evidenceType', 'expectedMedian', 'envelopeLower', 'envelopeUpper', 'firstDepartureAtUtc', 'firstDepartureDirection', 'recurrenceCount', 'longestDurationMinutes', 'maximumDepartureMagnitude'],
+  deviation_persistence: ['unit', 'classification', 'startAtUtc', 'endAtUtc', 'totalDurationMinutes', 'longestDurationMinutes', 'recurrenceCount', 'maximumMagnitude'],
+  first_divergence: ['firstObservedAtUtc', 'relativeToEpisodeMinutes', 'sourceFamily', 'signal'],
+  radius_telemetry_alignment: ['relation', 'lagMinutes', 'radiusTransitionAtUtc', 'telemetryBehaviorAtUtc', 'telemetryFamily', 'statement'],
   value_state_transition: ['transitionCount', 'transitionsNearEvent', 'medianMinutesBetweenTransitions'],
-  radius_sequence_deviation: ['commonSequenceCount', 'commonSequenceSharePercent', 'extraStepCount', 'missingStepCount', 'loopCount', 'longestDwellMinutes', 'returnAttempts'],
-  numeric_relationship: ['context', 'pearson', 'spearman', 'bestLagMinutes', 'bestLagCorrelation', 'direction'],
+  radius_sequence_deviation: ['commonSequence', 'actualSequence', 'commonSequenceCount', 'extraStates', 'missingStates', 'repeatedStates', 'loopCount', 'biggestDwellDeviationMinutes', 'returnAttempts', 'productionRestored'],
+  numeric_relationship: ['pearson', 'spearman', 'bestLagMinutes', 'bestLagCorrelation', 'alignedPairCount', 'pairCoveragePercent', 'temporalCoveragePercent', 'qualification', 'direction'],
   cross_press_comparison: ['unit', 'pressValue', 'compatiblePressMedian', 'delta'],
 }
 function compactObservationMetrics(observation: IndustrialAnalyticalObservation) { return Object.fromEntries(MODEL_METRICS[observation.family].flatMap((key) => observation.metrics[key] === undefined ? [] : [[key, observation.metrics[key]]])) }
@@ -147,49 +166,115 @@ function uniqueFacts(input: AiGroundingFact[]): AiGroundingFact[] {
   return [...found.values()]
 }
 
-function selectFacts(pressKey: RadiusPressKey, all: AiGroundingFact[], observations: IndustrialAnalyticalObservation[]): AiGroundingFact[] {
+function selectFacts(pressKey: RadiusPressKey, all: AiGroundingFact[], observations: IndustrialAnalyticalObservation[], fleetCompact = false): AiGroundingFact[] {
   const matching = all.filter((fact) => fact.pressKey === pressKey && fact.usable)
-  const core = matching.filter((fact) => ['coveragePercent', 'productionPercent', 'productionPercentagePointDelta', 'interruptions', 'interruptionDelta', 'longestInterruptionMinutes', 'longestInterruptionDeltaMinutes'].includes(fact.metric))
+  const coreThresholds = new Map([['productionPercentagePointDelta', 5], ['interruptionDelta', 3], ['longestInterruptionDeltaMinutes', 45]])
+  const rankedCoreRoots = matching.filter((fact) => fact.role === 'delta' && coreThresholds.has(fact.metric) && typeof fact.value === 'number' && Math.abs(fact.value) >= coreThresholds.get(fact.metric)!).map((fact) => ({ root: groupKey(fact), score: Math.abs(Number(fact.value)) / coreThresholds.get(fact.metric)! })).sort((left, right) => right.score - left.score || left.root.localeCompare(right.root))
+  const materialCoreRoots = new Set((fleetCompact ? rankedCoreRoots.slice(0, 1) : rankedCoreRoots).map(({ root }) => root))
+  const core = matching.filter((fact) => materialCoreRoots.has(groupKey(fact)) && ['current', 'baseline', 'delta'].includes(fact.role))
   const drivers = (role: AiGroundingFact['role']) => matching.filter((fact) => fact.metric === 'radiusDriverDurationMinutes' && fact.role === role).slice(0, 1)
   const eventPairs = matching.filter((fact) => ['eventTimestamp', 'eventDurationMinutes'].includes(fact.metric)).slice(0, 2)
-  const context = ['job', 'order', 'recipe'].flatMap((metric) => matching.filter((fact) => fact.source === 'production_context' && fact.metric === metric).slice(0, 1))
+  const context = ['job', 'order', 'recipe', 'material', 'customer'].flatMap((metric) => matching.filter((fact) => fact.source === 'production_context' && fact.metric === metric).slice(0, 1)).slice(0, fleetCompact ? 2 : 5)
   const observationIds = new Set(observations.flatMap(({ factIds }) => factIds))
   const observationFacts = matching.filter((fact) => observationIds.has(fact.factId))
-  return uniqueFacts([...core, ...drivers('current'), ...drivers('baseline'), ...eventPairs, ...context, ...observationFacts])
+  return uniqueFacts([...core, ...drivers('current'), ...(fleetCompact ? [] : drivers('baseline')), ...eventPairs, ...context, ...observationFacts])
 }
 
-function compactModelInput(request: AiInvestigatorRequest, current: { start: string; end: string }, baseline: { start: string; end: string }, candidates: DiscoveryCandidate[], eligible: RadiusPressKey[], excluded: RadiusPressKey[], limit: number, limitations: string[]) {
+function compactNumericLandmarks(trace: Extract<TemporalEvidenceProgram, { datatype: 'numeric' }>) {
+  const critical = new Set(['EVENT_START', 'EVENT_END', 'MINIMUM', 'MAXIMUM', 'DELTA_BASELINE', 'DELTA_TRIGGER', 'DELTA_EXTREME', 'ENVELOPE_CROSSING', 'RETURN_INSIDE_ENVELOPE', 'RADIUS_ADJACENT'])
+  const selected = trace.landmarks.filter((landmark) => landmark.kinds.some((kind) => critical.has(kind)))
+  const direction = trace.landmarks.filter((landmark) => landmark.kinds.includes('DIRECTION_CHANGE')).sort((left, right) => Math.abs(right.value - trace.summary.startValue) - Math.abs(left.value - trace.summary.startValue) || left.relativeMinutes - right.relativeMinutes)[0]
+  if (direction && !selected.includes(direction)) selected.push(direction)
+  for (const landmark of trace.landmarks.filter((item) => item.kinds.includes('WINDOW_START') || item.kinds.includes('WINDOW_END') || item.kinds.includes('SHAPE'))) {
+    if (selected.length >= DISCOVERY_MODEL_NUMERIC_LANDMARK_LIMIT) break
+    if (!selected.includes(landmark)) selected.push(landmark)
+  }
+  return selected.sort((left, right) => left.relativeMinutes - right.relativeMinutes)
+}
+
+function compactNumericSegments(trace: Extract<TemporalEvidenceProgram, { datatype: 'numeric' }>) {
+  const required = trace.segments.filter((segment, index) => index === 0 || index === trace.segments.length - 1 || segment.startRelativeMinutes <= 0 && segment.endRelativeMinutes >= 0 || segment.minimum <= trace.summary.minimum && segment.maximum >= trace.summary.minimum || segment.minimum <= trace.summary.maximum && segment.maximum >= trace.summary.maximum)
+  const selected = [...new Set(required)]
+  for (const segment of [...trace.segments].sort((left, right) => Math.abs(right.endValue - right.startValue) - Math.abs(left.endValue - left.startValue) || right.sampleCount - left.sampleCount)) {
+    if (selected.length >= DISCOVERY_MODEL_NUMERIC_SEGMENT_LIMIT) break
+    if (!selected.includes(segment)) selected.push(segment)
+  }
+  return selected.sort((left, right) => left.startRelativeMinutes - right.startRelativeMinutes).slice(0, DISCOVERY_MODEL_NUMERIC_SEGMENT_LIMIT)
+}
+
+export function compactDiscoveryTraceForModel(trace: TemporalEvidenceProgram): unknown[] {
+  if (trace.datatype === 'numeric') return [trace.traceId, 'N', trace.canonicalId, trace.unit, trace.coveragePercent, trace.gapState, trace.selectedBecause.slice(0, 2), [trace.summary.minimum, trace.summary.maximum, trace.summary.strongestDelta?.windowMinutes ?? null, trace.summary.strongestDelta?.delta ?? null, trace.summary.envelopeState, trace.summary.persistence, trace.summary.recurrenceCount], compactNumericSegments(trace).map((item) => [item.startRelativeMinutes, item.endRelativeMinutes, item.trend, item.startValue, item.endValue]), compactNumericLandmarks(trace).map((item) => [item.relativeMinutes, item.value, item.kinds])]
+  return [trace.traceId, trace.datatype === 'radius' ? 'R' : trace.datatype === 'production_context' ? 'C' : 'S', trace.canonicalId, null, trace.coveragePercent, trace.gapState, trace.selectedBecause.slice(0, 2), [trace.enteringState, trace.leavingState, trace.repeatedToggleCount, trace.longestPersistenceMinutes], trace.intervals.slice(0, 6).map((item) => [item.startRelativeMinutes, item.endRelativeMinutes, item.value]), trace.transitions.slice(0, 6).map((item) => [item.relativeMinutes, item.from, item.to])]
+}
+
+export function selectDiscoveryModelTraces(traces: TemporalEvidenceProgram[], selectedPress: boolean): TemporalEvidenceProgram[] {
+  if (!selectedPress) return traces
+  const radius = traces.filter((trace) => trace.datatype === 'radius').slice(0, 1)
+  const context = traces.filter((trace) => trace.datatype === 'production_context').slice(0, 1)
+  const telemetry = traces.filter((trace) => trace.datatype === 'numeric' || trace.datatype === 'categorical').slice(0, DISCOVERY_SELECTED_MODEL_TELEMETRY_TRACE_LIMIT)
+  return [...radius, ...context, ...telemetry].slice(0, DISCOVERY_SELECTED_MODEL_TRACE_LIMIT)
+}
+
+function compactModelLimitations(limitations: string[], selectedPress: boolean) {
+  const values = uniqueStrings(limitations).filter((item) => !/no raw-tag scan was performed/i.test(item))
+  const context = values.find((item) => /formed the production context/i.test(item))
+  const compactContext = context?.match(/;\s*(.+?)\s+formed the production context/i)?.[1]
+  const normalized = values.filter((item) => item !== context)
+  if (compactContext) normalized.unshift(`Production context available: ${compactContext}.`)
+  return normalized.slice(0, selectedPress ? 4 : 5)
+}
+
+export function compactModelInput(request: AiInvestigatorRequest, current: { start: string; end: string }, baseline: { start: string; end: string }, candidates: DiscoveryCandidate[], eligible: RadiusPressKey[], excluded: RadiusPressKey[], limit: number, limitations: string[]) {
   const units: Array<string | null> = [null]; const roles: AiGroundingFact['role'][] = ['current', 'baseline', 'delta', 'event']; const sources = ['radius', 'telemetry', 'production_context', 'comparison', 'coverage']
+  const provenance: Array<string | null> = [null]
   const unitIndex = (unit: string | null) => { const found = units.indexOf(unit); if (found >= 0) return found; units.push(unit); return units.length - 1 }
+  const provenanceIndex = (label: string | undefined) => { if (!label) return 0; const found = provenance.indexOf(label); if (found >= 0) return found; provenance.push(label); return provenance.length - 1 }
   return {
-    version: 1,
+    version: 2,
     task: 'rank_supplied_candidates',
     scope: request.scope.pressKey ?? 'all',
     ranges: { current: [current.start, current.end], baseline: [baseline.start, baseline.end] },
-    selection: { eligible, excluded, selected: candidates.map((candidate) => candidate.pressKey), limit, rule: 'coverage>=80 both periods; press rank by material baseline signal count then absolute deltas; observation rank by fixed family priority, deterministic magnitude, support, id' },
-    factColumns: ['id', 'metric', 'value', 'unitIndex', 'roleIndex', 'sourceIndex', 'timestamp', 'label'],
-    dictionary: { units, roles, sources },
-    observationColumns: ['id', 'family', 'eventId', 'variables', 'factIds', 'metrics', 'sampleCount', 'coveragePercent'],
+    selection: { eligible, excluded, selected: candidates.map((candidate) => candidate.pressKey), limit, rule: 'coverage80; deterministic material-delta and family-priority ranking' },
+    factColumns: ['id', 'metric', 'value', 'unitIndex', 'roleIndex', 'sourceIndex', 'timestamp', 'baselineProvenanceIndex'],
+    dictionary: { units, roles, sources, baselineProvenance: provenance },
+    observationColumns: ['id', 'family', 'eventId', 'variables', 'factIds', 'sampleCount', 'coveragePercent'],
+    traceColumns: ['id', 'kind', 'signal', 'unit', 'coveragePercent', 'gapState', 'selectedBecause', 'summary', 'segmentsOrIntervals', 'landmarksOrTransitions'],
     candidates: candidates.map((candidate) => {
       const candidateFacts = new Map(candidate.facts.map((fact) => [fact.factId, fact]))
-      return { id: candidate.pressKey, score: [candidate.signalCount, candidate.productionDelta, candidate.interruptionDelta, candidate.longestDelta], observations: candidate.observations.map((observation) => [observation.observationId, observation.family, observation.eventId, observation.variableIds, observation.factIds.map((factId) => candidateFacts.get(factId)!.factId), compactObservationMetrics(observation), observation.support.sampleCount, observation.support.coveragePercent]), facts: candidate.facts.map((fact) => [fact.factId, fact.metric, fact.value, unitIndex(fact.unit), roles.indexOf(fact.role), sources.indexOf(fact.source), fact.timestamp ?? null, fact.label]) }
+      return { id: candidate.pressKey, score: [candidate.signalCount, candidate.productionDelta, candidate.interruptionDelta, candidate.longestDelta], observations: candidate.observations.map((observation) => [observation.observationId, observation.family, observation.eventId, observation.variableIds, observation.factIds.map((factId) => candidateFacts.get(factId)!.factId), observation.support.sampleCount, observation.support.coveragePercent]), traces: selectDiscoveryModelTraces(candidate.traces ?? [], request.scope.pressKey !== null).map(compactDiscoveryTraceForModel), facts: candidate.facts.map((fact) => [fact.factId, fact.metric, fact.value, unitIndex(fact.unit), roles.indexOf(fact.role), sources.indexOf(fact.source), fact.timestamp ?? null, provenanceIndex(fact.baselineProvenance?.label)]) }
     }),
-    limitations,
+    limitations: compactModelLimitations(limitations, request.scope.pressKey !== null),
   }
 }
 
-export async function buildDiscoveryPreflight(executor: AiInvestigatorToolExecutor, request: AiInvestigatorRequest, signal: AbortSignal, options: { candidateLimit?: number; requestId?: string; maxParallelTools?: number; toolTimeoutMs?: number } = {}): Promise<DiscoveryPreflight> {
+function sectionTokenContributions(modelInput: Record<string, unknown>) {
+  const candidateValues = Array.isArray(modelInput.candidates) ? modelInput.candidates as Array<Record<string, unknown>> : []; const sections = new Map<string, unknown[]>([['overall summary', []], ['context', []], ['Radius sequence evidence', []], ['temporal traces', []], ['telemetry events', []], ['baseline evidence', []], ['relationships', []], ['persistence', []], ['first divergence', []], ['Radius/telemetry alignment', []], ['limitations', []]])
+  sections.get('overall summary')!.push({ version: modelInput.version, task: modelInput.task, scope: modelInput.scope, ranges: modelInput.ranges, selection: modelInput.selection, factColumns: modelInput.factColumns, dictionary: modelInput.dictionary, observationColumns: modelInput.observationColumns, traceColumns: modelInput.traceColumns })
+  sections.get('limitations')!.push(modelInput.limitations)
+  for (const candidate of candidateValues) {
+    for (const raw of Array.isArray(candidate.observations) ? candidate.observations as unknown[][] : []) {
+      const family = String(raw[1] ?? ''); const target = family === 'radius_sequence_deviation' ? 'Radius sequence evidence' : family === 'numeric_relationship' ? 'relationships' : family === 'deviation_persistence' ? 'persistence' : family === 'first_divergence' ? 'first divergence' : family === 'radius_telemetry_alignment' ? 'Radius/telemetry alignment' : ['baseline_deviation', 'contextual_baseline', 'contextual_telemetry_baseline', 'cross_press_comparison'].includes(family) ? 'baseline evidence' : 'telemetry events'; sections.get(target)!.push(raw)
+    }
+    for (const raw of Array.isArray(candidate.facts) ? candidate.facts as unknown[][] : []) { const sourceIndex = Number(raw[5]); const roleIndex = Number(raw[4]); if (sourceIndex === 2) sections.get('context')!.push(raw); else if (roleIndex === 1 || roleIndex === 2 || sourceIndex === 3) sections.get('baseline evidence')!.push(raw); else sections.get('overall summary')!.push(raw) }
+    for (const raw of Array.isArray(candidate.traces) ? candidate.traces as unknown[][] : []) sections.get(raw[1] === 'C' ? 'context' : raw[1] === 'R' ? 'Radius sequence evidence' : 'temporal traces')!.push(raw)
+  }
+  return [...sections].map(([section, values]) => { const bytes = Buffer.byteLength(JSON.stringify(values), 'utf8'); return { section, bytes, approximateTokens: Math.ceil(bytes / 4) } })
+}
+
+export async function buildDiscoveryPreflight(executor: AiInvestigatorToolExecutor, request: AiInvestigatorRequest, signal: AbortSignal, options: { candidateLimit?: number; requestId?: string; maxParallelTools?: number; toolTimeoutMs?: number; includeDiagnostics?: boolean } = {}): Promise<DiscoveryPreflight> {
   const preflightBegan = Date.now()
   const duration = Date.parse(request.range.endUtc) - Date.parse(request.range.startUtc)
   const current = { start: request.range.startUtc, end: request.range.endUtc }
   const baseline = { start: new Date(Date.parse(current.start) - duration).toISOString(), end: current.start }
+  const periodHours = Math.round(duration / 3_600_000 * 10) / 10
+  const periodProvenance: AiBaselineProvenance = { baselineType: 'period', label: `Period comparison: immediately preceding ${periodHours} hours`, currentRange: current, baselineRange: baseline, supportCount: 1, coveragePercent: null, matchingDimensions: [], fallbackLevel: 0 }
   const scope = request.scope.pressKey
   const evidence: DiscoveryPreflight['evidence'] = []
   const execute = async (name: string, args: unknown) => {
     const began = Date.now(); const controller = new AbortController(); const toolSignal = AbortSignal.any([signal, controller.signal])
     const timer = options.toolTimeoutMs ? setTimeout(() => controller.abort(new Error('ai_tool_timeout')), options.toolTimeoutMs) : undefined
     try {
-      const operation = executor.execute(name, args, { requestId: options.requestId ?? 'offline-discovery', signal: toolSignal })
+      const operation = executor.execute(name, args, { requestId: options.requestId ?? 'offline-discovery', signal: toolSignal, includeDiagnostics: options.includeDiagnostics })
       const result = await Promise.race([operation, new Promise<never>((_resolve, reject) => toolSignal.addEventListener('abort', () => reject(toolSignal.reason ?? new Error('ai_tool_timeout')), { once: true }))])
       return { name, arguments: args, result, durationMs: Date.now() - began }
     } finally { if (timer) clearTimeout(timer) }
@@ -214,7 +299,7 @@ export async function buildDiscoveryPreflight(executor: AiInvestigatorToolExecut
   const limit = Math.max(0, Math.min(DISCOVERY_CANDIDATE_LIMIT, options.candidateLimit ?? (scope ? DISCOVERY_SELECTED_PRESS_LIMIT : DISCOVERY_CANDIDATE_LIMIT)))
   const selected = eligible.slice(0, limit)
   const eventEvidence: DiscoveryPreflight['evidence'] = []; const parallel = Math.max(1, options.maxParallelTools ?? 3)
-  for (let offset = 0; offset < selected.length; offset += parallel) eventEvidence.push(...await Promise.all(selected.slice(offset, offset + parallel).map(({ row }) => execute('get_press_event_summary', { press: row.pressKey, start: current.start, end: current.end, topN: DISCOVERY_EVENT_LIMIT }))))
+  for (let offset = 0; offset < selected.length; offset += parallel) eventEvidence.push(...await Promise.all(selected.slice(offset, offset + parallel).map(({ row }, localIndex) => execute('get_press_event_summary', { press: row.pressKey, start: current.start, end: current.end, topN: DISCOVERY_EVENT_LIMIT, detailLevel: scope ? 'selected' : offset + localIndex < 2 ? 'fleet' : 'fleet_summary' }))))
   evidence.push(...eventEvidence)
   const eventResults = eventEvidence.map((item) => item.result)
   const analyticsBegan = Date.now()
@@ -248,19 +333,22 @@ export async function buildDiscoveryPreflight(executor: AiInvestigatorToolExecut
     const pressKey = typeof result.pressKey === 'string' ? result.pressKey as RadiusPressKey : null
     if (pressKey) industrialByPress.set(pressKey, [...(industrialByPress.get(pressKey) ?? []), ...eventObservations(result)])
   })
+  const peerProvenance: AiBaselineProvenance = { baselineType: 'peer', label: `Peer comparison: median across ${eligible.length} compatible presses`, currentRange: current, baselineRange: current, supportCount: Math.max(0, eligible.length - 1), coveragePercent: null, matchingDimensions: [], fallbackLevel: 0 }
   const baseFacts = [
     ...facts(currentResult),
     ...facts(baselineResult).map((fact) => baselineFact(fact, baseline)),
     ...selected.flatMap(({ row, productionDelta, interruptionDelta, longestDelta }) => [deltaFact(row, 'production', productionDelta, current), deltaFact(row, 'interruptions', interruptionDelta, current), deltaFact(row, 'longest', longestDelta, current)]),
     ...derivedFacts,
     ...eventResults.flatMap(supplementalEventFacts),
-  ]
+  ].map((fact) => fact.baselineProvenance ? fact : ['compatiblePressMedian', 'crossPressDelta'].includes(fact.metric) ? { ...fact, baselineProvenance: peerProvenance } : fact.role !== 'event' ? { ...fact, baselineProvenance: periodProvenance } : fact)
   factRegistry.registerAll(baseFacts)
   const allFacts = factRegistry.values()
   const retainedByPress = new Map(selected.map(({ row }) => [row.pressKey, rankObservations(industrialByPress.get(row.pressKey) ?? [])]))
-  const candidates: DiscoveryCandidate[] = selected.map(({ row, productionDelta, interruptionDelta, longestDelta, signalCount }) => {
-    const retained = retainedByPress.get(row.pressKey) ?? []; const observations = retained.slice(0, DISCOVERY_OBSERVATION_LIMIT_PER_CANDIDATE)
-    return { pressKey: row.pressKey, press: row.press, signalCount: signalCount + retained.length, productionDelta, interruptionDelta, longestDelta, observations, facts: selectFacts(row.pressKey, allFacts, observations) }
+  const candidates: DiscoveryCandidate[] = selected.map(({ row, productionDelta, interruptionDelta, longestDelta, signalCount }, candidateIndex) => {
+    const retained = retainedByPress.get(row.pressKey) ?? []; const observations = retained.slice(0, scope ? DISCOVERY_OBSERVATION_LIMIT_PER_CANDIDATE : 1)
+    const availableTraces = eventResults.filter((result) => result.pressKey === row.pressKey).flatMap(eventTraces).filter((trace) => trace.usable)
+    const traces = scope || candidateIndex < 2 ? availableTraces.slice(0, 8) : []
+    return { pressKey: row.pressKey, press: row.press, signalCount: signalCount + retained.length, productionDelta, interruptionDelta, longestDelta, observations, traces, facts: selectFacts(row.pressKey, allFacts, observations, scope === null) }
   })
   const eligiblePresses = eligible.map(({ row }) => row.pressKey); const excludedPresses = candidateRows.filter((item) => !eligible.includes(item)).map(({ row }) => row.pressKey)
   const limitations = uniqueStrings([
@@ -273,14 +361,19 @@ export async function buildDiscoveryPreflight(executor: AiInvestigatorToolExecut
   const observations = [...new Map(candidates.flatMap((candidate) => candidate.observations).map((observation) => [observation.observationId, observation])).values()]
   const evidenceGraphInput = { facts: selectedFacts, observations, candidates }
   requireValidDiscoveryEvidenceGraph(evidenceGraphInput)
-  const modelInput = compactModelInput(request, current, baseline, candidates, eligiblePresses, excludedPresses, limit, limitations)
+  const modelLimitations = scope ? limitations.slice(0, 8) : [...limitations.slice(0, 5), ...(limitations.length > 5 ? [`${limitations.length - 5} additional candidate-specific limitations remain available in deterministic diagnostics.`] : [])]
+  const modelInput = compactModelInput(request, current, baseline, candidates, eligiblePresses, excludedPresses, limit, modelLimitations)
   const evidenceGraph = requireValidDiscoveryEvidenceGraph({ ...evidenceGraphInput, modelInput })
   const baselineCalculated = selected.reduce((sum, { row }) => sum + (industrialByPress.get(row.pressKey)?.filter(({ family }) => family === 'baseline_deviation').length ?? 0), 0)
   const eventCalculated = eventResults.reduce((sum, result) => sum + analyticsCount(result, 'calculatedCount'), 0)
   const retained = [...retainedByPress.values()].reduce((sum, observations) => sum + observations.length, 0)
   const analytics = { calculated: baselineCalculated + eventCalculated + crossPress.filter((observation) => selected.some(({ row }) => row.pressKey === observation.pressKey)).length, retained, grouped: candidates.reduce((sum, candidate) => sum + candidate.observations.length, 0), modelCandidates: candidates.length, calculationMs: Date.now() - analyticsBegan }
   const dataServiceQueries = evidence.reduce((sum, item) => sum + (typeof item.result.queryCount === 'number' && Number.isFinite(item.result.queryCount) ? item.result.queryCount : 1), 0)
-  return { evidence, facts: selectedFacts, candidates, eligiblePresses, excludedPresses, limitations, analytics, performance: { dataServiceQueries, preflightMs: Date.now() - preflightBegan }, evidenceGraph, modelInput }
+  const diagnostics = eventResults.flatMap((result) => result.validationDiagnostics && typeof result.validationDiagnostics === 'object' ? [result.validationDiagnostics as Record<string, unknown>] : [])
+  const boundedValues = diagnostics.flatMap((item) => item.boundedTelemetry && typeof item.boundedTelemetry === 'object' ? [item.boundedTelemetry as Record<string, unknown>] : [])
+  const eventAnalyticsValues = eventResults.flatMap((result) => result.eventAnalytics && typeof result.eventAnalytics === 'object' ? [result.eventAnalytics as Record<string, unknown>] : [])
+  const instrumentation = { sectionTokenContributions: sectionTokenContributions(modelInput), detailedWindows: diagnostics.flatMap((item) => Array.isArray(item.windows) ? item.windows : []), baselineSearches: diagnostics.flatMap((item) => Array.isArray(item.baselines) ? item.baselines : []), relationshipQualifications: diagnostics.flatMap((item) => Array.isArray(item.relationships) ? item.relationships : []), runtimeBreakdowns: diagnostics.flatMap((item) => item.runtimeBreakdown && typeof item.runtimeBreakdown === 'object' ? [item.runtimeBreakdown] : []), rawTelemetryScans: diagnostics.reduce((sum, item) => sum + (typeof item.rawTelemetryScans === 'number' ? item.rawTelemetryScans : 0), 0), tracesCreated: candidates.reduce((sum, candidate) => sum + (candidate.traces?.length ?? 0), 0), signalsScanned: eventAnalyticsValues.reduce((sum, item) => sum + Number(item.telemetrySeriesScanned ?? 0), 0), signalsSelected: eventAnalyticsValues.reduce((sum, item) => sum + Number(item.telemetrySeriesSelected ?? 0), 0), boundedTelemetry: { telemetryRequests: boundedValues.reduce((sum, item) => sum + Number(item.telemetryRequests ?? 0), 0), chunkCount: boundedValues.reduce((sum, item) => sum + Number(item.chunkCount ?? 0), 0), cacheHits: boundedValues.reduce((sum, item) => sum + Number(item.cacheHits ?? 0), 0), exactCacheHits: boundedValues.reduce((sum, item) => sum + Number(item.exactCacheHits ?? 0), 0), selectorSubsetCacheHits: boundedValues.reduce((sum, item) => sum + Number(item.selectorSubsetCacheHits ?? 0), 0), containedRangeCacheHits: boundedValues.reduce((sum, item) => sum + Number(item.containedRangeCacheHits ?? 0), 0), containedRangeSelectorSubsetCacheHits: boundedValues.reduce((sum, item) => sum + Number(item.containedRangeSelectorSubsetCacheHits ?? 0), 0), pointsReturned: boundedValues.reduce((sum, item) => sum + Number(item.pointsReturned ?? 0), 0), pointsRetained: boundedValues.reduce((sum, item) => sum + Number(item.pointsRetained ?? 0), 0), requests: boundedValues.flatMap((item) => Array.isArray(item.requests) ? item.requests : []) }, evaluation: evaluateIndustrialCandidates({ pressCount: scope ? 1 : Math.max(1, eligiblePresses.length + excludedPresses.length), rangeHours: duration / 3_600_000, candidates: candidates.map((candidate) => ({ candidateId: candidate.pressKey, observations: candidate.observations })) }) }
+  return { evidence, facts: selectedFacts, candidates, eligiblePresses, excludedPresses, limitations, analytics, performance: { dataServiceQueries, preflightMs: Date.now() - preflightBegan }, evidenceGraph, modelInput, instrumentation }
 }
 
 function extractLimitations(result: AiToolResult): string[] { return Array.isArray(result.limitations) ? result.limitations.filter((item): item is string => typeof item === 'string') : [] }
@@ -290,7 +383,7 @@ function groupKey(fact: AiGroundingFact): string {
   return fact.factId.replace(/\.(?:current|baseline|delta)$/, '').replace(/\.(?:timestamp|duration_minutes)$/, '')
 }
 
-export type DiscoveryReferenceIssueCode = 'unknown_candidate_id' | 'duplicate_candidate_id' | 'unknown_fact_id' | 'cross_press_fact' | 'unusable_fact' | 'invalid_fact_source'
+export type DiscoveryReferenceIssueCode = 'unknown_candidate_id' | 'duplicate_candidate_id' | 'unknown_fact_id' | 'cross_press_fact' | 'unusable_fact' | 'invalid_fact_source' | 'unknown_trace_id' | 'cross_press_trace' | 'unusable_trace'
 export interface DiscoveryReferenceIssue {
   validationStage: 'grounding_reference'
   code: DiscoveryReferenceIssueCode
@@ -298,6 +391,7 @@ export interface DiscoveryReferenceIssue {
   findingIndex: number
   candidateId: string
   factId?: string
+  traceId?: string
 }
 
 export function validateDiscoveryReferences(draft: AiInvestigatorDiscoveryDraftContent, candidates: DiscoveryCandidate[], facts: AiGroundingFact[]): { accepted: AiInvestigatorDiscoveryDraftContent; issues: DiscoveryReferenceIssue[] } {
@@ -316,13 +410,19 @@ export function validateDiscoveryReferences(draft: AiInvestigatorDiscoveryDraftC
       else if (!fact.usable) findingIssues.push({ validationStage: 'grounding_reference', code: 'unusable_fact', path, findingIndex, candidateId: finding.candidateId, factId })
       else if (!['radius', 'telemetry', 'production_context', 'comparison', 'coverage'].includes(fact.source)) findingIssues.push({ validationStage: 'grounding_reference', code: 'invalid_fact_source', path, findingIndex, candidateId: finding.candidateId, factId })
     })
+    finding.traceIds.forEach((traceId, traceIndex) => {
+      const trace = candidate?.traces?.find((item) => item.traceId === traceId); const path = `findings[${findingIndex}].traceIds[${traceIndex}]`
+      if (!trace) findingIssues.push({ validationStage: 'grounding_reference', code: 'unknown_trace_id', path, findingIndex, candidateId: finding.candidateId, traceId })
+      else if (candidate && trace.pressKey !== candidate.pressKey) findingIssues.push({ validationStage: 'grounding_reference', code: 'cross_press_trace', path, findingIndex, candidateId: finding.candidateId, traceId })
+      else if (!trace.usable || trace.coveragePercent < 30) findingIssues.push({ validationStage: 'grounding_reference', code: 'unusable_trace', path, findingIndex, candidateId: finding.candidateId, traceId })
+    })
     issues.push(...findingIssues)
     if (!findingIssues.length) { accepted.push(finding); seenCandidates.add(finding.candidateId) }
   })
   return { accepted: { summary: draft.summary, findings: accepted, limitations: draft.limitations }, issues }
 }
 
-export function expandDiscoveryDraft(draft: AiInvestigatorDiscoveryDraftContent, availableFacts: AiGroundingFact[], availableObservations: IndustrialAnalyticalObservation[] = []): AiInvestigatorDraftContent {
+export function expandDiscoveryDraft(draft: AiInvestigatorDiscoveryDraftContent, availableFacts: AiGroundingFact[], availableObservations: IndustrialAnalyticalObservation[] = [], availableTraces: TemporalEvidenceProgram[] = []): AiInvestigatorDraftContent {
   const factMap = new Map(availableFacts.map((fact) => [fact.factId, fact]))
   return {
     summary: draft.summary,
@@ -338,15 +438,18 @@ export function expandDiscoveryDraft(draft: AiInvestigatorDiscoveryDraftContent,
       const selectedIds = new Set(selected.map(({ factId }) => factId))
       const observationLinks = availableObservations.filter((observation) => observation.pressKey === pressKey && observation.factIds.some((id) => selectedIds.has(id)) && observation.explorer).map((observation) => observation.explorer!)
       const links = [...new Map([...observationLinks, { label: 'Inspect Radius evidence', href: `/raw-radius-explorer?press=${pressKey}` }, { label: 'Open press overview', href: `/overview?press=${pressKey}` }].map((link) => [link.href, link])).values()].slice(0, 4)
+      const traceEvidence = finding.traceIds.flatMap((traceId) => { const trace = availableTraces.find((item) => item.traceId === traceId && item.pressKey === pressKey && item.usable); return trace ? [trace] : [] })
       return {
         rank: findingIndex + 1, pressKey, title: finding.title, importance: finding.importance, confidence: finding.confidence,
         whyItMatters: `${finding.interpretation} ${finding.whyWorthInvestigating}`.trim().slice(0, 700),
         facts: [...grouped.values()].slice(0, 8).map((group) => ({ label: group[0].label, factIds: group.map((fact) => fact.factId).slice(0, 4) })).concat(unknownIds.length ? [{ label: 'Selected evidence', factIds: unknownIds.slice(0, 4) }] : []).slice(0, 8),
         timestampFactIds: selected.filter((fact) => fact.timestamp).map((fact) => fact.factId).slice(0, 8),
         evidenceFactIds: selected.filter((fact) => ['radius', 'telemetry'].includes(fact.source) && fact.usable).map((fact) => fact.factId).slice(0, 12),
-        productionContextFactIds: { job: contextId('job'), order: contextId('order'), recipe: contextId('recipe') },
+        productionContextFactIds: { job: contextId('job'), order: contextId('order'), recipe: contextId('recipe'), material: contextId('material'), customer: contextId('customer') },
         recommendedInvestigation: finding.recommendedInvestigation,
         links,
+        traceIds: traceEvidence.map((trace) => trace.traceId),
+        traceEvidence,
       }
     }),
     limitations: uniqueStrings(draft.limitations),

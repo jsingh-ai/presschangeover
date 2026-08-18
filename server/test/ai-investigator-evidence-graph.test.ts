@@ -55,6 +55,11 @@ function observation(family: IndustrialAnalysisFamily, index: number): Industria
   const metricsByFamily: Record<IndustrialAnalysisFamily, Record<string, string | number | null>> = {
     baseline_deviation: { unit: 'minutes', current: 12, baseline: 8, delta: 4 }, robust_numeric_change: { unit: 'rpm', median: 10, startEndDelta: 3, largestDelta: 4, standardDeviation: 1.2 },
     event_aligned_change: { unit: 'rpm', beforeMedian: 8, eventMedian: 12, afterMedian: 9, beforeToEventDelta: 4 }, value_state_transition: { transitionCount: 3, transitionsNearEvent: 2, stateBefore: 'A', stateAfter: 'B' },
+    contextual_baseline: { unit: 'count', current: 6, baselineMedian: 2, delta: 4, sampleCount: 5 }, contextual_telemetry_baseline: { unit: 'rpm', current: 12, historicalMedian: 4, historicalMad: 1, delta: 8, standardizedDelta: 5, sampleCount: 4 }, speed_recovery: { unit: 'rpm', speedBefore: 200, minimumSpeed: 0, speedAtReturn: 180, timeToRestartMinutes: 4, accelerationAttempts: 3, failedAccelerations: 2, maximumRecoveredSpeed: 190, timeToSustainedSpeedMinutes: 8 },
+    normal_envelope_departure: { unit: 'rpm', expectedMedian: 100, envelopeLower: 90, envelopeUpper: 110, firstDepartureAtUtc: current.startUtc, recurrenceCount: 2, longestDurationMinutes: 6, maximumDepartureMagnitude: 20 },
+    deviation_persistence: { unit: 'rpm', classification: 'sustained', startAtUtc: current.startUtc, endAtUtc: current.endUtc, totalDurationMinutes: 8, longestDurationMinutes: 8, recurrenceCount: 1, maximumMagnitude: 20 },
+    first_divergence: { firstObservedAtUtc: current.startUtc, relativeToEpisodeMinutes: -2, sourceFamily: 'robust_numeric_change', signal: 'machine.speed.actual', observedBehavior: 'numeric delta', expectedBehavior: 'matched pre-event behavior' },
+    radius_telemetry_alignment: { relation: 'TELEMETRY_PRECEDED_RADIUS', lagMinutes: -2, radiusTransitionAtUtc: current.endUtc, telemetryBehaviorAtUtc: current.startUtc, statement: 'Telemetry preceded Radius.' },
     radius_sequence_deviation: { commonSequenceCount: 4, commonSequenceSharePercent: 50, extraStepCount: 14, loopCount: 5 }, numeric_relationship: { pearson: 0.8, spearman: 0.75, bestLagMinutes: 2, bestLagCorrelation: 0.84 },
     cross_press_comparison: { unit: 'percent', pressMedian: 49, compatiblePressMedian: 62, delta: -13 },
   }
@@ -73,7 +78,7 @@ describe('AI Investigator evidence graph', () => {
     assert.equal(preflight.facts.find((fact) => fact.factId === 'press14.longest_interruption_minutes.current')?.value, 222.7)
     assert.deepEqual({ valid: preflight.evidenceGraph.valid, unresolved: preflight.evidenceGraph.unresolvedReferences, crossPress: preflight.evidenceGraph.crossPressViolations, unusable: preflight.evidenceGraph.unusableAdvertisedFacts }, { valid: true, unresolved: 0, crossPress: 0, unusable: 0 })
     for (const factId of preflight.candidates[0]!.facts.map((fact) => fact.factId)) {
-      const draft: AiInvestigatorDiscoveryDraftContent = { summary: 'Synthetic reference validation.', findings: [{ candidateId: 'press14', title: 'Review deterministic evidence', importance: 'medium', confidence: 'medium', factIds: [factId], interpretation: 'The selected evidence merits review.', whyWorthInvestigating: 'It is part of the validated candidate package.', recommendedInvestigation: 'Inspect the corresponding evidence.' }], limitations: [] }
+      const draft: AiInvestigatorDiscoveryDraftContent = { summary: 'Synthetic reference validation.', findings: [{ candidateId: 'press14', title: 'Review deterministic evidence', importance: 'medium', confidence: 'medium', factIds: [factId], traceIds: [], interpretation: 'The selected evidence merits review.', whyWorthInvestigating: 'It is part of the validated candidate package.', recommendedInvestigation: 'Inspect the corresponding evidence.' }], limitations: [] }
       const references = validateDiscoveryReferences(draft, preflight.candidates, preflight.facts)
       assert.equal(references.issues.length, 0, factId)
       const grounded = groundAiInvestigatorDraft(expandDiscoveryDraft(references.accepted, preflight.facts), preflight.facts, request)
@@ -93,7 +98,7 @@ describe('AI Investigator evidence graph', () => {
   })
 
   it('validates registered facts for every Industrial Analytics family including Pearson, Spearman, and lag metrics', () => {
-    const families: IndustrialAnalysisFamily[] = ['baseline_deviation', 'robust_numeric_change', 'event_aligned_change', 'value_state_transition', 'radius_sequence_deviation', 'numeric_relationship', 'cross_press_comparison']
+    const families: IndustrialAnalysisFamily[] = ['baseline_deviation', 'robust_numeric_change', 'event_aligned_change', 'value_state_transition', 'radius_sequence_deviation', 'contextual_baseline', 'speed_recovery', 'normal_envelope_departure', 'deviation_persistence', 'first_divergence', 'radius_telemetry_alignment', 'numeric_relationship', 'cross_press_comparison']
     const observations = families.map(observation); const facts = observations.flatMap((item) => createIndustrialObservationFacts(item, 'Press 14'))
     const candidate = { pressKey: 'press14' as const, observations, facts }
     const modelInput = { candidates: [{ id: 'press14', observations: observations.map((item) => [item.observationId, item.family, null, item.variableIds, item.factIds]), facts: facts.map((fact) => [fact.factId]) }] }
@@ -144,7 +149,7 @@ function assertCandidateClosure(preflight: Awaited<ReturnType<typeof buildDiscov
     const serialized = modelCandidates.find(({ id }) => id === candidate.pressKey)!
     assert.deepEqual(new Set(serialized.facts.map((item) => item[0])), closure)
     for (const sourceFact of candidate.facts) {
-      const draft: AiInvestigatorDiscoveryDraftContent = { summary: 'Closure invariant.', findings: [{ candidateId: candidate.pressKey, title: 'Review deterministic evidence', importance: 'medium', confidence: 'medium', factIds: [sourceFact.factId], interpretation: 'The selected evidence merits review.', whyWorthInvestigating: 'It belongs to the authoritative candidate closure.', recommendedInvestigation: 'Inspect the corresponding evidence.' }], limitations: [] }
+      const draft: AiInvestigatorDiscoveryDraftContent = { summary: 'Closure invariant.', findings: [{ candidateId: candidate.pressKey, title: 'Review deterministic evidence', importance: 'medium', confidence: 'medium', factIds: [sourceFact.factId], traceIds: [], interpretation: 'The selected evidence merits review.', whyWorthInvestigating: 'It belongs to the authoritative candidate closure.', recommendedInvestigation: 'Inspect the corresponding evidence.' }], limitations: [] }
       const references = validateDiscoveryReferences(draft, preflight.candidates, preflight.facts)
       assert.equal(references.issues.length, 0, sourceFact.factId)
       const grounded = groundAiInvestigatorDraft(expandDiscoveryDraft(references.accepted, preflight.facts), preflight.facts, sourceRequest)

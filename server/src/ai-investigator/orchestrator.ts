@@ -421,7 +421,7 @@ export class AiInvestigatorOrchestrator {
       const references = validateDiscoveryReferences(compactDraft, preflight.candidates, preflight.facts)
       for (const issue of references.issues) safeLog(this.logger, 'error', { event: 'ai_investigator_validation_failed', architecture: 'single_synthesis', analysisId, responseId: response.id, ...issue })
       if (!references.issues.length) safeLog(this.logger, 'info', { event: 'ai_investigator_validation_passed', architecture: 'single_synthesis', analysisId, responseId: response.id, validationStage: 'grounding_reference', findingCount: references.accepted.findings.length })
-      const expanded = expandDiscoveryDraft(references.accepted, preflight.facts, preflight.candidates.flatMap(({ observations }) => observations))
+      const expanded = expandDiscoveryDraft(references.accepted, preflight.facts, preflight.candidates.flatMap(({ observations }) => observations), preflight.candidates.flatMap(({ traces }) => traces ?? []))
       expanded.limitations = [...new Set([...expanded.limitations, ...preflight.limitations])]
       const grounded = groundAiInvestigatorDraft(expanded, preflight.facts, request, fleetTable(evidence))
       const referenceOmitted = new Set(references.issues.map((issue) => issue.findingIndex)).size

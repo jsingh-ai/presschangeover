@@ -225,6 +225,9 @@ describe('Raw Radius Code Explorer', () => {
     const detail = await explorer.detail({ occurrence, changeLookbackMinutes: 15 })
     assert.deepEqual(rawCalls, [{ pressKey: 'press3', fromUtc: '2026-08-13T11:45:00.000Z', toUtc: startUtc }])
     assert.equal(detail.rawTelemetry.status, 'available')
+    const validationDetail = await explorer.detail({ occurrence, changeLookbackMinutes: 15 }, 'validation-request', undefined, { includeRawTelemetryDiscovery: false })
+    assert.equal(rawCalls.length, 1)
+    assert.equal(validationDetail.rawTelemetry.status, 'unavailable')
     assert.deepEqual(detail.rawTelemetry.signals.map(({ rawIdentity, dataKind, reviewStatus }) => ({ rawIdentity, dataKind, reviewStatus })), [
       { rawIdentity: 'Press3.unique.numeric', dataKind: 'numeric', reviewStatus: 'UNREVIEWED' },
       { rawIdentity: 'Press3.unique.container', dataKind: 'container', reviewStatus: 'UNREVIEWED' },
@@ -252,5 +255,15 @@ describe('Raw Radius Code Explorer', () => {
     assert.ok(Array.isArray(detail.radiusSegments))
     assert.ok(Array.isArray(detail.speed.samples))
     assert.ok(Array.isArray(detail.changedSignals))
+  })
+
+  it('bounds lazy same-code history and preserves exact statusCode identity', async () => {
+    const source = radiusService(); const starts = Array.from({ length: 140 }, (_item, index) => new Date(Date.parse(startUtc) - (140 - index) * 60_000).toISOString())
+    source.getAnalysisOverview = async () => ({ presses: [{ pressKey: 'press3', displayName: 'Press 3', timelineSegments: starts.flatMap((start, index) => [
+      { ...radiusSegment(start, new Date(Date.parse(start) + 30_000).toISOString()), statusCode: index % 7 === 0 ? '401' : '400' },
+      { ...radiusSegment(new Date(Date.parse(start) + 30_000).toISOString(), new Date(Date.parse(start) + 60_000).toISOString()), eventType: 'G', statusCode: '1', statusDescription: 'Run' },
+    ]) }] }) as never
+    const telemetry = {} as TelemetryFoundationService; const summary = await new RawRadiusExplorerService(source, telemetry).historicalSummary({ occurrence, lookbackDays: 31, maximumOccurrences: 100 })
+    assert.ok(summary.supportCount <= 100); assert.equal(summary.scope.includes('exact Radius identity'), true); assert.doesNotMatch(String(summary.metrics.commonPreviousIdentities), /401/); assert.match(summary.limitations.join(' '), /not a correctness standard/)
   })
 })

@@ -2,11 +2,11 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { AiInvestigatorConfig } from '../src/config.js'
 import { AI_INVESTIGATOR_DISCOVERY_SCHEMA, AI_INVESTIGATOR_DISCOVERY_TEXT_FORMAT, validateAiInvestigatorDiscoveryDraft, type AiInvestigatorDiscoveryDraftContent } from '../src/ai-investigator/contracts.js'
-import { buildDiscoveryPreflight, DISCOVERY_INSTRUCTIONS, DISCOVERY_OUTPUT_TOKENS, expandDiscoveryDraft } from '../src/ai-investigator/discovery.js'
+import { buildDiscoveryPreflight, compactDiscoveryTraceForModel, compactModelInput, DISCOVERY_INSTRUCTIONS, DISCOVERY_MODEL_NUMERIC_LANDMARK_LIMIT, DISCOVERY_MODEL_NUMERIC_SEGMENT_LIMIT, DISCOVERY_OUTPUT_TOKENS, DISCOVERY_SELECTED_MODEL_TELEMETRY_TRACE_LIMIT, DISCOVERY_SELECTED_MODEL_TRACE_LIMIT, expandDiscoveryDraft, selectDiscoveryModelTraces } from '../src/ai-investigator/discovery.js'
 import { groundAiInvestigatorDraft } from '../src/ai-investigator/grounding.js'
 import { buildAiResponsesRequestPayload, AiInvestigatorOrchestrator, type AiInvestigatorModelClient } from '../src/ai-investigator/orchestrator.js'
 import { profileAiResponsesRequest } from '../src/ai-investigator/offline-profiler.js'
-import { DiscoveryFixtureExecutor, fixtureCurrent } from './fixtures/ai-investigator-discovery-fixture.js'
+import { DiscoveryFixtureExecutor, fixtureBaseline, fixtureCurrent } from './fixtures/ai-investigator-discovery-fixture.js'
 
 const request = { scope: { pressKey: null }, range: fixtureCurrent, analysis: 'discover_unusual_behavior' as const }
 const config: AiInvestigatorConfig = { enabled: true, apiKey: 'offline-test', model: 'test-model', totalTimeoutMs: 2_000, toolTimeoutMs: 500, openAiTimeoutMs: 500, maxToolCalls: 8, maxToolRounds: 4, maxParallelTools: 3 }
@@ -46,12 +46,76 @@ describe('AI Investigator deterministic discovery preflight', () => {
     assert.match(preflight.facts.filter((fact) => ['press10', 'press13', 'press14'].includes(fact.pressKey) && fact.metric === 'radiusDriverDurationMinutes').map((fact) => fact.label).join(' '), /Sheet feed|delivery jam|web break/)
     assert.ok(preflight.candidates.every((candidate) => candidate.observations.length <= 3 && candidate.observations.every((observation) => observation.support.adequate && observation.material)))
     assert.equal(preflight.analytics.modelCandidates, 5); assert.equal(preflight.analytics.grouped, preflight.candidates.reduce((sum, candidate) => sum + candidate.observations.length, 0))
+    assert.ok(preflight.candidates.every((candidate) => candidate.observations.length <= 1))
     assert.equal(JSON.stringify(preflight.modelInput).includes('samples'), false)
+  })
+
+  it('requests full temporal detail for only the first two fleet candidates', async () => {
+    const executor = new DiscoveryFixtureExecutor(true)
+    await buildDiscoveryPreflight(executor, request, new AbortController().signal)
+    const detailLevels = executor.calls
+      .filter((call) => call.name === 'get_press_event_summary')
+      .map((call) => (call.arguments as { detailLevel: string }).detailLevel)
+    assert.deepEqual(detailLevels, ['fleet', 'fleet', 'fleet_summary', 'fleet_summary', 'fleet_summary'])
+  })
+
+  it('keeps compact selected-press and fleet serialization within hard token gates', async () => {
+    const estimate = async (pressKey: 'press14' | null) => {
+      const preflight = await buildDiscoveryPreflight(new DiscoveryFixtureExecutor(), { ...request, scope: { pressKey } }, new AbortController().signal)
+      const payload = buildAiResponsesRequestPayload('test-model', [{ role: 'user', content: JSON.stringify(preflight.modelInput) }], DISCOVERY_INSTRUCTIONS, [], 'none', { structuredOutputSchema: AI_INVESTIGATOR_DISCOVERY_SCHEMA, structuredOutputFormat: AI_INVESTIGATOR_DISCOVERY_TEXT_FORMAT, structuredOutputName: 'process_intelligence_discovery', maxOutputTokens: DISCOVERY_OUTPUT_TOKENS })
+      assert.equal(JSON.stringify(preflight.modelInput).includes('validationDiagnostics'), false)
+      assert.deepEqual(preflight.instrumentation.sectionTokenContributions.map(({ section }) => section), ['overall summary', 'context', 'Radius sequence evidence', 'temporal traces', 'telemetry events', 'baseline evidence', 'relationships', 'persistence', 'first divergence', 'Radius/telemetry alignment', 'limitations'])
+      return profileAiResponsesRequest(payload).estimatedInputTokens
+    }
+    assert.ok(await estimate('press14') <= 2_500); assert.ok(await estimate(null) <= 6_000)
+  })
+
+  it('keeps bounded temporal programs within selected and fleet token/detail limits without raw arrays', async () => {
+    const estimate = async (pressKey: 'press14' | null) => {
+      const preflight = await buildDiscoveryPreflight(new DiscoveryFixtureExecutor(true), { ...request, scope: { pressKey } }, new AbortController().signal)
+      const payload = buildAiResponsesRequestPayload('test-model', [{ role: 'user', content: JSON.stringify(preflight.modelInput) }], DISCOVERY_INSTRUCTIONS, [], 'none', { structuredOutputSchema: AI_INVESTIGATOR_DISCOVERY_SCHEMA, structuredOutputFormat: AI_INVESTIGATOR_DISCOVERY_TEXT_FORMAT, structuredOutputName: 'process_intelligence_discovery', maxOutputTokens: DISCOVERY_OUTPUT_TOKENS })
+      const serialized = JSON.stringify(preflight.modelInput); assert.equal(serialized.includes('samples'), false); assert.equal(serialized.includes('rawSignalId'), false); assert.ok(preflight.candidates.filter((candidate) => (candidate.traces?.length ?? 0) > 0).length <= 2); assert.ok(preflight.candidates.every((candidate) => (candidate.traces?.length ?? 0) <= 8 && (candidate.traces?.filter((trace) => trace.datatype === 'numeric' || trace.datatype === 'categorical').length ?? 0) <= 6))
+      return profileAiResponsesRequest(payload).estimatedInputTokens
+    }
+    assert.ok(await estimate('press14') <= 2_500); assert.ok(await estimate(null) <= 6_000)
+  })
+
+  it('keeps authoritative traces rich while bounding the selected-press model view to three telemetry traces plus Radius and context', async () => {
+    const preflight = await buildDiscoveryPreflight(new DiscoveryFixtureExecutor(true), { ...request, scope: { pressKey: 'press14' } }, new AbortController().signal)
+    const candidate = preflight.candidates[0]!
+    assert.equal(candidate.traces?.length, 6)
+    const modelTraces = selectDiscoveryModelTraces(candidate.traces ?? [], true)
+    assert.equal(modelTraces.length, DISCOVERY_SELECTED_MODEL_TRACE_LIMIT)
+    assert.equal(modelTraces.filter((trace) => trace.datatype === 'numeric' || trace.datatype === 'categorical').length, DISCOVERY_SELECTED_MODEL_TELEMETRY_TRACE_LIMIT)
+    assert.equal(modelTraces.filter((trace) => trace.datatype === 'radius').length, 1)
+    assert.equal(modelTraces.filter((trace) => trace.datatype === 'production_context').length, 1)
+    assert.equal(candidate.traces?.some((trace) => trace.canonicalId === 'drive.load.actual'), true)
+    assert.equal(modelTraces.some((trace) => trace.canonicalId === 'drive.load.actual'), false)
+    const fourthSignalFact = { ...candidate.facts[0]!, factId: 'press14.telemetry.drive_load.strongest_delta.event', source: 'telemetry' as const, metric: 'strongest10mDelta', value: 12.5, unit: 'percent', role: 'event' as const, label: 'Drive load strongest 10-minute Delta' }
+    const modelInput = compactModelInput({ ...request, scope: { pressKey: 'press14' } }, { start: fixtureCurrent.startUtc, end: fixtureCurrent.endUtc }, { start: fixtureBaseline.startUtc, end: fixtureBaseline.endUtc }, [{ ...candidate, facts: [...candidate.facts, fourthSignalFact] }], ['press14'], [], 3, [])
+    const modelFacts = (modelInput.candidates[0] as { facts: unknown[][] }).facts
+    assert.equal(modelFacts.some((fact) => fact[0] === fourthSignalFact.factId), true)
+  })
+
+  it('preserves observed critical numeric landmarks while bounding the compact model trace', async () => {
+    const preflight = await buildDiscoveryPreflight(new DiscoveryFixtureExecutor(true), { ...request, scope: { pressKey: 'press14' } }, new AbortController().signal)
+    const trace = preflight.candidates[0]!.traces!.find((item) => item.datatype === 'numeric')!
+    assert.equal(trace.datatype, 'numeric')
+    const compact = compactDiscoveryTraceForModel(trace)
+    const segments = compact[8] as unknown[][]
+    const landmarks = compact[9] as Array<[number, number, string[]]>
+    assert.ok(segments.length <= DISCOVERY_MODEL_NUMERIC_SEGMENT_LIMIT)
+    assert.ok(landmarks.length <= DISCOVERY_MODEL_NUMERIC_LANDMARK_LIMIT)
+    const kinds = new Set(landmarks.flatMap((item) => item[2]))
+    for (const required of ['EVENT_START', 'EVENT_END', 'MINIMUM', 'MAXIMUM']) assert.ok(kinds.has(required), `missing ${required}`)
+    assert.ok(kinds.has('DELTA_BASELINE') || kinds.has('DELTA_TRIGGER') || kinds.has('DELTA_EXTREME'))
+    const observedPairs = new Set(trace.landmarks.map((item) => `${item.relativeMinutes}:${item.value}`))
+    assert.ok(landmarks.every(([relativeMinutes, observedValue]) => observedPairs.has(`${relativeMinutes}:${observedValue}`)))
   })
 
   it('expands the compact model draft into the rich grounded UI contract server-side', async () => {
     const preflight = await buildDiscoveryPreflight(new DiscoveryFixtureExecutor(), { ...request, scope: { pressKey: 'press14' } }, new AbortController().signal)
-    const draft: AiInvestigatorDiscoveryDraftContent = { summary: 'Press 14 has material comparative signals.', findings: [{ candidateId: 'press14', title: 'Production time declined', importance: 'high', confidence: 'high', interpretation: 'The deterministic comparison warrants review.', whyWorthInvestigating: 'The combined changes merit an operator review.', factIds: ['press14.production_percent.delta', 'press14.longest_interruption_minutes.delta', 'press14.radius_driver.driver1.duration_minutes.current'], recommendedInvestigation: 'Inspect the synchronized Radius episodes.' }], limitations: ['Advisory result.'] }
+    const draft: AiInvestigatorDiscoveryDraftContent = { summary: 'Press 14 has material comparative signals.', findings: [{ candidateId: 'press14', title: 'Production time declined', importance: 'high', confidence: 'high', interpretation: 'The deterministic comparison warrants review.', whyWorthInvestigating: 'The combined changes merit an operator review.', factIds: ['press14.production_percent.delta', 'press14.longest_interruption_minutes.delta', 'press14.radius_driver.driver1.duration_minutes.current'], traceIds: [], recommendedInvestigation: 'Inspect the synchronized Radius episodes.' }], limitations: ['Advisory result.'] }
     assert.deepEqual(validateAiInvestigatorDiscoveryDraft(draft), draft)
     const expanded = expandDiscoveryDraft(draft, preflight.facts)
     assert.deepEqual(expanded.findings[0].facts[0].factIds, ['press14.production_percent.delta', 'press14.production_percent.current', 'press14.production_percent.baseline'])
@@ -64,7 +128,7 @@ describe('AI Investigator deterministic discovery preflight', () => {
 
   it('uses exactly one tool-free model synthesis request on the deployed API path', async () => {
     const executor = new DiscoveryFixtureExecutor(); const observed: Array<{ tools: number; options: unknown }> = []
-    const draft: AiInvestigatorDiscoveryDraftContent = { summary: 'One material signal.', findings: [{ candidateId: 'press14', title: 'Production time declined', importance: 'high', confidence: 'high', interpretation: 'The deterministic comparison warrants review.', whyWorthInvestigating: 'The change is material enough to prioritize.', factIds: ['press14.production_percent.delta'], recommendedInvestigation: 'Inspect Radius episodes.' }], limitations: [] }
+    const draft: AiInvestigatorDiscoveryDraftContent = { summary: 'One material signal.', findings: [{ candidateId: 'press14', title: 'Production time declined', importance: 'high', confidence: 'high', interpretation: 'The deterministic comparison warrants review.', whyWorthInvestigating: 'The change is material enough to prioritize.', factIds: ['press14.production_percent.delta'], traceIds: [], recommendedInvestigation: 'Inspect Radius episodes.' }], limitations: [] }
     const model: AiInvestigatorModelClient = { create: async (_input, _instructions, tools, _choice, _signal, options) => { observed.push({ tools: tools.length, options }); return { id: 'offline-model', outputText: JSON.stringify(draft), outputItems: [], toolCalls: [] } } }
     const result = await new AiInvestigatorOrchestrator(config, executor, model, false).analyzeDiscovery({ ...request, scope: { pressKey: 'press14' } })
     assert.equal(result.status, 'complete'); assert.equal(result.findings.length, 1); assert.equal(result.toolCallsUsed, 3)

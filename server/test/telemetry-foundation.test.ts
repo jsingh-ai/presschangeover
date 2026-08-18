@@ -99,6 +99,58 @@ test('semantic history distinguishes unsupported and supported-with-no-observati
   assert.equal(evidence.signals.find(({ canonicalId }) => canonicalId === 'supported.empty')?.observationState, 'SUPPORTED_WITH_NO_SAMPLES_IN_RANGE')
 })
 
+test('bounded semantic history chunks ranges at two hours, merges exact bounds, and deduplicates boundaries', async () => {
+  const began = Date.parse('2026-08-17T00:00:00.000Z'); const calls: Array<{ fromUtc: string; toUtc: string }> = []
+  const sample = (observedAtUtc: string, value: number) => ({ observedAtUtc, receivedAtUtc: observedAtUtc, sourceTimestampUtc: observedAtUtc, qualityState: 'GOOD', valueKind: 'numeric' as const, value })
+  const service = new TelemetryFoundationService(baseClient({ querySemanticHistory: async (_sourceId, query) => {
+    calls.push({ fromUtc: query.fromUtc, toUtc: query.toUtc }); const template = mixedHistoryFixture.signals.find(({ canonicalId }) => canonicalId === 'ink.temperature.actual')!
+    return { ...mixedHistoryFixture, fromUtc: query.fromUtc, toUtc: query.toUtc, signals: [{ ...template, canonicalId: query.signals[0]!.canonicalId, deckNumber: null, samples: [sample(query.fromUtc, Date.parse(query.fromUtc)), sample(query.toUtc, Date.parse(query.toUtc))], changes: [] }] }
+  } }))
+  const result = await service.semanticHistory('press5', { fromUtc: new Date(began).toISOString(), toUtc: new Date(began + 5 * 60 * 60_000).toISOString(), includeSeed: false, signals: [{ canonicalId: 'ink.temperature.actual', representation: 'samples' }] }, 'bounded-test')
+  assert.equal(calls.length, 3); assert.ok(calls.every((call) => Date.parse(call.toUtc) - Date.parse(call.fromUtc) <= 2 * 60 * 60_000))
+  assert.equal(result.fromUtc, new Date(began).toISOString()); assert.equal(result.toUtc, new Date(began + 5 * 60 * 60_000).toISOString())
+  assert.equal(result.signals[0]!.samples.length, 4); assert.equal(result.readDiagnostics?.boundaryDuplicatesRemoved, 2)
+})
+
+test('bounded semantic history preserves detected gaps and reuses identical reads within one analysis', async () => {
+  let calls = 0; const start = '2026-08-17T00:00:00.000Z'; const end = '2026-08-17T01:00:00.000Z'
+  const at = (minute: number) => new Date(Date.parse(start) + minute * 60_000).toISOString()
+  const sample = (minute: number) => ({ observedAtUtc: at(minute), receivedAtUtc: at(minute), sourceTimestampUtc: at(minute), qualityState: 'GOOD', valueKind: 'numeric' as const, value: minute })
+  const template = mixedHistoryFixture.signals.find(({ canonicalId }) => canonicalId === 'ink.temperature.actual')!
+  const service = new TelemetryFoundationService(baseClient({ querySemanticHistory: async (_sourceId, query) => { calls += 1; return { ...mixedHistoryFixture, fromUtc: query.fromUtc, toUtc: query.toUtc, signals: [{ ...template, canonicalId: 'ink.temperature.actual', deckNumber: null, samples: [0, 1, 2, 30, 31].map(sample), changes: [] }] } } }))
+  const query = { fromUtc: start, toUtc: end, includeSeed: false, signals: [{ canonicalId: 'ink.temperature.actual', representation: 'samples' as const }] }
+  const first = await service.semanticHistory('press5', query, 'same-analysis'); const second = await service.semanticHistory('press5', query, 'same-analysis')
+  assert.equal(calls, 1); assert.equal(first.readDiagnostics?.gaps.length, 1); assert.equal(first.readDiagnostics?.gaps[0]?.startUtc, at(2)); assert.equal(first.readDiagnostics?.gaps[0]?.endUtc, at(30)); assert.equal(second.readDiagnostics?.cacheHits, 1)
+})
+
+test('analysis cache reuses exact, selector-subset, contained-range, and combined reads with exact clipping', async () => {
+  let calls = 0; const start = '2026-08-17T00:00:00.000Z'; const end = '2026-08-17T01:00:00.000Z'
+  const at = (minute: number) => new Date(Date.parse(start) + minute * 60_000).toISOString()
+  const sample = (minute: number, qualityState = 'GOOD') => ({ observedAtUtc: at(minute), receivedAtUtc: at(minute), sourceTimestampUtc: at(minute), qualityState, valueKind: 'numeric' as const, value: minute })
+  const template = mixedHistoryFixture.signals.find(({ canonicalId }) => canonicalId === 'ink.temperature.actual')!
+  const selectors = [{ canonicalId: 'ink.temperature.actual', representation: 'samples' as const }, { canonicalId: 'dryer.tunnel.temperature.actual', representation: 'samples' as const }]
+  const service = new TelemetryFoundationService(baseClient({ querySemanticHistory: async (_sourceId, query) => {
+    calls += 1
+    return { ...mixedHistoryFixture, fromUtc: query.fromUtc, toUtc: query.toUtc, includeSeed: query.includeSeed, signals: query.signals.map((selector) => ({ ...template, canonicalId: selector.canonicalId, deckNumber: null, representation: selector.representation, seedSample: sample(-1), samples: [sample(0), sample(1), sample(2), sample(10), sample(11), sample(12, 'BAD'), sample(30), sample(31), sample(50)], changes: [] })) }
+  } }))
+  const broad = { fromUtc: start, toUtc: end, includeSeed: true, signals: selectors }
+  await service.semanticHistory('press5', broad, 'range-cache')
+  const exact = await service.semanticHistory('press5', broad, 'range-cache')
+  const subset = await service.semanticHistory('press5', { ...broad, signals: selectors.slice(0, 1) }, 'range-cache')
+  const contained = await service.semanticHistory('press5', { ...broad, fromUtc: at(10), toUtc: at(40) }, 'range-cache')
+  const combined = await service.semanticHistory('press5', { ...broad, fromUtc: at(10), toUtc: at(40), signals: selectors.slice(0, 1) }, 'range-cache')
+  assert.equal(calls, 1)
+  assert.equal(exact.readDiagnostics?.cacheHitType, 'EXACT'); assert.equal(exact.readDiagnostics?.exactCacheHits, 1)
+  assert.equal(subset.readDiagnostics?.cacheHitType, 'SELECTOR_SUBSET'); assert.equal(subset.readDiagnostics?.selectorSubsetCacheHits, 1); assert.equal(subset.signals.length, 1)
+  assert.equal(contained.readDiagnostics?.cacheHitType, 'CONTAINED_RANGE'); assert.equal(contained.readDiagnostics?.containedRangeCacheHits, 1)
+  assert.equal(combined.readDiagnostics?.cacheHitType, 'CONTAINED_RANGE_SELECTOR_SUBSET'); assert.equal(combined.readDiagnostics?.containedRangeSelectorSubsetCacheHits, 1)
+  assert.deepEqual(combined.signals[0]?.samples.map(({ observedAtUtc }) => observedAtUtc), [at(10), at(11), at(12), at(30), at(31)])
+  assert.equal(combined.signals[0]?.seed?.value, 2)
+  assert.equal(combined.signals[0]?.samples.find(({ observedAtUtc }) => observedAtUtc === at(12))?.qualityState, 'BAD')
+  assert.equal(combined.readDiagnostics?.gaps.length, 1); assert.deepEqual(combined.readDiagnostics?.gaps[0], { canonicalId: 'ink.temperature.actual', deckNumber: null, startUtc: at(12), endUtc: at(30), durationMs: 18 * 60_000 })
+  assert.equal(combined.readDiagnostics?.telemetryRequests, 0); assert.equal(combined.readDiagnostics?.chunkCount, 0); assert.equal(combined.readDiagnostics?.pointsReturned, 0)
+})
+
 function contextFixture(): TelemetrySemanticHistoryResponse {
   const supported = (canonicalId: string, value: string) => ({ ...mixedHistoryFixture.signals[0]!, canonicalId, seedSample: { ...mixedHistoryFixture.signals[0]!.seedSample!, value }, changes: canonicalId === 'production.roll' ? mixedHistoryFixture.signals[0]!.changes : [] })
   return { ...mixedHistoryFixture, signals: [supported('production.job', 'JOB-REDACTED'), supported('production.order', 'ORDER-REDACTED'), supported('production.recipe', 'RECIPE-REDACTED'), supported('production.customer', 'CUSTOMER-REDACTED'), supported('production.material', 'MATERIAL-REDACTED'), supported('production.roll', 'ROLL-REDACTED')] }

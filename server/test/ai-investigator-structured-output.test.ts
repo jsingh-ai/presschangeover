@@ -39,7 +39,7 @@ const press14Facts: AiGroundingFact[] = [
 const candidate: DiscoveryCandidate = { pressKey: 'press14', press: 'Press 14', signalCount: 7, productionDelta: -17.6, interruptionDelta: 1, longestDelta: 106.3, observations: [], facts: press14Facts }
 
 function judgment(overrides: Partial<AiInvestigatorDiscoveryDraftContent['findings'][number]> = {}): AiInvestigatorDiscoveryDraftContent['findings'][number] {
-  return { candidateId: 'press14', title: 'Operating shift merits review', importance: 'high', confidence: 'high', factIds: ['press14.production_percent.delta'], interpretation: 'The supplied changes align into a material operating shift.', whyWorthInvestigating: 'The combination is more decision-relevant than any one metric alone.', recommendedInvestigation: 'Review the synchronized Radius sequence with the operating team.', ...overrides }
+  return { candidateId: 'press14', title: 'Operating shift merits review', importance: 'high', confidence: 'high', factIds: ['press14.production_percent.delta'], traceIds: [], interpretation: 'The supplied changes align into a material operating shift.', whyWorthInvestigating: 'The combination is more decision-relevant than any one metric alone.', recommendedInvestigation: 'Review the synchronized Radius sequence with the operating team.', ...overrides }
 }
 
 function diagnostic(operation: () => unknown) {
@@ -54,7 +54,7 @@ describe('AI Investigator authoritative structured output', () => {
     assert.deepEqual(AI_INVESTIGATOR_DISCOVERY_TEXT_FORMAT.schema, AI_INVESTIGATOR_DISCOVERY_SCHEMA)
     const root = AI_INVESTIGATOR_DISCOVERY_SCHEMA as { additionalProperties: boolean; properties: { findings: { items: { additionalProperties: boolean; required: string[]; properties: Record<string, unknown> } } } }
     assert.equal(root.additionalProperties, false); assert.equal(root.properties.findings.items.additionalProperties, false)
-    assert.deepEqual(root.properties.findings.items.required, ['candidateId', 'title', 'importance', 'confidence', 'factIds', 'interpretation', 'whyWorthInvestigating', 'recommendedInvestigation'])
+    assert.deepEqual(root.properties.findings.items.required, ['candidateId', 'title', 'importance', 'confidence', 'factIds', 'traceIds', 'interpretation', 'whyWorthInvestigating', 'recommendedInvestigation'])
     assert.equal('rank' in root.properties.findings.items.properties, false); assert.equal('pressKey' in root.properties.findings.items.properties, false)
     const singleCandidate = aiInvestigatorDiscoveryTextFormat(1).schema as { properties: { findings: { maxItems: number } } }
     assert.equal(singleCandidate.properties.findings.maxItems, 1)

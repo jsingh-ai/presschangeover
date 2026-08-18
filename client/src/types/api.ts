@@ -87,9 +87,27 @@ export interface AiInvestigatorFinding {
   timestamps: Array<{ label: string; start: string; end: string | null }>
   radiusEvidence: string[]
   telemetryEvidence: string[]
-  productionContext: { job: string; order: string; recipe: string }
+  productionContext: Partial<Record<'job' | 'order' | 'recipe' | 'material' | 'customer', string>>
+  baselines: string[]
   recommendedInvestigation: string
   links: Array<{ label: string; href: string }>
+  traceEvidence: AiTemporalEvidenceProgram[]
+}
+
+export interface AiTemporalEvidenceProgram {
+  traceId: string
+  canonicalId: string
+  datatype: 'numeric' | 'categorical' | 'radius' | 'production_context'
+  unit: string | null
+  coveragePercent: number
+  gapState: 'COMPLETE' | 'GAPS_PRESENT' | 'INSUFFICIENT'
+  selectedBecause: string[]
+  event: { start: string; end: string }
+  segments?: Array<{ startRelativeMinutes: number; endRelativeMinutes: number; trend: 'STABLE' | 'RISING' | 'FALLING' | 'OSCILLATING'; startValue: number; endValue: number }>
+  landmarks?: Array<{ relativeMinutes: number; value: number; kinds: string[] }>
+  intervals?: Array<{ startRelativeMinutes: number; endRelativeMinutes: number; value: string | number | boolean }>
+  transitions?: Array<{ relativeMinutes: number; from: string | number | boolean; to: string | number | boolean }>
+  explorer: { label: string; href: string }
 }
 
 export interface AiInvestigatorResult {
@@ -807,6 +825,18 @@ export interface RawTelemetryChange extends RawTelemetrySample {
   previousValue: RawTelemetryScalar
 }
 
+export interface ExplorerEvidenceQuality { supportCount: number; comparisonCount: number | null; coverage: number | null; comparisonCoverage: number | null; historicalSpan: { startUtc: string; endUtc: string } | null; contextMatchLevel: number | null; contextMatchDimensions: string[]; medianCadence: number | null; maximumGap: number | null; timingResolution: { minimumSeconds: number; maximumSeconds: number } | null; qualification: 'SUPPORTED' | 'LIMITED' | 'INSUFFICIENT'; excludedReason: string | null }
+export interface RelatedSignalSuggestion { canonicalId: string; deckNumber: number | null; friendlyName: string; signalType: RawExplorerSignalType | string; category: RawExplorerCategory | string; scope: 'machine' | 'deck'; reasonCodes: string[]; reason: string; timingDetail: string | null }
+export interface EvidencePhaseSummary { eventStartUtc: string; eventEndUtc: string; items: Array<{ phase: 'BACKGROUND' | 'PRECURSOR' | 'TARGET' | 'RESPONSE' | 'RECOVERY'; atUtc: string | null; label: string; detail: string | null; source: 'radius' | 'telemetry' | 'production_context'; canonicalId: string | null; deckNumber: number | null }>; limitations: string[] }
+export interface BasicHistoricalSummary { scope: string; supportCount: number; timeSpan: { startUtc: string; endUtc: string } | null; metrics: Record<string, string | number | boolean | null>; evidenceQuality: ExplorerEvidenceQuality; limitations: string[] }
+export interface ExplorerAnalyticalObservation { family: string; metrics: Record<string, string | number | boolean | null>; support: { sampleCount: number; comparisonSampleCount: number | null; coveragePercent: number | null; comparisonCoveragePercent: number | null; adequate: boolean; minimumRequired: number; reason: string | null }; material: boolean; limitations: string[] }
+
+export interface RadiusPhysicalAlignment {
+  pressKey: RadiusPressKey; occurrenceId: string; recordedRadius: { eventType: string; statusCode: string | null; statusDescription: string }; recordedStartUtc: string; recordedEndUtc: string
+  inferredPhysicalOnsetRange: { startUtc: string; endUtc: string } | null; inferredPhysicalExitRange: { startUtc: string; endUtc: string } | null; entryLagRange: { minimumSeconds: number; maximumSeconds: number } | null; exitLagRange: { minimumSeconds: number; maximumSeconds: number } | null
+  speedEvidence: Array<{ canonicalId: 'machine.speed.actual'; observedAtUtc: string; referenceAtUtc: string; delta: number; sourceUnit: string | null }>; otherTelemetryEvidence: Array<{ canonicalId: string; deckNumber: number | null; observedAtUtc: string; reason: string }>; contextEvidence: Array<{ field: string; value: string | number | boolean }>; radiusSequenceEvidence: Array<{ eventType: string; statusCode: string | null; statusDescription: string; relationship: 'PREVIOUS' | 'CURRENT' | 'NEXT' }>; agreementClass: 'PHYSICAL_PRECEDES_RECORDED' | 'RECORDED_PRECEDES_PHYSICAL' | 'ALIGNED_WITHIN_CADENCE' | 'INDETERMINATE_WITHIN_CADENCE' | 'NO_SUPPORTED_PHYSICAL_EVIDENCE'; evidenceQuality: ExplorerEvidenceQuality
+}
+
 export interface RawExplorerDetail {
   occurrence: RawExplorerOccurrence
   lookback: { fromUtc: string; toUtc: string; halfOpen: true }
@@ -819,6 +849,14 @@ export interface RawExplorerDetail {
     signals: RawUnmappedChangedSignal[]
     counts: null | { rawCatalogIdentityCount: number; canonicallyRepresentedIdentityCount: number; unmappedIdentityCount: number; usableIdentityCount: number; changedIdentityCount: number }
     historianReadCount: number
+  }
+  evidence: {
+    physicalAlignment: RadiusPhysicalAlignment
+    productionContext: Array<{ field: string; value: string | number | boolean }>
+    phaseSummary: EvidencePhaseSummary
+    behavior: { signal: string; unit: string | null; before: Record<string, number> | null; during: Record<string, number> | null; after: Record<string, number> | null }
+    radiusSequence: RadiusPhysicalAlignment['radiusSequenceEvidence']
+    suggestedSignals: RelatedSignalSuggestion[]
   }
   performance: { totalMs: number; selectorCount: number; semanticHistoryRequests: number; speedHistoryMs: number; payloadBytes: number }
 }
@@ -931,4 +969,5 @@ export interface TelemetryEventDetail {
   occurrence: TelemetryEventOccurrence
   primary: { kind: 'canonical'; signal: TelemetryEventCanonicalHistory } | { kind: 'raw'; signal: Omit<RawUnmappedHistory, 'reviewStatus'> }
   context: RawExplorerDetail
+  evidence: { productionContext: Array<{ field: string; value: string | number | boolean }>; radiusAtEvent: { eventType: string; statusCode: string | null; statusDescription: string } | null; phaseSummary: EvidencePhaseSummary; behavior: ExplorerAnalyticalObservation | null; persistence: ExplorerAnalyticalObservation | null; contextualEnvelope: ExplorerAnalyticalObservation | null; firstDivergence: ExplorerAnalyticalObservation | null; suggestedSignals: RelatedSignalSuggestion[]; observationCount: number }
 }

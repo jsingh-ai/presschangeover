@@ -6,6 +6,13 @@ export type IndustrialAnalysisFamily =
   | 'event_aligned_change'
   | 'value_state_transition'
   | 'radius_sequence_deviation'
+  | 'contextual_baseline'
+  | 'contextual_telemetry_baseline'
+  | 'speed_recovery'
+  | 'normal_envelope_departure'
+  | 'deviation_persistence'
+  | 'first_divergence'
+  | 'radius_telemetry_alignment'
   | 'numeric_relationship'
   | 'cross_press_comparison'
 
@@ -85,15 +92,25 @@ export interface IndustrialSequenceEpisode {
   episodeId: string
   startUtc: string
   endUtc: string
-  orderedStates: Array<{ state: string; durationSeconds: number }>
+  orderedStates: Array<{
+    state: string
+    identity: { eventType: string; statusCode: string | null; statusDescription: string }
+    durationSeconds: number
+  }>
   returnAttempts: number
+  productionRestored?: boolean
 }
 
 export interface IndustrialRelationshipResult {
+  basis: 'LEVELS' | 'DIFFERENCES'
+  scope: 'WHOLE_WINDOW' | 'EVENT_WINDOW' | 'CONTEXT'
   pearson: number
   spearman: number
   bestLagMinutes: number
   bestLagCorrelation: number
   sampleCount: number
   coveragePercent: number
+  temporalCoveragePercent: number
+  qualified: boolean
+  qualification: 'QUALIFIED' | 'INSUFFICIENT_PAIRS' | 'LOW_PAIR_COVERAGE' | 'LOW_TEMPORAL_COVERAGE'
 }

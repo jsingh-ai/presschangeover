@@ -6,6 +6,9 @@ import type { PressSemanticSignalEvidence, TelemetryChange, TelemetrySample, Tel
 import { TelemetryFoundationService } from '../telemetry/telemetry-foundation-service.js'
 import type { RawTelemetryChangedSignal, RawTelemetryHistoryResponse } from '../telemetry/telemetry-contracts.js'
 import { InMemoryRawTelemetryReviewRepository, RawTelemetryReviewService, type RawTelemetryReviewStatus } from './raw-telemetry-review-service.js'
+import { buildRadiusPhysicalAlignment, evidenceQuality, rankRelatedSignals, type BasicHistoricalSummary, type EvidencePhaseSummary } from '../industrial-analytics/explorer-evidence.js'
+import { describeIndustrialNumeric } from '../industrial-analytics/industrial-analytics-service.js'
+import { usableProductionContextValue } from '../industrial-analytics/production-context.js'
 
 const TWO_HOURS_MS = 2 * 60 * 60_000
 const SELECTOR_BATCH_SIZE = 50
@@ -101,6 +104,11 @@ export interface RawExplorerSignalHistory extends RawExplorerSignalIdentity {
   changes: TelemetryChange[]
 }
 
+export interface RawExplorerDetailOptions {
+  /** Validation callers can disable the operator-triggered supplemental raw scan. */
+  includeRawTelemetryDiscovery?: boolean
+}
+
 export interface RawExplorerRawChangedSignal extends RawTelemetryChangedSignal {
   reviewStatus: RawTelemetryReviewStatus
 }
@@ -123,6 +131,14 @@ function signalKey(signal: { canonicalId: string; deckNumber?: number | null }) 
 function sameIdentity(segment: RadiusStatusSegment, identity: RawExplorerSetup['identity']) {
   return segment.kind === 'radius' && segment.eventType === identity.eventType && segment.statusCode === identity.statusCode && segment.statusDescription === identity.statusDescription
 }
+
+function quantile(values: number[], percentile: number) {
+  const ordered = [...values].sort((a, b) => a - b); if (!ordered.length) return null
+  return ordered[Math.min(ordered.length - 1, Math.max(0, Math.floor((ordered.length - 1) * percentile)))]!
+}
+function medianValue(values: number[]) { const ordered = [...values].sort((a, b) => a - b); const middle = Math.floor(ordered.length / 2); return ordered.length % 2 ? ordered[middle]! : (ordered[middle - 1]! + ordered[middle]!) / 2 }
+
+function exactRadiusLabel(value: { eventType: string; statusCode: string | null; statusDescription: string }) { return `${value.eventType} / ${value.statusCode ?? '—'} / ${value.statusDescription}` }
 
 export function observedRadiusEntrySegments(segments: RadiusStatusSegment[]) {
   return segments.filter((segment, index): segment is RadiusStateSegment => segment.kind === 'radius' && segments[index - 1]?.kind !== 'offline')
@@ -324,7 +340,7 @@ export class RawRadiusExplorerService {
     return { signals: mergeSignals(histories.map((item) => item.signals)), requestCount: jobs.length, selectorCount: selectors.length, totalMs: this.now() - started }
   }
 
-  async detail(input: { occurrence: RawExplorerOccurrence; changeLookbackMinutes: number }, requestId?: string, signal?: AbortSignal) {
+  async detail(input: { occurrence: RawExplorerOccurrence; changeLookbackMinutes: number }, requestId?: string, signal?: AbortSignal, options: RawExplorerDetailOptions = {}) {
     if (!this.radius.getRawTimeline) throw new RadiusUnavailableError()
     const started = this.now()
     const { occurrence } = input
@@ -333,14 +349,17 @@ export class RawRadiusExplorerService {
     const lookbackFromUtc = new Date(Date.parse(occurrence.startUtc) - input.changeLookbackMinutes * 60_000).toISOString()
     const speedSelector: TelemetrySemanticSelector = { canonicalId: 'machine.speed.actual', representation: 'samples' }
     const currentRollSelector = catalog.find(({ selector }) => selector.canonicalId === CURRENT_ROLL_LENGTH_CANONICAL_ID)?.selector
-    const [radius, speed, discovery, currentRoll, rawDiscovery] = await Promise.all([
+    const [radius, speed, discovery, currentRoll, rawDiscovery, productionContext] = await Promise.all([
       this.radius.getRawTimeline(occurrence.pressKey, occurrence.chartFromUtc, occurrence.chartToUtc),
       this.history(occurrence.pressKey, occurrence.chartFromUtc, occurrence.chartToUtc, [speedSelector], true, requestId, signal),
       this.history(occurrence.pressKey, lookbackFromUtc, occurrence.startUtc, catalog.map(({ selector }) => selector), true, requestId, signal),
       currentRollSelector
         ? this.history(occurrence.pressKey, occurrence.chartFromUtc, occurrence.chartToUtc, [currentRollSelector], true, requestId, signal).catch(() => undefined)
         : Promise.resolve(undefined),
-      Promise.resolve().then(() => this.telemetry.rawChanges(occurrence.pressKey, lookbackFromUtc, occurrence.startUtc, requestId, signal)).catch(() => undefined),
+      options.includeRawTelemetryDiscovery === false
+        ? Promise.resolve(undefined)
+        : Promise.resolve().then(() => this.telemetry.rawChanges(occurrence.pressKey, lookbackFromUtc, occurrence.startUtc, requestId, signal)).catch(() => undefined),
+      Promise.resolve().then(() => this.telemetry.context(occurrence.pressKey, occurrence.chartFromUtc, occurrence.chartToUtc, requestId, signal)).catch(() => undefined),
     ])
     const byKey = new Map(catalog.map(({ item, selector }) => [signalKey(selector), item]))
     const changedSignals = discovery.signals.flatMap((item): RawExplorerChangedSignal[] => {
@@ -358,6 +377,30 @@ export class RawRadiusExplorerService {
     const analysisSafeRawSignals = rawDiscovery?.signals.filter(({ unavailableObservationCount }) => unavailableObservationCount === 0) ?? []
     const rawReviews = rawDiscovery ? await this.reviews.list(occurrence.pressKey, analysisSafeRawSignals.map(({ rawIdentity }) => rawIdentity)).catch(() => []) : []
     const reviewByIdentity = new Map(rawReviews.map((item) => [item.rawIdentity, item.reviewStatus]))
+    const contextEvidence = productionContext ? Object.values(productionContext.fields).flatMap((field) => {
+      const changes = field.changes.filter((item) => Date.parse(item.observedAtUtc) <= Date.parse(occurrence.startUtc))
+      const observed = changes.at(-1)?.value ?? field.seed?.value
+      const value = usableProductionContextValue(observed)
+      return value === null ? [] : [{ field: field.field, value }]
+    }) : []
+    const speedSamples = speedSignal ? samplesWithSeed(speedSignal).flatMap((item) => typeof item.value === 'number' ? [{ atUtc: item.observedAtUtc, value: item.value, qualityState: item.qualityState }] : []) : []
+    const occurrenceSegmentIndex = radius.segments.findIndex((item) => item.kind === 'radius' && item.eventType === occurrence.eventType && item.statusCode === occurrence.statusCode && item.statusDescription === occurrence.statusDescription && item.startUtc === occurrence.startUtc)
+    const sequenceEvidence = [
+      ...(occurrenceSegmentIndex > 0 && radius.segments[occurrenceSegmentIndex - 1]?.kind === 'radius' ? [{ ...radius.segments[occurrenceSegmentIndex - 1], relationship: 'PREVIOUS' as const }] : []),
+      { eventType: occurrence.eventType, statusCode: occurrence.statusCode, statusDescription: occurrence.statusDescription, relationship: 'CURRENT' as const },
+      ...(occurrenceSegmentIndex >= 0 && radius.segments[occurrenceSegmentIndex + 1]?.kind === 'radius' ? [{ ...radius.segments[occurrenceSegmentIndex + 1], relationship: 'NEXT' as const }] : []),
+    ].map(({ eventType, statusCode, statusDescription, relationship }) => ({ eventType: eventType!, statusCode, statusDescription: statusDescription!, relationship }))
+    const physicalAlignment = buildRadiusPhysicalAlignment({ pressKey: occurrence.pressKey, occurrenceId: occurrence.occurrenceId, recordedRadius: { eventType: occurrence.eventType, statusCode: occurrence.statusCode, statusDescription: occurrence.statusDescription }, recordedStartUtc: occurrence.startUtc, recordedEndUtc: occurrence.endUtc, speedSamples, sourceUnit: speedSignal?.sourceUnit ?? null, contextEvidence, radiusSequenceEvidence: sequenceEvidence, otherTelemetryEvidence: changedSignals.flatMap((item) => item.summary.kind === 'state' && item.summary.transitions.length ? [{ canonicalId: item.canonicalId, deckNumber: item.deckNumber, observedAtUtc: item.summary.transitions.at(-1)!.atUtc, reason: 'Value transition before the recorded Radius entry' }] : []) })
+    const speedPhase = (fromUtc: string, toUtc: string) => describeIndustrialNumeric(speedSamples.filter((item) => Date.parse(item.atUtc) >= Date.parse(fromUtc) && Date.parse(item.atUtc) <= Date.parse(toUtc)))
+    const phaseSummary: EvidencePhaseSummary = { eventStartUtc: occurrence.startUtc, eventEndUtc: occurrence.endUtc, items: [
+      ...contextEvidence.map((item) => ({ phase: 'BACKGROUND' as const, atUtc: occurrence.startUtc, label: `${item.field[0]!.toUpperCase()}${item.field.slice(1)}`, detail: String(item.value), source: 'production_context' as const, canonicalId: `production.${item.field}`, deckNumber: null })),
+      ...(physicalAlignment.inferredPhysicalOnsetRange ? [{ phase: 'PRECURSOR' as const, atUtc: physicalAlignment.inferredPhysicalOnsetRange.endUtc, label: 'Actual Speed materially changed', detail: 'Possible physical transition; activity remains unknown.', source: 'telemetry' as const, canonicalId: 'machine.speed.actual', deckNumber: null }] : []),
+      { phase: 'TARGET' as const, atUtc: occurrence.startUtc, label: `Recorded Radius: ${exactRadiusLabel({ eventType: occurrence.eventType, statusCode: occurrence.statusCode, statusDescription: occurrence.statusDescription })}`, detail: null, source: 'radius' as const, canonicalId: null, deckNumber: null },
+    ], limitations: ['Phase labels organize observed timing and do not establish causation.', 'Actual Speed is physical-boundary evidence, not a physical-state classifier.'] }
+    const suggestedSignals = rankRelatedSignals([
+      ...(speedSamples.length ? [{ canonicalId: 'machine.speed.actual', deckNumber: null, friendlyName: 'Actual Speed', signalType: 'continuous', category: 'speed', scope: 'machine' as const, reasonCodes: ['ACTUAL_SPEED_CONTEXT' as const], timingDetail: physicalAlignment.inferredPhysicalOnsetRange ? `Changed near ${physicalAlignment.inferredPhysicalOnsetRange.endUtc}` : null }] : []),
+      ...changedSignals.map((item) => ({ canonicalId: item.canonicalId, deckNumber: item.deckNumber, friendlyName: item.friendlyName, signalType: item.signalType, category: item.category, scope: item.scope, reasonCodes: [item.summary.kind === 'numeric' ? 'DELTA_NEAR_EVENT' as const : 'VALUE_TRANSITION' as const], timingDetail: item.summary.kind === 'numeric' ? `${item.summary.netDelta >= 0 ? '+' : ''}${item.summary.netDelta.toPrecision(3)} in the pre-entry window` : `${item.summary.transitions.length} transition${item.summary.transitions.length === 1 ? '' : 's'} before entry` })),
+    ], null, 5)
     const response = {
       occurrence, lookback: { fromUtc: lookbackFromUtc, toUtc: occurrence.startUtc, halfOpen: true },
       radiusSegments: radius.segments,
@@ -370,10 +413,33 @@ export class RawRadiusExplorerService {
         counts: { rawCatalogIdentityCount: rawDiscovery.rawCatalogIdentityCount, canonicallyRepresentedIdentityCount: rawDiscovery.canonicallyRepresentedIdentityCount, unmappedIdentityCount: rawDiscovery.unmappedIdentityCount, usableIdentityCount: rawDiscovery.usableIdentityCount, changedIdentityCount: analysisSafeRawSignals.length },
         historianReadCount: rawDiscovery.historianReadCount,
       } : { status: 'unavailable' as const, signals: [], counts: null, historianReadCount: 0 },
+      evidence: {
+        physicalAlignment,
+        productionContext: contextEvidence,
+        phaseSummary,
+        behavior: { signal: 'machine.speed.actual', unit: speedSignal?.sourceUnit ?? null, before: speedPhase(occurrence.chartFromUtc, occurrence.startUtc), during: speedPhase(occurrence.startUtc, occurrence.endUtc), after: speedPhase(occurrence.endUtc, occurrence.chartToUtc) },
+        radiusSequence: sequenceEvidence,
+        suggestedSignals,
+      },
       performance: { totalMs: this.now() - started, selectorCount: discovery.selectorCount, semanticHistoryRequests: discovery.requestCount + speed.requestCount + (currentRoll?.requestCount ?? 0), speedHistoryMs: speed.totalMs, payloadBytes: 0 },
     }
     response.performance.payloadBytes = Buffer.byteLength(JSON.stringify(response))
     return response
+  }
+
+  async historicalSummary(input: { occurrence: RawExplorerOccurrence; lookbackDays?: number; maximumOccurrences?: number }): Promise<BasicHistoricalSummary> {
+    const lookbackDays = Math.min(31, Math.max(1, input.lookbackDays ?? 31)); const maximum = Math.min(100, Math.max(1, input.maximumOccurrences ?? 100))
+    const fromUtc = new Date(Date.parse(input.occurrence.startUtc) - lookbackDays * 24 * 60 * 60_000).toISOString(); const toUtc = input.occurrence.startUtc
+    const overview = await (this.radius.getAnalysisOverview?.(fromUtc, toUtc) ?? this.radius.getOverview(fromUtc, toUtc))
+    const press = overview.presses.find((item) => item.pressKey === input.occurrence.pressKey)
+    const all = press ? observedRadiusEntrySegments(press.timelineSegments) : []
+    const comparable = all.filter((item) => item.eventType === input.occurrence.eventType && item.statusCode === input.occurrence.statusCode && item.statusDescription === input.occurrence.statusDescription && item.startUtc !== input.occurrence.startUtc).slice(-maximum)
+    const durations = comparable.map((item) => item.durationSeconds); const neighborCounts = (offset: -1 | 1) => {
+      const counts = new Map<string, number>(); for (const item of comparable) { const index = all.indexOf(item); const neighbor = all[index + offset]; if (neighbor?.kind !== 'radius') continue; const label = exactRadiusLabel(neighbor); counts.set(label, (counts.get(label) ?? 0) + 1) }
+      return [...counts].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0])).slice(0, 3).map(([identity, count]) => `${identity} (${count})`).join(', ')
+    }
+    const historicalSpan = comparable.length ? { startUtc: comparable[0]!.startUtc, endUtc: comparable.at(-1)!.endUtc } : null
+    return { scope: `Same press and exact Radius identity over the previous ${lookbackDays} days`, supportCount: comparable.length, timeSpan: historicalSpan, metrics: { medianDurationMinutes: durations.length ? Math.round(medianValue(durations) / 6) / 10 : null, durationLowerQuartileMinutes: durations.length ? Math.round(quantile(durations, .25)! / 6) / 10 : null, durationUpperQuartileMinutes: durations.length ? Math.round(quantile(durations, .75)! / 6) / 10 : null, commonPreviousIdentities: neighborCounts(-1) || null, commonNextIdentities: neighborCounts(1) || null }, evidenceQuality: evidenceQuality({ timestamps: comparable.map((item) => item.startUtc), range: historicalSpan ?? { startUtc: fromUtc, endUtc: toUtc }, comparisonCount: comparable.length, historicalSpan, minimumSupport: 3, excludedReason: comparable.length ? null : 'No previous comparable recorded occurrences were found in the bounded range.' }), limitations: ['Typical recorded history is descriptive; it is not a correctness standard.', `At most ${maximum} occurrences are summarized.`, 'Historical telemetry fingerprints and operator-accuracy scoring are not included.'] }
   }
 
   async plot(input: { occurrence: RawExplorerOccurrence; signal: RawExplorerSignalIdentity }, requestId?: string, abortSignal?: AbortSignal) {

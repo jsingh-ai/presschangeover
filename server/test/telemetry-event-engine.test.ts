@@ -104,4 +104,11 @@ describe('Telemetry Event Explorer mathematics', () => {
     const result = detectValueChangeEvents({ observations, fromUtc: at(0), toUtc: at(4), rule: { match: 'any' } })
     assert.deepEqual(result.map(({ previousValue, newValue }) => [previousValue, newValue]), [['ABC', 'XYZ']])
   })
+
+  it('keeps dense rolling Delta detection near-linear without dropping observations', () => {
+    const base = Date.parse('2026-08-17T10:00:00.000Z')
+    const observations = Array.from({ length: 20_000 }, (_item, index) => ({ atUtc: new Date(base + index * 1_000).toISOString(), value: index % 500 < 250 ? index % 250 : 250 - index % 250 }))
+    const began = performance.now(); const result = detectDeltaEvents({ observations, fromUtc: observations[0]!.atUtc, toUtc: observations.at(-1)!.atUtc, rule: { direction: 'either', amount: 100, windowMinutes: 5 } }); const elapsed = performance.now() - began
+    assert.ok(result.length > 0); assert.ok(elapsed < 3_000, `dense Delta scan took ${elapsed.toFixed(1)}ms`)
+  })
 })

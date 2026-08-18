@@ -183,4 +183,11 @@ describe('Telemetry Event Explorer UI', () => {
     assert.match(styles, /synchronized-timeline__inspection-tooltip[^}]*overflow: visible/)
     assert.match(styles, /raw-inspection-tooltip dl[^}]*overflow: visible/)
   })
+
+  it('adds context, behavior, timing, shared suggestions, and lazy bounded history while omitting negative-evidence UI', () => {
+    assert.match(pageSource, /explorer-context-strip/); assert.match(pageSource, /Recorded Radius/); assert.match(pageSource, /Event behavior/); assert.match(pageSource, /Timing/)
+    assert.match(pageSource, /Suggested Signals/); assert.match(pageSource, /Preview/); assert.match(pageSource, /Historical occurrences/); assert.match(pageSource, /getTelemetryEventHistoricalSummary/)
+    assert.match(pageSource, /Historical\/contextual envelope/); assert.doesNotMatch(pageSource, /Expected But Missing|should have changed but did not/)
+    assert.match(pageSource, /raw-browser-tabs/); assert.match(pageSource, /Search signal, category, deck, or raw ID/)
+  })
 })

@@ -9,14 +9,14 @@ import type { TelemetryFoundationService } from '../src/telemetry/telemetry-foun
 import type { TelemetryClient } from '../src/telemetry/telemetry-api-client.js'
 import { parseAiInvestigatorRequest, validateAiInvestigatorDraft, type AiGroundingFact, type AiInvestigatorDraftContent } from '../src/ai-investigator/contracts.js'
 import { groundAiInvestigatorDraft } from '../src/ai-investigator/grounding.js'
-import { AiInvestigatorReadOnlyToolRegistry, AI_INVESTIGATOR_TOOL_NAMES, sanitizeProductionContextIdentity } from '../src/ai-investigator/read-only-tools.js'
+import { AiInvestigatorReadOnlyToolRegistry, AI_INVESTIGATOR_TOOL_NAMES, eventOverlapsRequestedRange, sanitizeProductionContextIdentity } from '../src/ai-investigator/read-only-tools.js'
 import { AiInvestigatorOrchestrator, compactInvestigationState, estimateAiInputTokens, safeOpenAiHttpMetadata, type AiInvestigatorLogger, type AiInvestigatorModelClient, type AiModelResponse, type AiModelToolChoice, type ToolEvidence } from '../src/ai-investigator/orchestrator.js'
 
 const start = '2026-08-16T12:00:00.000Z'; const end = '2026-08-17T12:00:00.000Z'
 const request = { scope: { pressKey: null }, range: { startUtc: start, endUtc: end }, analysis: 'discover_unusual_behavior' as const }
 const config: AiInvestigatorConfig = { enabled: true, apiKey: 'test-secret-never-return', model: 'test-model', totalTimeoutMs: 500, toolTimeoutMs: 50, openAiTimeoutMs: 100, maxToolCalls: 8, maxToolRounds: 4, maxParallelTools: 3 }
 const content: AiInvestigatorDraftContent = { summary: 'No material candidates selected.', findings: [], limitations: ['Advisory result.'] }
-const draftFinding: AiInvestigatorDraftContent = { summary: 'One bounded finding.', findings: [{ rank: 1, pressKey: 'press11', title: 'More interruptions', importance: 'medium', confidence: 'medium', whyItMatters: 'The deterministic comparison warrants review.', facts: [{ label: 'Interruptions', factIds: ['press11.interruptions.current', 'press11.interruptions.baseline', 'press11.interruptions.delta'] }], timestampFactIds: [], evidenceFactIds: ['press11.interruptions.current'], productionContextFactIds: { job: null, order: null, recipe: null }, recommendedInvestigation: 'Open the synchronized evidence.', links: [{ label: 'Open Radius Explorer', href: '/raw-radius-explorer' }] }], limitations: ['Advisory result.'] }
+const draftFinding: AiInvestigatorDraftContent = { summary: 'One bounded finding.', findings: [{ rank: 1, pressKey: 'press11', title: 'More interruptions', importance: 'medium', confidence: 'medium', whyItMatters: 'The deterministic comparison warrants review.', facts: [{ label: 'Interruptions', factIds: ['press11.interruptions.current', 'press11.interruptions.baseline', 'press11.interruptions.delta'] }], timestampFactIds: [], evidenceFactIds: ['press11.interruptions.current'], productionContextFactIds: { job: null, order: null, recipe: null, material: null, customer: null }, recommendedInvestigation: 'Open the synchronized evidence.', links: [{ label: 'Open Radius Explorer', href: '/raw-radius-explorer' }] }], limitations: ['Advisory result.'] }
 
 function modelQueue(responses: AiModelResponse[]): AiInvestigatorModelClient {
   let index = 0
@@ -86,6 +86,10 @@ function radiusWithOverview(load: () => Promise<RadiusOverview>): RadiusService 
 function registry(radius: RadiusService) { return new AiInvestigatorReadOnlyToolRegistry(radius, {} as TelemetryFoundationService) }
 
 describe('AI Investigator read-only boundary', () => {
+  it('excludes fully historical episodes from requested event windows', () => {
+    assert.equal(eventOverlapsRequestedRange({ startUtc: '2026-08-16T09:00:00.000Z', endUtc: '2026-08-16T10:00:00.000Z' }, { start, end }), false)
+    assert.equal(eventOverlapsRequestedRange({ startUtc: '2026-08-16T11:00:00.000Z', endUtc: '2026-08-16T13:00:00.000Z' }, { start, end }), true)
+  })
   it('contains only the four approved typed read-only tools and no generic database capability', () => {
     assert.deepEqual(AI_INVESTIGATOR_TOOL_NAMES, ['get_fleet_operational_summary', 'compare_press_period', 'get_press_event_summary', 'get_event_context'])
     assert.ok(AI_INVESTIGATOR_TOOL_NAMES.every((name) => !/sql|database|shell|http|mqtt|write|ack|config/i.test(name)))
@@ -341,7 +345,7 @@ describe('AI Investigator deterministic grounding', () => {
     const finding = groundAiInvestigatorDraft(draft, [radius], request).content.findings[0]
     assert.deepEqual(finding.telemetryEvidence, []); assert.deepEqual(finding.radiusEvidence, ['productionPercent: 37.5%'])
     assert.deepEqual(sanitizeProductionContextIdentity('[0,0,0,0,0,0]'), { value: null, usable: false })
-    assert.deepEqual(sanitizeProductionContextIdentity('0'), { value: '0', usable: true })
+    assert.deepEqual(sanitizeProductionContextIdentity('0'), { value: null, usable: false })
   })
 })
 

@@ -1,12 +1,24 @@
 import { RADIUS_PRESS_KEYS, type RadiusPressKey } from '../radius/models.js'
 import { zodTextFormat } from 'openai/helpers/zod'
 import { z } from 'zod'
+import type { TemporalEvidenceProgram } from '../industrial-analytics/temporal-evidence.js'
 
 export const AI_INVESTIGATOR_MAX_RANGE_MS = 7 * 24 * 60 * 60_000
 export const AI_INVESTIGATOR_ANALYSES = ['discover_unusual_behavior'] as const
 export type AiInvestigatorAnalysis = (typeof AI_INVESTIGATOR_ANALYSES)[number]
 export type AiInvestigatorStatus = 'complete' | 'partial' | 'timeout' | 'error'
 export type AiEvidenceSource = 'radius' | 'telemetry' | 'production_context' | 'comparison' | 'coverage'
+
+export interface AiBaselineProvenance {
+  baselineType: 'period' | 'context' | 'press' | 'peer'
+  label: string
+  currentRange: { start: string; end: string }
+  baselineRange: { start: string; end: string }
+  supportCount: number
+  coveragePercent: number | null
+  matchingDimensions: string[]
+  fallbackLevel: number
+}
 
 export interface AiGroundingFact {
   factId: string
@@ -21,6 +33,7 @@ export interface AiGroundingFact {
   label: string
   timestamp?: string
   range?: { start: string; end: string }
+  baselineProvenance?: AiBaselineProvenance
 }
 
 export interface AiInvestigatorRequest {
@@ -43,9 +56,11 @@ export interface AiInvestigatorFinding {
   timestamps: AiInvestigatorTimestamp[]
   radiusEvidence: string[]
   telemetryEvidence: string[]
-  productionContext: { job: string; order: string; recipe: string }
+  productionContext: Partial<Record<'job' | 'order' | 'recipe' | 'material' | 'customer', string>>
+  baselines: string[]
   recommendedInvestigation: string
   links: AiInvestigatorLink[]
+  traceEvidence: TemporalEvidenceProgram[]
 }
 
 export interface AiInvestigatorTable { title: string; columns: string[]; rows: string[][] }
@@ -85,9 +100,11 @@ export interface AiInvestigatorDraftFinding {
   facts: Array<{ label: string; factIds: string[] }>
   timestampFactIds: string[]
   evidenceFactIds: string[]
-  productionContextFactIds: { job: string | null; order: string | null; recipe: string | null }
+  productionContextFactIds: Record<'job' | 'order' | 'recipe' | 'material' | 'customer', string | null>
   recommendedInvestigation: string
   links: AiInvestigatorLink[]
+  traceIds?: string[]
+  traceEvidence?: TemporalEvidenceProgram[]
 }
 
 export interface AiInvestigatorDraftContent {
@@ -112,7 +129,7 @@ export const AI_INVESTIGATOR_CONTENT_SCHEMA = {
         whyItMatters: { type: 'string', maxLength: 700 },
         facts: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'object', additionalProperties: false, required: ['label', 'factIds'], properties: { label: { type: 'string', maxLength: 100 }, factIds: { type: 'array', minItems: 1, maxItems: 4, items: FACT_ID } } } },
         timestampFactIds: { type: 'array', maxItems: 8, items: FACT_ID }, evidenceFactIds: { type: 'array', maxItems: 12, items: FACT_ID },
-        productionContextFactIds: { type: 'object', additionalProperties: false, required: ['job', 'order', 'recipe'], properties: { job: { anyOf: [FACT_ID, { type: 'null' }] }, order: { anyOf: [FACT_ID, { type: 'null' }] }, recipe: { anyOf: [FACT_ID, { type: 'null' }] } } },
+        productionContextFactIds: { type: 'object', additionalProperties: false, required: ['job', 'order', 'recipe', 'material', 'customer'], properties: { job: { anyOf: [FACT_ID, { type: 'null' }] }, order: { anyOf: [FACT_ID, { type: 'null' }] }, recipe: { anyOf: [FACT_ID, { type: 'null' }] }, material: { anyOf: [FACT_ID, { type: 'null' }] }, customer: { anyOf: [FACT_ID, { type: 'null' }] } } },
         recommendedInvestigation: { type: 'string', maxLength: 600 }, links: { type: 'array', maxItems: 4, items: LINK },
       },
     } },
@@ -122,6 +139,7 @@ export const AI_INVESTIGATOR_CONTENT_SCHEMA = {
 
 const AI_JUDGMENT_LEVELS = ['high', 'medium', 'low'] as const
 const AI_DISCOVERY_FACT_ID_PATTERN = /^press(?:3|5|6|7|8|9|10|11|12|13|14|15)\.[A-Za-z0-9_.-]{3,160}$/
+const AI_DISCOVERY_TRACE_ID_PATTERN = /^press(?:3|5|6|7|8|9|10|11|12|13|14|15)\.trace\.[a-f0-9]{16}$/
 
 export const AI_INVESTIGATOR_DISCOVERY_RUNTIME_SCHEMA = z.object({
   summary: z.string().min(1).max(900),
@@ -131,6 +149,7 @@ export const AI_INVESTIGATOR_DISCOVERY_RUNTIME_SCHEMA = z.object({
     importance: z.enum(AI_JUDGMENT_LEVELS),
     confidence: z.enum(AI_JUDGMENT_LEVELS),
     factIds: z.array(z.string().regex(AI_DISCOVERY_FACT_ID_PATTERN).max(180)).min(1).max(18),
+    traceIds: z.array(z.string().regex(AI_DISCOVERY_TRACE_ID_PATTERN).max(64)).max(8),
     interpretation: z.string().min(1).max(500),
     whyWorthInvestigating: z.string().min(1).max(500),
     recommendedInvestigation: z.string().min(1).max(400),
@@ -183,9 +202,9 @@ export function validateAiInvestigatorDraft(value: unknown): AiInvestigatorDraft
     if (!Number.isInteger(candidate.rank) || Number(candidate.rank) < 1 || Number(candidate.rank) > 5 || typeof candidate.pressKey !== 'string' || !RADIUS_PRESS_KEYS.includes(candidate.pressKey as RadiusPressKey) || !boundedString(candidate.title, 160) || !['high', 'medium', 'low'].includes(String(candidate.importance)) || !['high', 'medium', 'low'].includes(String(candidate.confidence)) || !boundedString(candidate.whyItMatters, 700) || !boundedString(candidate.recommendedInvestigation, 600)) throw new Error('invalid_investigator_response')
     if (!Array.isArray(candidate.facts) || candidate.facts.length < 1 || candidate.facts.length > 8 || !candidate.facts.every((item) => isRecord(item) && exactKeys(item, ['label', 'factIds']) && boundedString(item.label, 100) && Array.isArray(item.factIds) && item.factIds.length > 0 && item.factIds.length <= 4 && item.factIds.every(factId))) throw new Error('invalid_investigator_response')
     if (!Array.isArray(candidate.timestampFactIds) || candidate.timestampFactIds.length > 8 || !candidate.timestampFactIds.every(factId) || !Array.isArray(candidate.evidenceFactIds) || candidate.evidenceFactIds.length > 12 || !candidate.evidenceFactIds.every(factId)) throw new Error('invalid_investigator_response')
-    if (!isRecord(candidate.productionContextFactIds) || !exactKeys(candidate.productionContextFactIds, ['job', 'order', 'recipe']) || !Object.values(candidate.productionContextFactIds).every((item) => item === null || factId(item))) throw new Error('invalid_investigator_response')
+    if (!isRecord(candidate.productionContextFactIds) || !exactKeys(candidate.productionContextFactIds, ['job', 'order', 'recipe']) && !exactKeys(candidate.productionContextFactIds, ['job', 'order', 'recipe', 'material', 'customer']) || !Object.values(candidate.productionContextFactIds).every((item) => item === null || factId(item))) throw new Error('invalid_investigator_response')
     if (!Array.isArray(candidate.links) || candidate.links.length > 4 || !candidate.links.every((link) => isRecord(link) && exactKeys(link, ['label', 'href']) && boundedString(link.label, 80) && boundedString(link.href, 600) && safeInvestigatorHref(link.href))) throw new Error('invalid_investigator_response')
-    return candidate as unknown as AiInvestigatorDraftFinding
+    return { ...(candidate as unknown as Omit<AiInvestigatorDraftFinding, 'traceIds' | 'traceEvidence'>), traceIds: [], traceEvidence: [] }
   })
   return { summary: value.summary, findings, limitations: value.limitations }
 }

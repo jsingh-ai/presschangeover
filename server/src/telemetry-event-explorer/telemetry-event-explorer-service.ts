@@ -5,6 +5,9 @@ import type { EngineeringClueCatalogItem } from '../telemetry/engineering-clue-a
 import { PRODUCTION_CONTEXT_CANONICAL_IDS, type CapabilityAssessment, type PressSemanticSignalEvidence, type RawTelemetryHistoryResponse, type TelemetrySample, type TelemetryScalarValue, type TelemetrySemanticSelector, type TelemetrySourceSignal } from '../telemetry/telemetry-contracts.js'
 import { TelemetryFoundationService, type PressSemanticSignalWithIdentity } from '../telemetry/telemetry-foundation-service.js'
 import { detectDeltaEvents, detectThresholdEvents, detectValueChangeEvents, type DeltaDirection, type DeltaRule, type EventScalarValue, type NumericEventObservation, type ThresholdOperator, type ThresholdRule, type ValueChangeRule, type ValueEventObservation } from './telemetry-event-engine.js'
+import { IndustrialAnalyticsService } from '../industrial-analytics/industrial-analytics-service.js'
+import { rankRelatedSignals, type BasicHistoricalSummary, type EvidencePhaseSummary } from '../industrial-analytics/explorer-evidence.js'
+import type { IndustrialAnalyticalObservation, IndustrialNumericSample, IndustrialStateSample } from '../industrial-analytics/contracts.js'
 
 const TWO_HOURS_MS = 2 * 60 * 60_000
 const REQUEST_CONCURRENCY = 3
@@ -163,6 +166,7 @@ function rawOccurrence(occurrence: TelemetryEventOccurrence): RawExplorerOccurre
 
 export class TelemetryEventExplorerService {
   private readonly rawCatalogCache = new Map<RadiusPressKey, { expiresAt: number; values: TelemetrySourceSignal[] }>()
+  private readonly analytics = new IndustrialAnalyticsService()
   constructor(private readonly telemetry: TelemetryFoundationService, private readonly radius: RadiusService, private readonly rawExplorer: RawRadiusExplorerService, private readonly now = () => Date.now()) {}
 
   private async capabilities(requestId?: string, signal?: AbortSignal) {
@@ -311,16 +315,52 @@ export class TelemetryEventExplorerService {
     return { sourceKind: 'canonical' as const, pressKey: input.pressKey, displayName: capabilities.displayName, deckNumber: history.deckNumber, canonicalId: history.canonicalId, rawIdentity: history.rawSignalId ?? history.sourceSelector ?? history.canonicalId, signalDisplayName: item.friendlyName, dataType: history.valueKind ?? kind, dataKind: kind, sourceUnit: history.sourceUnit, canonicalUnitStatus: history.canonicalUnitStatus, fromUtc: input.fromUtc, toUtc: input.toUtc, plottable: true, observations }
   }
 
-  async detail(occurrence: TelemetryEventOccurrence, requestId?: string, signal?: AbortSignal) {
+  async detail(occurrence: TelemetryEventOccurrence, requestId?: string, signal?: AbortSignal, options: { includeRawTelemetryDiscovery?: boolean } = {}) {
     const contextMinutes = Math.min(RAW_EXPLORER_MAX_WINDOW_MINUTES, Math.max(1, Math.ceil((Date.parse(occurrence.startUtc) - Date.parse(occurrence.chartFromUtc)) / 60_000)))
-    const context = await this.rawExplorer.detail({ occurrence: rawOccurrence(occurrence), changeLookbackMinutes: contextMinutes }, requestId, signal)
+    const context = await this.rawExplorer.detail({ occurrence: rawOccurrence(occurrence), changeLookbackMinutes: contextMinutes }, requestId, signal, options)
     let primary: { kind: 'raw'; signal: RawTelemetryHistoryResponse } | { kind: 'canonical'; signal: PressSemanticSignalWithIdentity | undefined }
     if (occurrence.sourceKind === 'raw') {
       const history = (await this.rawHistory(occurrence.pressKey, occurrence.rawIdentity, occurrence.chartFromUtc, occurrence.chartToUtc, requestId, signal)).history
       primary = { kind: 'raw', signal: { ...history, dataType: occurrence.valueKind, dataKind: occurrence.dataKind, plottable: true, observations: history.observations.filter((item) => scalarForKind(item.rawValue, occurrence.dataKind)) } }
-    } else primary = { kind: 'canonical', signal: (await this.history(occurrence.pressKey, occurrence.chartFromUtc, occurrence.chartToUtc, [{ canonicalId: occurrence.canonicalId!, ...(occurrence.deckNumber === null ? {} : { deckNumber: occurrence.deckNumber }), representation: occurrence.eventType === 'value_change' ? 'changes' : 'samples' }], requestId, signal)).signals[0] }
+    } else if (occurrence.canonicalId === 'machine.speed.actual' && occurrence.deckNumber === null) primary = { kind: 'canonical', signal: { canonicalId: occurrence.canonicalId, deckNumber: null, capabilityState: 'SUPPORTED', observationState: context.speed.samples.length ? 'SUPPORTED_WITH_OBSERVATIONS' : 'SUPPORTED_WITH_NO_SAMPLES_IN_RANGE', mappingStatus: 'MAPPED', sourceUnit: context.speed.sourceUnit, canonicalUnitStatus: context.speed.canonicalUnitStatus, representation: 'samples', seed: null, samples: context.speed.samples, changes: [], valueKind: 'numeric', historianSignalId: null, rawSignalId: occurrence.rawIdentity, sourceSelector: occurrence.rawIdentity, selectedVariant: null } }
+    else primary = { kind: 'canonical', signal: (await this.history(occurrence.pressKey, occurrence.chartFromUtc, occurrence.chartToUtc, [{ canonicalId: occurrence.canonicalId!, ...(occurrence.deckNumber === null ? {} : { deckNumber: occurrence.deckNumber }), representation: occurrence.eventType === 'value_change' ? 'changes' : 'samples' }], requestId, signal)).signals[0] }
     if (!primary.signal) throw new RadiusUnavailableError()
-    return { occurrence, primary, context }
+    const numeric: IndustrialNumericSample[] = primary.kind === 'canonical'
+      ? [...(primary.signal.seed ? [primary.signal.seed] : []), ...primary.signal.samples].flatMap((item) => typeof item.value === 'number' ? [{ atUtc: item.observedAtUtc, value: item.value, qualityState: item.qualityState }] : [])
+      : primary.signal.observations.flatMap((item) => typeof item.rawValue === 'number' ? [{ atUtc: item.timestampUtc, value: item.rawValue, qualityState: item.qualityState }] : [])
+    const states: IndustrialStateSample[] = primary.kind === 'canonical'
+      ? [...(primary.signal.seed ? [{ atUtc: primary.signal.seed.observedAtUtc, value: primary.signal.seed.value, qualityState: primary.signal.seed.qualityState }] : []), ...primary.signal.changes.map((item) => ({ atUtc: item.observedAtUtc, value: item.value, qualityState: item.qualityState }))].flatMap((item): IndustrialStateSample[] => ['string', 'number', 'boolean'].includes(typeof item.value) ? [{ atUtc: item.atUtc, value: item.value, qualityState: item.qualityState }] : [])
+      : primary.signal.observations.flatMap((item) => ['string', 'number', 'boolean'].includes(typeof item.rawValue) ? [{ atUtc: item.timestampUtc, value: item.rawValue as string | number | boolean, qualityState: item.qualityState }] : [])
+    const event = { id: occurrence.occurrenceId, start: occurrence.startUtc, end: occurrence.endUtc }; const range = { start: occurrence.chartFromUtc, end: occurrence.chartToUtc }
+    const observations: IndustrialAnalyticalObservation[] = []
+    if (numeric.length) {
+      const aligned = this.analytics.eventAlignedNumeric({ pressKey: occurrence.pressKey, variableId: occurrence.canonicalId ?? occurrence.rawIdentity, deckNumber: occurrence.deckNumber, unit: occurrence.sourceUnit, range, samples: numeric, event }); if (aligned) observations.push(aligned)
+      const envelope = this.analytics.normalEnvelopeDeparture({ pressKey: occurrence.pressKey, variableId: occurrence.canonicalId ?? occurrence.rawIdentity, deckNumber: occurrence.deckNumber, unit: occurrence.sourceUnit, range, samples: numeric, event }); if (envelope) observations.push(envelope)
+      const persistence = this.analytics.deviationPersistence({ pressKey: occurrence.pressKey, variableId: occurrence.canonicalId ?? occurrence.rawIdentity, deckNumber: occurrence.deckNumber, unit: occurrence.sourceUnit, range, samples: numeric, event }); if (persistence) observations.push(persistence)
+    } else if (states.length) observations.push(this.analytics.valueTransitions({ pressKey: occurrence.pressKey, variableId: occurrence.canonicalId ?? occurrence.rawIdentity, deckNumber: occurrence.deckNumber, range, samples: states, event }))
+    const firstDivergence = this.analytics.firstDivergence({ pressKey: occurrence.pressKey, event, observations }); if (firstDivergence) observations.push(firstDivergence)
+    const productionContext = context.evidence.productionContext
+    const radiusAtEvent = context.radiusSegments.find((item) => item.kind === 'radius' && Date.parse(item.startUtc) <= Date.parse(occurrence.startUtc) && Date.parse(item.endUtc) > Date.parse(occurrence.startUtc))
+    const phaseSummary: EvidencePhaseSummary = { eventStartUtc: occurrence.startUtc, eventEndUtc: occurrence.endUtc, items: [
+      ...productionContext.map((item) => ({ phase: 'BACKGROUND' as const, atUtc: occurrence.startUtc, label: `${item.field[0]!.toUpperCase()}${item.field.slice(1)}`, detail: String(item.value), source: 'production_context' as const, canonicalId: `production.${item.field}`, deckNumber: null })),
+      ...(radiusAtEvent?.kind === 'radius' ? [{ phase: 'BACKGROUND' as const, atUtc: occurrence.startUtc, label: 'Recorded Radius', detail: `${radiusAtEvent.eventType} / ${radiusAtEvent.statusCode ?? '—'} / ${radiusAtEvent.statusDescription}`, source: 'radius' as const, canonicalId: null, deckNumber: null }] : []),
+      ...(context.evidence.physicalAlignment.inferredPhysicalOnsetRange ? [{ phase: 'PRECURSOR' as const, atUtc: context.evidence.physicalAlignment.inferredPhysicalOnsetRange.endUtc, label: 'Actual Speed materially changed', detail: 'Possible physical transition; activity remains unknown.', source: 'telemetry' as const, canonicalId: 'machine.speed.actual', deckNumber: null }] : []),
+      ...context.changedSignals.flatMap((item) => item.summary.kind === 'state' ? item.summary.transitions.slice(-1).map((transition) => ({ phase: 'PRECURSOR' as const, atUtc: transition.atUtc, label: `${item.friendlyName} changed`, detail: `${String(transition.previousValue)} → ${String(transition.value)}`, source: 'telemetry' as const, canonicalId: item.canonicalId, deckNumber: item.deckNumber })) : []).sort((left, right) => Date.parse(left.atUtc!) - Date.parse(right.atUtc!)).slice(-3),
+      { phase: 'TARGET' as const, atUtc: occurrence.startUtc, label: `${occurrence.signalDisplayName} ${occurrence.eventType.replace('_', ' ')}`, detail: null, source: 'telemetry' as const, canonicalId: occurrence.canonicalId, deckNumber: occurrence.deckNumber },
+    ], limitations: ['Phase labels organize observed timing and do not establish causation.', 'Recorded Radius is operator-entered context, not physical ground truth.'] }
+    const suggestedSignals = rankRelatedSignals([
+      { canonicalId: 'machine.speed.actual', deckNumber: null, friendlyName: 'Actual Speed', signalType: 'continuous', category: 'speed', scope: 'machine', reasonCodes: ['ACTUAL_SPEED_CONTEXT'], timingDetail: context.evidence.physicalAlignment.inferredPhysicalOnsetRange ? `Changed near ${context.evidence.physicalAlignment.inferredPhysicalOnsetRange.endUtc}` : null },
+      ...context.changedSignals.filter((item) => item.canonicalId !== occurrence.canonicalId || item.deckNumber !== occurrence.deckNumber).map((item) => ({ canonicalId: item.canonicalId, deckNumber: item.deckNumber, friendlyName: item.friendlyName, signalType: item.signalType, category: item.category, scope: item.scope, reasonCodes: [item.summary.kind === 'numeric' ? 'DELTA_NEAR_EVENT' as const : 'VALUE_TRANSITION' as const], timingDetail: item.summary.kind === 'numeric' ? `${item.summary.netDelta >= 0 ? '+' : ''}${item.summary.netDelta.toPrecision(3)} before target` : `${item.summary.transitions.length} nearby transition${item.summary.transitions.length === 1 ? '' : 's'}` })),
+    ], occurrence.deckNumber, 5)
+    return { occurrence, primary, context, evidence: { productionContext, radiusAtEvent: radiusAtEvent?.kind === 'radius' ? { eventType: radiusAtEvent.eventType, statusCode: radiusAtEvent.statusCode, statusDescription: radiusAtEvent.statusDescription } : null, phaseSummary, behavior: observations.find((item) => item.family === 'event_aligned_change' || item.family === 'value_state_transition') ?? null, persistence: observations.find((item) => item.family === 'deviation_persistence') ?? null, contextualEnvelope: observations.find((item) => item.family === 'normal_envelope_departure') ?? null, firstDivergence, suggestedSignals, observationCount: observations.length } }
+  }
+
+  historicalSummary(input: { occurrence: TelemetryEventOccurrence; occurrences: TelemetryEventOccurrence[] }): BasicHistoricalSummary {
+    const bounded = input.occurrences.slice(0, 500).filter((item) => item.pressKey === input.occurrence.pressKey && item.sourceKind === input.occurrence.sourceKind && item.rawIdentity === input.occurrence.rawIdentity && item.deckNumber === input.occurrence.deckNumber && item.eventType === input.occurrence.eventType)
+    const magnitudes = bounded.flatMap((item) => typeof item.maximumExcursion === 'number' ? [Math.abs(item.maximumExcursion)] : typeof item.extremeValue === 'number' && typeof item.entryValue === 'number' ? [Math.abs(item.extremeValue - item.entryValue)] : [])
+    const durations = bounded.map((item) => item.durationSeconds).filter(Number.isFinite).sort((a, b) => a - b); const median = (values: number[]) => values.length ? values.length % 2 ? values[Math.floor(values.length / 2)]! : (values[values.length / 2 - 1]! + values[values.length / 2]!) / 2 : null
+    const timeSpan = bounded.length ? { startUtc: bounded.reduce((value, item) => Date.parse(item.startUtc) < Date.parse(value) ? item.startUtc : value, bounded[0]!.startUtc), endUtc: bounded.reduce((value, item) => Date.parse(item.endUtc) > Date.parse(value) ? item.endUtc : value, bounded[0]!.endUtc) } : null
+    return { scope: 'Same press, exact source identity, deck, and detector family in the current bounded search result', supportCount: bounded.length, timeSpan, metrics: { medianMagnitude: median(magnitudes.sort((a, b) => a - b)), medianDurationSeconds: median(durations), detectorFamily: input.occurrence.eventType, truncatedAt: input.occurrences.length > 500 ? 500 : null }, evidenceQuality: { supportCount: bounded.length, comparisonCount: bounded.length, coverage: null, comparisonCoverage: null, historicalSpan: timeSpan, contextMatchLevel: null, contextMatchDimensions: [], medianCadence: null, maximumGap: null, timingResolution: null, qualification: bounded.length >= 3 ? 'SUPPORTED' : bounded.length ? 'LIMITED' : 'INSUFFICIENT', excludedReason: bounded.length ? null : 'No matching occurrences are present in the bounded search result.' }, limitations: ['This summarizes only the current fetched search result.', 'No target/control comparison or causal inference is performed.', 'At most 500 supplied occurrences are evaluated.'] }
   }
 
   plot(occurrence: TelemetryEventOccurrence, signalIdentity: RawExplorerSignalIdentity, requestId?: string, signal?: AbortSignal) {

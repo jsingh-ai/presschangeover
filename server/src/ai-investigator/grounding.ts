@@ -88,6 +88,10 @@ function comparisonGroupValid(facts: AiGroundingFact[]): boolean {
     longestInterruptionMinutes: 'longestInterruptionDeltaMinutes',
     radiusDriverDurationMinutes: 'radiusDriverDurationDeltaMinutes',
     radiusDriverOccurrences: 'radiusDriverOccurrenceDelta',
+    contextEpisodeInterruptions: 'contextEpisodeInterruptionDelta',
+    contextEpisodeTotalInterruptionMinutes: 'contextEpisodeTotalInterruptionDeltaMinutes',
+    contextEpisodeReturnAttempts: 'contextEpisodeReturnAttemptDelta',
+    contextEpisodeDurationMinutes: 'contextEpisodeDurationDeltaMinutes',
   }
   return expectedDelta[current.metric] === delta.metric
 }
@@ -136,8 +140,8 @@ function resolveFinding(candidate: AiInvestigatorDraftFinding, factMap: Map<stri
     return [{ label: fact.label, start, end }]
   })
 
-  const context: Record<'job' | 'order' | 'recipe', string> = { job: '', order: '', recipe: '' }
-  for (const field of ['job', 'order', 'recipe'] as const) {
+  const context: Partial<Record<'job' | 'order' | 'recipe' | 'material' | 'customer', string>> = {}
+  for (const field of ['job', 'order', 'recipe', 'material', 'customer'] as const) {
     const id = candidate.productionContextFactIds[field]
     if (!id) continue
     const fact = factMap.get(id)!
@@ -159,7 +163,8 @@ function resolveFinding(candidate: AiInvestigatorDraftFinding, factMap: Map<stri
     if (fact.source === 'radius') radiusEvidence.push(rendered)
     else if (fact.source === 'telemetry') telemetryEvidence.push(rendered)
   }
-  return { issues: [], finding: { rank: candidate.rank, press: displayPress(candidate.pressKey), title: candidate.title, importance: candidate.importance, confidence: candidate.confidence, whyItMatters: candidate.whyItMatters, facts, timestamps, radiusEvidence: [...new Set(radiusEvidence)], telemetryEvidence: [...new Set(telemetryEvidence)], productionContext: context, recommendedInvestigation: candidate.recommendedInvestigation, links: candidate.links } }
+  const baselines = [...new Set(selected.flatMap((fact) => fact.baselineProvenance?.label ? [fact.baselineProvenance.label] : []))]
+  return { issues: [], finding: { rank: candidate.rank, press: displayPress(candidate.pressKey), title: candidate.title, importance: candidate.importance, confidence: candidate.confidence, whyItMatters: candidate.whyItMatters, facts, timestamps, radiusEvidence: [...new Set(radiusEvidence)], telemetryEvidence: [...new Set(telemetryEvidence)], productionContext: context, baselines, recommendedInvestigation: candidate.recommendedInvestigation, links: candidate.links, traceEvidence: candidate.traceEvidence ?? [] } }
 }
 
 export function groundAiInvestigatorDraft(draft: AiInvestigatorDraftContent, facts: AiGroundingFact[], request: AiInvestigatorRequest, tables: AiInvestigatorContent['tables'] = []): GroundingResult {

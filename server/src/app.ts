@@ -32,6 +32,7 @@ import type { AiInvestigatorConfig } from './config.js'
 import { parseAiInvestigatorRequest } from './ai-investigator/contracts.js'
 import { AI_INVESTIGATOR_TOOL_NAMES, AiInvestigatorReadOnlyToolRegistry } from './ai-investigator/read-only-tools.js'
 import { AiInvestigatorOrchestrator, createAiInvestigatorOrchestrator, investigatorDisplayName, type AiInvestigatorModelClient } from './ai-investigator/orchestrator.js'
+import { EXPLORER_HTTP_VALIDATION_CAPABILITIES } from './explorer-validation-capabilities.js'
 
 const MAX_PHYSICAL_STATE_RANGE_MS = 2 * 60 * 60 * 1_000
 const MAX_RADIUS_RANGE_MS = 31 * 24 * 60 * 60 * 1_000
@@ -509,6 +510,7 @@ export function createApp({
     response.status(200).json({
       service: 'ProcessIntelligence',
       status: 'healthy',
+      explorerHttpValidation: EXPLORER_HTTP_VALIDATION_CAPABILITIES,
     })
   })
 
@@ -682,7 +684,14 @@ export function createApp({
   app.post('/api/radius/raw-explorer/detail', asyncRoute(async (request, response) => {
     if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)) throw new RequestValidationError('invalid_raw_explorer_request')
     const raw = request.body as Record<string, unknown>
-    response.status(200).json(await rawRadiusExplorer.detail({ occurrence: parseRawExplorerOccurrence(raw.occurrence), changeLookbackMinutes: rawExplorerMinutes(raw.changeLookbackMinutes, false, 'invalid_change_lookback') }, String(response.locals.requestId), cancellationSignal(request, response)))
+    response.status(200).json(await rawRadiusExplorer.detail({ occurrence: parseRawExplorerOccurrence(raw.occurrence), changeLookbackMinutes: rawExplorerMinutes(raw.changeLookbackMinutes, false, 'invalid_change_lookback') }, String(response.locals.requestId), cancellationSignal(request, response), raw.includeRawTelemetryDiscovery === false ? { includeRawTelemetryDiscovery: false } : undefined))
+  }))
+
+  app.post('/api/radius/raw-explorer/history', asyncRoute(async (request, response) => {
+    if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)) throw new RequestValidationError('invalid_raw_explorer_history_request')
+    const raw = request.body as Record<string, unknown>; const lookbackDays = raw.lookbackDays === undefined ? undefined : Number(raw.lookbackDays); const maximumOccurrences = raw.maximumOccurrences === undefined ? undefined : Number(raw.maximumOccurrences)
+    if (lookbackDays !== undefined && (!Number.isSafeInteger(lookbackDays) || lookbackDays < 1 || lookbackDays > 31) || maximumOccurrences !== undefined && (!Number.isSafeInteger(maximumOccurrences) || maximumOccurrences < 1 || maximumOccurrences > 100)) throw new RequestValidationError('invalid_raw_explorer_history_bounds')
+    response.status(200).json(await rawRadiusExplorer.historicalSummary({ occurrence: parseRawExplorerOccurrence(raw.occurrence), lookbackDays, maximumOccurrences }))
   }))
 
   app.post('/api/radius/raw-explorer/plot', asyncRoute(async (request, response) => {
@@ -732,7 +741,12 @@ export function createApp({
   }))
 
   app.post('/api/telemetry/event-explorer/detail', asyncRoute(async (request, response) => {
-    response.status(200).json(await telemetryEventExplorer.detail(parseTelemetryEventOccurrence(request.body?.occurrence), String(response.locals.requestId), cancellationSignal(request, response)))
+    response.status(200).json(await telemetryEventExplorer.detail(parseTelemetryEventOccurrence(request.body?.occurrence), String(response.locals.requestId), cancellationSignal(request, response), request.body?.includeRawTelemetryDiscovery === false ? { includeRawTelemetryDiscovery: false } : undefined))
+  }))
+
+  app.post('/api/telemetry/event-explorer/history', asyncRoute(async (request, response) => {
+    if (!Array.isArray(request.body?.occurrences) || request.body.occurrences.length > 500) throw new RequestValidationError('invalid_telemetry_event_history_bounds')
+    response.status(200).json(telemetryEventExplorer.historicalSummary({ occurrence: parseTelemetryEventOccurrence(request.body?.occurrence), occurrences: request.body.occurrences.map(parseTelemetryEventOccurrence) }))
   }))
 
   app.post('/api/telemetry/event-explorer/plot', asyncRoute(async (request, response) => {
