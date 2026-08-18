@@ -258,12 +258,30 @@ describe('Raw Radius Code Explorer', () => {
   })
 
   it('bounds lazy same-code history and preserves exact statusCode identity', async () => {
-    const source = radiusService(); const starts = Array.from({ length: 140 }, (_item, index) => new Date(Date.parse(startUtc) - (140 - index) * 60_000).toISOString())
-    source.getAnalysisOverview = async () => ({ presses: [{ pressKey: 'press3', displayName: 'Press 3', timelineSegments: starts.flatMap((start, index) => [
-      { ...radiusSegment(start, new Date(Date.parse(start) + 30_000).toISOString()), statusCode: index % 7 === 0 ? '401' : '400' },
-      { ...radiusSegment(new Date(Date.parse(start) + 30_000).toISOString(), new Date(Date.parse(start) + 60_000).toISOString()), eventType: 'G', statusCode: '1', statusDescription: 'Run' },
-    ]) }] }) as never
-    const telemetry = {} as TelemetryFoundationService; const summary = await new RawRadiusExplorerService(source, telemetry).historicalSummary({ occurrence, lookbackDays: 31, maximumOccurrences: 100 })
-    assert.ok(summary.supportCount <= 100); assert.equal(summary.scope.includes('exact Radius identity'), true); assert.doesNotMatch(String(summary.metrics.commonPreviousIdentities), /401/); assert.match(summary.limitations.join(' '), /not a correctness standard/)
+    const source = radiusService(); let historyInput: Parameters<NonNullable<RadiusService['getExactIdentityHistory']>>[0] | undefined
+    source.getAnalysisOverview = async () => { throw new Error('full overview must not be used by lazy history') }
+    const identity = { eventType: 'B', statusCode: '400', statusDescription: 'Recorded B state' }
+    const neighbor = (eventType: string, statusCode: string, statusDescription: string) => ({ eventType, statusCode, statusDescription })
+    source.getExactIdentityHistory = async (input) => {
+      historyInput = input
+      return {
+        queryCount: 3, rowsConsidered: 18, matchingOccurrencesAvailable: 4,
+        occurrences: [
+          { ...identity, startUtc: '2026-08-01T12:00:00.000Z', endUtc: '2026-08-01T12:01:00.000Z', durationSeconds: 60, previousIdentity: neighbor('G', '1', 'Run'), nextIdentity: neighbor('B', '401', 'Recorded B state') },
+          { ...identity, startUtc: '2026-08-02T12:00:00.000Z', endUtc: '2026-08-02T12:02:00.000Z', durationSeconds: 120, previousIdentity: neighbor('B', '401', 'Recorded B state'), nextIdentity: neighbor('M', '16', 'Make Ready') },
+          { ...identity, startUtc: '2026-08-03T12:00:00.000Z', endUtc: '2026-08-03T12:03:00.000Z', durationSeconds: 180, previousIdentity: neighbor('G', '1', 'Run'), nextIdentity: neighbor('G', '1', 'Run') },
+          { ...identity, startUtc: '2026-08-04T12:00:00.000Z', endUtc: '2026-08-04T12:04:00.000Z', durationSeconds: 240, previousIdentity: neighbor('M', '16', 'Make Ready'), nextIdentity: neighbor('G', '1', 'Run') },
+        ],
+      }
+    }
+    const telemetry = new Proxy({}, { get: () => { throw new Error('lazy Radius history must not access telemetry') } }) as TelemetryFoundationService
+    const summary = await new RawRadiusExplorerService(source, telemetry).historicalSummary({ occurrence, lookbackDays: 31, maximumOccurrences: 100 })
+    assert.deepEqual(historyInput, { pressKey: 'press3', fromUtc: '2026-07-13T12:00:00.000Z', toUtc: startUtc, identity, maximumOccurrences: 100 })
+    assert.equal(summary.supportCount, 4); assert.equal(summary.scope.includes('exact Radius identity'), true)
+    assert.equal(summary.metrics.medianDurationMinutes, 2.5); assert.equal(summary.metrics.durationLowerQuartileMinutes, 1); assert.equal(summary.metrics.durationUpperQuartileMinutes, 3)
+    assert.match(String(summary.metrics.commonPreviousIdentities), /B \/ 401 \/ Recorded B state \(1\)/); assert.match(String(summary.metrics.commonNextIdentities), /G \/ 1 \/ Run \(2\)/)
+    assert.deepEqual(summary.timeSpan, { startUtc: '2026-08-01T12:00:00.000Z', endUtc: '2026-08-04T12:04:00.000Z' })
+    assert.deepEqual({ ...summary.performance, totalMs: 0 }, { radiusQueryCount: 3, rowsConsidered: 18, matchingOccurrences: 4, matchingOccurrencesAvailable: 4, totalMs: 0, payloadBytes: summary.performance!.payloadBytes })
+    assert.ok(summary.performance!.totalMs >= 0); assert.ok(summary.performance!.payloadBytes > 0); assert.match(summary.limitations.join(' '), /not a correctness standard/)
   })
 })

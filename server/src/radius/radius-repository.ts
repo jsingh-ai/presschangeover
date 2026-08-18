@@ -25,6 +25,27 @@ export interface RadiusAccessAssessment {
   elevatedRole: boolean
 }
 
+export interface RadiusExactIdentity {
+  eventType: string
+  statusCode: string | null
+  statusDescription: string
+}
+
+export interface RadiusIdentityHistoryOccurrence extends RadiusExactIdentity {
+  startUtc: string
+  endUtc: string
+  durationSeconds: number
+  previousIdentity: RadiusExactIdentity | null
+  nextIdentity: RadiusExactIdentity | null
+}
+
+export interface RadiusIdentityHistoryResult {
+  occurrences: RadiusIdentityHistoryOccurrence[]
+  rowsConsidered: number
+  matchingOccurrencesAvailable: number
+  queryCount: number
+}
+
 const EXPECTED_COLUMNS: Record<string, Record<string, string>> = {
   machine_status_history: {
     machine_id: 'text',
@@ -130,6 +151,17 @@ function mapPollRun(row: Record<string, unknown>): RadiusPollRun {
       row.staleMachineCount,
       'stale_machine_count',
     ),
+  }
+}
+
+function exactIdentityFromJson(value: unknown): RadiusExactIdentity | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const row = value as Record<string, unknown>
+  if (typeof row.eventType !== 'string' || typeof row.statusDescription !== 'string') return null
+  return {
+    eventType: row.eventType,
+    statusCode: nullableText(row.statusCode, 'status_code'),
+    statusDescription: row.statusDescription,
   }
 }
 
@@ -417,6 +449,145 @@ export class RadiusRepository {
     for (const observation of rows) result.get(observation.machineId)?.push(observation)
     for (const observations of result.values()) observations.sort((left, right) => Date.parse(left.fetchedAtUtc) - Date.parse(right.fetchedAtUtc))
     return result
+  }
+
+  async getExactIdentityHistory(input: {
+    machineId: number
+    fromUtc: string
+    toUtc: string
+    identity: RadiusExactIdentity
+    maximumOccurrences: number
+  }): Promise<RadiusIdentityHistoryResult> {
+    const maximumOccurrences = Math.min(100, Math.max(1, Math.floor(input.maximumOccurrences)))
+    const result = await this.executor.query(
+      `WITH legacy_seed AS (
+         SELECT id AS "sourceId", 0 AS "sourceOrder", event_type AS "eventType",
+                status_code AS "statusCode", status_description AS "statusDescription",
+                fetched_at AS "atUtc"
+         FROM ${this.legacyTable}
+         WHERE machine_id = $1
+           AND fetched_at < LEAST($2::timestamptz, $4::timestamptz)
+         ORDER BY fetched_at DESC, id DESC
+         LIMIT 1
+       ), legacy_window AS (
+         SELECT id AS "sourceId", 0 AS "sourceOrder", event_type AS "eventType",
+                status_code AS "statusCode", status_description AS "statusDescription",
+                fetched_at AS "atUtc"
+         FROM ${this.legacyTable}
+         WHERE machine_id = $1
+           AND fetched_at >= $2::timestamptz
+           AND fetched_at <= $3::timestamptz
+           AND fetched_at < $4::timestamptz
+       ), legacy_ordered AS (
+         SELECT legacy_rows.*,
+                lag("atUtc") OVER (ORDER BY "atUtc", "sourceId") AS "previousAtUtc",
+                lag("eventType") OVER (ORDER BY "atUtc", "sourceId") AS "previousEventType",
+                lag("statusCode") OVER (ORDER BY "atUtc", "sourceId") AS "previousStatusCode",
+                lag("statusDescription") OVER (ORDER BY "atUtc", "sourceId") AS "previousStatusDescription"
+         FROM (SELECT * FROM legacy_seed UNION ALL SELECT * FROM legacy_window) AS legacy_rows
+       ), legacy_states AS (
+         SELECT "sourceId", "sourceOrder", "eventType", "statusCode", "statusDescription", "atUtc"
+         FROM legacy_ordered
+         WHERE "atUtc" < $2::timestamptz
+            OR ROW("eventType", "statusCode", "statusDescription")
+               IS DISTINCT FROM ROW("previousEventType", "previousStatusCode", "previousStatusDescription")
+       ), compact_seed AS (
+         SELECT id AS "sourceId", 1 AS "sourceOrder", event_type AS "eventType",
+                status_code AS "statusCode", status_description AS "statusDescription",
+                started_at AS "atUtc"
+         FROM ${this.eventsTable}
+         WHERE machine_id = $1
+           AND started_at >= $4::timestamptz
+           AND started_at < GREATEST($2::timestamptz, $4::timestamptz)
+         ORDER BY started_at DESC, id DESC
+         LIMIT 1
+       ), compact_window AS (
+         SELECT id AS "sourceId", 1 AS "sourceOrder", event_type AS "eventType",
+                status_code AS "statusCode", status_description AS "statusDescription",
+                started_at AS "atUtc"
+         FROM ${this.eventsTable}
+         WHERE machine_id = $1
+           AND started_at >= GREATEST($2::timestamptz, $4::timestamptz)
+           AND started_at <= $3::timestamptz
+       ), hybrid_ordered AS (
+         SELECT hybrid_rows.*,
+                lag("atUtc") OVER (ORDER BY "atUtc", "sourceOrder", "sourceId") AS "previousAtUtc",
+                lag("eventType") OVER (ORDER BY "atUtc", "sourceOrder", "sourceId") AS "previousEventType",
+                lag("statusCode") OVER (ORDER BY "atUtc", "sourceOrder", "sourceId") AS "previousStatusCode",
+                lag("statusDescription") OVER (ORDER BY "atUtc", "sourceOrder", "sourceId") AS "previousStatusDescription"
+         FROM (SELECT * FROM legacy_states UNION ALL SELECT * FROM compact_seed UNION ALL SELECT * FROM compact_window) AS hybrid_rows
+       ), hybrid_states AS (
+         SELECT * FROM hybrid_ordered
+         WHERE "previousAtUtc" IS NULL
+            OR ROW("eventType", "statusCode", "statusDescription")
+               IS DISTINCT FROM ROW("previousEventType", "previousStatusCode", "previousStatusDescription")
+       ), annotated AS (
+         SELECT *,
+                lag("eventType") OVER (ORDER BY "atUtc", "sourceOrder", "sourceId") AS "neighborPreviousEventType",
+                lag("statusCode") OVER (ORDER BY "atUtc", "sourceOrder", "sourceId") AS "neighborPreviousStatusCode",
+                lag("statusDescription") OVER (ORDER BY "atUtc", "sourceOrder", "sourceId") AS "neighborPreviousStatusDescription",
+                lead("atUtc") OVER (ORDER BY "atUtc", "sourceOrder", "sourceId") AS "nextAtUtc",
+                lead("eventType") OVER (ORDER BY "atUtc", "sourceOrder", "sourceId") AS "neighborNextEventType",
+                lead("statusCode") OVER (ORDER BY "atUtc", "sourceOrder", "sourceId") AS "neighborNextStatusCode",
+                lead("statusDescription") OVER (ORDER BY "atUtc", "sourceOrder", "sourceId") AS "neighborNextStatusDescription"
+         FROM hybrid_states
+       ), candidates AS (
+         SELECT * FROM annotated
+         WHERE "atUtc" >= $2::timestamptz AND "atUtc" <= $3::timestamptz
+       ), matching AS (
+         SELECT * FROM candidates
+         WHERE "atUtc" < $3::timestamptz
+           AND "eventType" = $5::text
+           AND "statusCode" IS NOT DISTINCT FROM $6::text
+           AND "statusDescription" = $7::text
+       ), selected AS (
+         SELECT * FROM matching ORDER BY "atUtc" DESC, "sourceOrder" DESC, "sourceId" DESC LIMIT $8
+       )
+       SELECT (SELECT count(*)::integer FROM candidates) AS "rowsConsidered",
+              (SELECT count(*)::integer FROM matching) AS "matchingOccurrencesAvailable",
+              coalesce((
+                SELECT jsonb_agg(jsonb_build_object(
+                  'eventType', "eventType", 'statusCode', "statusCode", 'statusDescription', "statusDescription",
+                  'startUtc', "atUtc", 'endUtc', LEAST(coalesce("nextAtUtc", $3::timestamptz), $3::timestamptz),
+                  'previousIdentity', CASE WHEN "neighborPreviousEventType" IS NULL THEN NULL ELSE jsonb_build_object('eventType', "neighborPreviousEventType", 'statusCode', "neighborPreviousStatusCode", 'statusDescription', "neighborPreviousStatusDescription") END,
+                  'nextIdentity', CASE WHEN "neighborNextEventType" IS NULL THEN NULL ELSE jsonb_build_object('eventType', "neighborNextEventType", 'statusCode', "neighborNextStatusCode", 'statusDescription', "neighborNextStatusDescription") END
+                ) ORDER BY "atUtc" ASC)
+                FROM selected
+              ), '[]'::jsonb) AS "occurrences"`,
+      [
+        String(input.machineId), input.fromUtc, input.toUtc, this.config.effectiveCutoverUtc,
+        input.identity.eventType, input.identity.statusCode, input.identity.statusDescription,
+        maximumOccurrences,
+      ],
+    )
+    const row = result.rows[0] ?? {}
+    const rawOccurrences = Array.isArray(row.occurrences)
+      ? row.occurrences
+      : typeof row.occurrences === 'string'
+        ? JSON.parse(row.occurrences) as unknown[]
+        : []
+    const occurrences = rawOccurrences.flatMap((value): RadiusIdentityHistoryOccurrence[] => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+      const candidate = value as Record<string, unknown>
+      const identity = exactIdentityFromJson(candidate)
+      if (!identity) return []
+      const startUtc = toUtc(candidate.startUtc, 'history start timestamp')
+      const endUtc = toUtc(candidate.endUtc, 'history end timestamp')
+      return [{
+        ...identity,
+        startUtc,
+        endUtc,
+        durationSeconds: Math.max(0, (Date.parse(endUtc) - Date.parse(startUtc)) / 1_000),
+        previousIdentity: exactIdentityFromJson(candidate.previousIdentity),
+        nextIdentity: exactIdentityFromJson(candidate.nextIdentity),
+      }]
+    })
+    return {
+      occurrences,
+      rowsConsidered: positiveInteger(row.rowsConsidered ?? 0, 'history rows considered'),
+      matchingOccurrencesAvailable: positiveInteger(row.matchingOccurrencesAvailable ?? 0, 'history matching occurrences'),
+      queryCount: 1,
+    }
   }
 
   async getPollRuns(fromUtc: string, toUtc: string): Promise<RadiusPollRun[]> {

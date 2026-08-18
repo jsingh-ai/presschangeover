@@ -288,3 +288,34 @@ test('observed identity catalog is read-only and null-safe across legacy and com
   assert.match(sql, /coalesce\(event_type, ''\)/)
   assert.doesNotMatch(sql, /\b(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|TRUNCATE)\b/i)
 })
+
+test('exact identity history is one bounded hybrid SELECT with exact status-code isolation', async () => {
+  const calls: Array<{ sql: string; values?: unknown[] }> = []
+  const executor: RadiusQueryExecutor = { query: async (sql, values) => {
+    assertPostgresParameterContract(sql, values); calls.push({ sql, values })
+    return { rows: [{
+      rowsConsidered: 9,
+      matchingOccurrencesAvailable: 2,
+      occurrences: [
+        { eventType: 'B', statusCode: '400', statusDescription: 'Recorded B state', startUtc: '2026-08-11T10:00:00.000Z', endUtc: '2026-08-11T10:02:00.000Z', previousIdentity: { eventType: 'B', statusCode: '401', statusDescription: 'Recorded B state' }, nextIdentity: { eventType: 'G', statusCode: '1', statusDescription: 'Run' } },
+        { eventType: 'B', statusCode: '400', statusDescription: 'Recorded B state', startUtc: '2026-08-12T10:00:00.000Z', endUtc: '2026-08-12T10:03:00.000Z', previousIdentity: { eventType: 'M', statusCode: '16', statusDescription: 'Make Ready' }, nextIdentity: null },
+      ],
+    }] }
+  } }
+  const result = await new RadiusRepository(executor, config, 'America/Chicago').getExactIdentityHistory({
+    machineId: 203,
+    fromUtc: '2026-07-13T12:00:00.000Z',
+    toUtc: '2026-08-13T12:00:00.000Z',
+    identity: { eventType: 'B', statusCode: '400', statusDescription: 'Recorded B state' },
+    maximumOccurrences: 100,
+  })
+  assert.equal(calls.length, 1); assert.equal(result.queryCount, 1); assert.equal(result.rowsConsidered, 9); assert.equal(result.matchingOccurrencesAvailable, 2)
+  assert.deepEqual(result.occurrences.map(({ statusCode, durationSeconds }) => ({ statusCode, durationSeconds })), [{ statusCode: '400', durationSeconds: 120 }, { statusCode: '400', durationSeconds: 180 }])
+  assert.equal(result.occurrences[0]?.previousIdentity?.statusCode, '401')
+  assert.deepEqual(calls[0].values, ['203', '2026-07-13T12:00:00.000Z', '2026-08-13T12:00:00.000Z', config.effectiveCutoverUtc, 'B', '400', 'Recorded B state', 100])
+  assert.match(calls[0].sql, /machine_status_history/); assert.match(calls[0].sql, /machine_status_events/)
+  assert.match(calls[0].sql, /machine_id = \$1/g); assert.match(calls[0].sql, /"statusCode" IS NOT DISTINCT FROM \$6::text/)
+  assert.match(calls[0].sql, /"atUtc" >= \$2::timestamptz/); assert.match(calls[0].sql, /"atUtc" < \$3::timestamptz/); assert.match(calls[0].sql, /LIMIT \$8/)
+  assert.doesNotMatch(calls[0].sql, /machine_status_poll_runs|machine_status_current|raw_payload/i)
+  assert.doesNotMatch(calls[0].sql, /\b(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|CREATE|ALTER|DROP|GRANT|REVOKE)\b/i)
+})

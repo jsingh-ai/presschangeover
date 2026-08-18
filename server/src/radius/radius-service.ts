@@ -26,7 +26,7 @@ import type {
   RawRadiusTimeline,
 } from './models.js'
 import { RADIUS_PRESS_KEYS } from './models.js'
-import { RadiusRepository } from './radius-repository.js'
+import { RadiusRepository, type RadiusExactIdentity, type RadiusIdentityHistoryResult } from './radius-repository.js'
 import { analyzeFleetEpisodes, analyzePressEpisodes } from './episode-analysis.js'
 import { analyzeOperationalHistory } from './operational-analytics.js'
 import { buildOperationalRunComparison } from './operational-runs.js'
@@ -69,6 +69,7 @@ export interface RadiusService {
   ): Promise<OperationalEpisode>
   getObservedIdentities?(): Promise<ObservedRadiusIdentity[]>
   getRawTimeline?(pressKey: RadiusPressKey, fromUtc: string, toUtc: string): Promise<RawRadiusTimeline>
+  getExactIdentityHistory?(input: { pressKey: RadiusPressKey; fromUtc: string; toUtc: string; identity: RadiusExactIdentity; maximumOccurrences: number }): Promise<RadiusIdentityHistoryResult>
   getActivityAnalysis?(fromUtc: string, toUtc: string, selection?: import('./models.js').ActivitySelection, pressKey?: RadiusPressKey, evidencePage?: { offset?: number; limit?: number }): Promise<import('./models.js').ActivityAnalysis>
   getPatternAnalysis?(fromUtc: string, toUtc: string, input?: { selectedPatternKey?: string; conditions?: import('./models.js').ActivitySelection[]; matchMode?: import('./models.js').PatternMatchMode; pressKey?: RadiusPressKey }): Promise<import('./models.js').PatternAnalysis>
 }
@@ -95,6 +96,10 @@ export class UnavailableRadiusService implements RadiusService {
   }
 
   async getRawTimeline(): Promise<RawRadiusTimeline> {
+    throw new RadiusUnavailableError()
+  }
+
+  async getExactIdentityHistory(): Promise<RadiusIdentityHistoryResult> {
     throw new RadiusUnavailableError()
   }
 }
@@ -231,6 +236,19 @@ export class DatabaseRadiusService implements RadiusService {
     const mapping = this.requireMapping(pressKey)
     const data = await this.loadPressData(mapping, fromUtc, toUtc)
     return { pressKey, displayName: mapping.displayName, fromUtc, toUtc, segments: data.visibleSegments }
+  }
+
+  async getExactIdentityHistory(input: { pressKey: RadiusPressKey; fromUtc: string; toUtc: string; identity: RadiusExactIdentity; maximumOccurrences: number }): Promise<RadiusIdentityHistoryResult> {
+    await this.assertSafeAccess()
+    const mapping = this.requireMapping(input.pressKey)
+    const result = await this.repository.getExactIdentityHistory({
+      machineId: mapping.machineId,
+      fromUtc: input.fromUtc,
+      toUtc: input.toUtc,
+      identity: input.identity,
+      maximumOccurrences: input.maximumOccurrences,
+    })
+    return { ...result, queryCount: result.queryCount + 2 }
   }
 
   private requireMapping(pressKey: RadiusPressKey): RadiusPressMapping {
