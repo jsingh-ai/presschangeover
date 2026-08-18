@@ -5,6 +5,7 @@ import type { AiInvestigatorConfig } from '../config.js'
 import type { RadiusPressKey } from '../radius/models.js'
 import { AI_INVESTIGATOR_CONTENT_SCHEMA, AI_INVESTIGATOR_DISCOVERY_SCHEMA, AI_INVESTIGATOR_DISCOVERY_TEXT_FORMAT, AiInvestigatorValidationError, parseAiInvestigatorDiscoveryDraft, type AiGroundingFact, type AiInvestigatorContent, type AiInvestigatorDraftContent, type AiInvestigatorRequest, type AiInvestigatorResult, validateAiInvestigatorDiscoveryDraft, validateAiInvestigatorDraft } from './contracts.js'
 import { buildDiscoveryPreflight, DISCOVERY_CANDIDATE_LIMIT, DISCOVERY_INSTRUCTIONS, DISCOVERY_OUTPUT_TOKENS, DISCOVERY_PROMPT_CACHE_KEY, expandDiscoveryDraft, validateDiscoveryReferences } from './discovery.js'
+import { DiscoveryEvidenceValidationError } from './evidence-graph.js'
 import { groundAiInvestigatorDraft } from './grounding.js'
 import { AiInvestigatorReadOnlyToolRegistry, type AiInvestigatorToolDefinition, type AiInvestigatorToolExecutor, type AiToolResult } from './read-only-tools.js'
 
@@ -229,7 +230,7 @@ function safeModelError(error: unknown): Record<string, unknown> {
   const http = candidate.http && typeof candidate.http === 'object' ? candidate.http as Record<string, unknown> : {}
   const safeHttp = Object.fromEntries(['requestId', 'processingMs', 'limitTokens', 'remainingTokens', 'resetTokens', 'limitRequests', 'remainingRequests', 'resetRequests', 'limitProjectTokens', 'remainingProjectTokens', 'resetProjectTokens', 'retryAfter'].flatMap((key) => typeof http[key] === 'string' ? [[key, http[key]]] : []))
   const diagnostic = candidate.validationDiagnostic && typeof candidate.validationDiagnostic === 'object' ? candidate.validationDiagnostic as Record<string, unknown> : {}
-  const safeDiagnostic: Record<string, unknown> = Object.fromEntries(['validationStage', 'schemaCode', 'path', 'expected', 'receivedType', 'candidateId', 'factId'].flatMap((key) => typeof diagnostic[key] === 'string' && String(diagnostic[key]).length <= 240 ? [[key, diagnostic[key]]] : []))
+  const safeDiagnostic: Record<string, unknown> = Object.fromEntries(['validationStage', 'generationStage', 'schemaCode', 'code', 'path', 'expected', 'receivedType', 'candidateId', 'observationId', 'factId', 'press'].flatMap((key) => typeof diagnostic[key] === 'string' && String(diagnostic[key]).length <= 240 ? [[key, diagnostic[key]]] : []))
   if (typeof diagnostic.findingIndex === 'number' && Number.isInteger(diagnostic.findingIndex)) safeDiagnostic.findingIndex = diagnostic.findingIndex
   return {
     errorType: candidate.constructor?.name ?? 'Error',
@@ -377,13 +378,18 @@ export class AiInvestigatorOrchestrator {
     safeLog(this.logger, 'info', { event: 'ai_investigator_started', architecture: 'single_synthesis', analysisId, scope: request.scope.pressKey ?? 'all', startUtc: request.range.startUtc, endUtc: request.range.endUtc, modelConfigured: true, model: this.config.model })
     try {
       const candidateLimit = Math.min(request.scope.pressKey ? 1 : DISCOVERY_CANDIDATE_LIMIT, Math.max(0, this.config.maxToolCalls - 2))
-      const preflight = await buildDiscoveryPreflight(this.registry, request, signal, { requestId: analysisId, candidateLimit, maxParallelTools: this.config.maxParallelTools, toolTimeoutMs: this.config.toolTimeoutMs })
+      let preflight
+      try { preflight = await buildDiscoveryPreflight(this.registry, request, signal, { requestId: analysisId, candidateLimit, maxParallelTools: this.config.maxParallelTools, toolTimeoutMs: this.config.toolTimeoutMs }) }
+      catch (error) {
+        if (error instanceof DiscoveryEvidenceValidationError) safeLog(this.logger, 'error', { event: 'ai_investigator_evidence_graph_validation_failed', architecture: 'single_synthesis', analysisId, ...error.diagnostic })
+        throw error
+      }
       evidence = preflight.evidence
       for (const item of evidence) safeLog(this.logger, 'info', { event: 'ai_investigator_tool', architecture: 'single_synthesis', analysisId, tool: item.name, durationMs: item.durationMs, success: true, payloadBytes: utf8Bytes(item.result) })
       const input: unknown[] = [{ role: 'user', content: JSON.stringify(preflight.modelInput) } satisfies ResponseInputItem]
       const options: AiModelRequestOptions = { structuredOutputSchema: AI_INVESTIGATOR_DISCOVERY_SCHEMA, structuredOutputFormat: AI_INVESTIGATOR_DISCOVERY_TEXT_FORMAT, structuredOutputName: 'process_intelligence_discovery', maxOutputTokens: DISCOVERY_OUTPUT_TOKENS, promptCacheKey: DISCOVERY_PROMPT_CACHE_KEY }
       const payload = buildAiResponsesRequestPayload(this.config.model, input, DISCOVERY_INSTRUCTIONS, [], 'none', options)
-      safeLog(this.logger, 'info', { event: 'ai_investigator_model_request', architecture: 'single_synthesis', analysisId, requestNumber: 1, phase: 'final_synthesis', toolsEnabled: false, toolChoice: 'none', availableTools: [], candidateCount: preflight.candidates.length, estimatedInputTokens: Math.ceil(utf8Bytes(payload) / 4), maxOutputTokens: DISCOVERY_OUTPUT_TOKENS, requestBytes: utf8Bytes(payload), modelFacingEvidenceBytes: utf8Bytes(preflight.modelInput), toolResultsIncluded: evidence.length, priorModelMessagesIncluded: 0, priorModelResultsIncluded: 0 })
+      safeLog(this.logger, 'info', { event: 'ai_investigator_model_request', architecture: 'single_synthesis', analysisId, requestNumber: 1, phase: 'final_synthesis', toolsEnabled: false, toolChoice: 'none', availableTools: [], candidateCount: preflight.candidates.length, evidenceGraph: { registeredFacts: preflight.evidenceGraph.registeredFacts, observations: preflight.evidenceGraph.observations, advertisedFactReferences: preflight.evidenceGraph.advertisedFactReferences, modelVisibleFactIds: preflight.evidenceGraph.modelVisibleFactIds, unresolvedReferences: preflight.evidenceGraph.unresolvedReferences, crossPressViolations: preflight.evidenceGraph.crossPressViolations, unusableAdvertisedFacts: preflight.evidenceGraph.unusableAdvertisedFacts }, estimatedInputTokens: Math.ceil(utf8Bytes(payload) / 4), maxOutputTokens: DISCOVERY_OUTPUT_TOKENS, requestBytes: utf8Bytes(payload), modelFacingEvidenceBytes: utf8Bytes(preflight.modelInput), toolResultsIncluded: evidence.length, priorModelMessagesIncluded: 0, priorModelResultsIncluded: 0 })
       let response: AiModelResponse
       try {
         response = await this.model.create(input, DISCOVERY_INSTRUCTIONS, [], 'none', signal, options)

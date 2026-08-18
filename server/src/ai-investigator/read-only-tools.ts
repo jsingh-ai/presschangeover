@@ -6,6 +6,7 @@ import type { ProductionContextChange, ProductionContextEvidence, TelemetrySampl
 import { IndustrialAnalyticsService } from '../industrial-analytics/industrial-analytics-service.js'
 import type { IndustrialAnalyticalObservation, IndustrialNumericSample, IndustrialStateSample } from '../industrial-analytics/contracts.js'
 import { AI_INVESTIGATOR_MAX_RANGE_MS, type AiEvidenceSource, type AiGroundingFact } from './contracts.js'
+import { createIndustrialObservationFacts, createRadiusDriverDurationFact } from './evidence-graph.js'
 
 export const AI_INVESTIGATOR_TOOL_NAMES = [
   'get_fleet_operational_summary',
@@ -147,10 +148,7 @@ function summaryFacts(pressKey: RadiusPressKey, pressName: string, summary: { co
 }
 
 function driverFacts(pressKey: RadiusPressKey, pressName: string, drivers: Array<{ eventType: string; statusCode: string | null; statusDescription: string; durationMinutes: number | null; occurrences: number }>, role: 'current' | 'baseline' | 'event', rangeValue: { start: string; end: string }): AiGroundingFact[] {
-  return drivers.map((driver) => {
-    const key = identity(`${driver.eventType}\u0000${driver.statusCode ?? ''}\u0000${driver.statusDescription}`)
-    return fact(pressKey, pressName, 'radius', 'radiusDriverDurationMinutes', driver.durationMinutes, 'minutes', role, `${driver.eventType} / ${driver.statusCode ?? '—'} / ${driver.statusDescription}`, `radius_driver.${key}.duration_minutes.${role}`, { range: rangeValue })
-  })
+  return drivers.map((driver) => createRadiusDriverDurationFact({ pressKey, press: pressName, driver, role, range: rangeValue }))
 }
 
 function compactRadiusStates(segments: RadiusStatusSegment[], maximum = 6) {
@@ -191,36 +189,6 @@ function industrialNumericSamples(samples: TelemetrySample[]): IndustrialNumeric
   return samples.flatMap((sample) => typeof sample.value === 'number' && Number.isFinite(sample.value)
     ? [{ atUtc: sample.observedAtUtc, value: sample.value, qualityState: sample.qualityState }]
     : [])
-}
-
-const INDUSTRIAL_METRIC_LABELS: Record<string, string> = {
-  median: 'Median', startEndDelta: 'Start-to-end change', largestDelta: 'Largest adjacent change', standardDeviation: 'Standard deviation',
-  beforeMedian: 'Before-event median', eventMedian: 'Event median', afterMedian: 'After-event median', beforeToEventDelta: 'Before-to-event change',
-  transitionCount: 'State transitions', transitionsNearEvent: 'Transitions near event', stateBefore: 'State before', stateAfter: 'State after',
-  commonSequenceCount: 'Common Radius sequence support', commonSequenceSharePercent: 'Common Radius sequence share', extraStepCount: 'Extra Radius steps', loopCount: 'Looped Radius steps',
-  pearson: 'Pearson correlation', spearman: 'Spearman correlation', bestLagMinutes: 'Strongest lag', bestLagCorrelation: 'Lagged correlation', direction: 'Lag direction',
-}
-
-const INDUSTRIAL_FACT_METRICS: Record<IndustrialAnalyticalObservation['family'], string[]> = {
-  baseline_deviation: ['current', 'baseline', 'delta'],
-  robust_numeric_change: ['median', 'startEndDelta', 'largestDelta', 'standardDeviation'],
-  event_aligned_change: ['beforeMedian', 'eventMedian', 'afterMedian', 'beforeToEventDelta'],
-  value_state_transition: ['transitionCount', 'transitionsNearEvent', 'stateBefore', 'stateAfter'],
-  radius_sequence_deviation: ['commonSequenceCount', 'commonSequenceSharePercent', 'extraStepCount', 'loopCount'],
-  numeric_relationship: ['pearson', 'spearman', 'bestLagMinutes', 'bestLagCorrelation'],
-  cross_press_comparison: ['pressMedian', 'compatiblePressMedian', 'delta'],
-}
-
-function industrialFacts(observation: IndustrialAnalyticalObservation, pressName: string): AiGroundingFact[] {
-  const unit = typeof observation.metrics.unit === 'string' ? observation.metrics.unit : null
-  const units: Record<string, string | null> = { transitionCount: 'count', transitionsNearEvent: 'count', commonSequenceCount: 'episodes', commonSequenceSharePercent: 'percent', extraStepCount: 'count', loopCount: 'count', bestLagMinutes: 'minutes', pearson: 'coefficient', spearman: 'coefficient', bestLagCorrelation: 'coefficient' }
-  const result = INDUSTRIAL_FACT_METRICS[observation.family].flatMap((metric) => {
-    const value = observation.metrics[metric]
-    if (value === null || value === undefined || value === '') return []
-    return [fact(observation.pressKey, pressName, observation.evidenceSource, `industrial.${observation.family}.${metric}`, value, units[metric] ?? unit, 'event', INDUSTRIAL_METRIC_LABELS[metric] ?? metric, `${observation.observationId}.${metric}.event`, { range: observation.range })]
-  })
-  observation.factIds = result.map(({ factId }) => factId)
-  return result
 }
 
 function safePayload(result: AiToolResult): AiToolResult {
@@ -355,7 +323,7 @@ export class AiInvestigatorReadOnlyToolRegistry implements AiInvestigatorToolExe
       }
     }
     const retainedObservations = observations.filter((observation) => observation.support.adequate && observation.material)
-    const analyticsFacts = retainedObservations.flatMap((observation) => industrialFacts(observation, data.press.displayName))
+    const analyticsFacts = retainedObservations.flatMap((observation) => createIndustrialObservationFacts(observation, data.press.displayName))
     return { press: data.press.displayName, pressKey, range: { start, end }, coveragePercent: summary.coveragePercent, productionInterruptions: summary.productionInterruptions, longestInterruptionMinutes: summary.longestInterruptionMinutes, events: episodes, topRadiusDrivers, productionContext, industrialAnalytics: { calculatedCount: observations.length, retainedCount: retainedObservations.length, excludedCount: observations.length - retainedObservations.length, observations: retainedObservations }, queryCount: focusEpisode ? 3 : 1, facts: [...summaryFacts(pressKey, data.press.displayName, summary, 'current', { start, end }).filter((item) => item.metric !== 'productionPercent'), ...driverFacts(pressKey, data.press.displayName, topRadiusDrivers, 'event', { start, end }), ...eventFacts, ...contextFacts, ...analyticsFacts], limitations: [...(contextResult.status === 'rejected' ? ['Job/Order/Recipe context was unavailable; Radius evidence remains valid.'] : []), ...(speedUnavailable ? ['Trusted canonical speed evidence was unavailable for the bounded event window.'] : []), 'Industrial analytics is bounded to the strongest Radius event and trusted canonical speed/context signals; no broad tag scan is performed.'] }
   }
 

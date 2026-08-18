@@ -1,8 +1,8 @@
-import { createHash } from 'node:crypto'
 import type { RadiusPressKey } from '../radius/models.js'
 import { IndustrialAnalyticsService } from '../industrial-analytics/industrial-analytics-service.js'
 import type { IndustrialAnalyticalObservation, IndustrialBaselineMetricInput } from '../industrial-analytics/contracts.js'
 import type { AiGroundingFact, AiInvestigatorDiscoveryDraftContent, AiInvestigatorDraftContent, AiInvestigatorRequest } from './contracts.js'
+import { DiscoveryFactRegistry, radiusDriverIdentity, registerRadiusDriverDurationComparison, requireValidDiscoveryEvidenceGraph, type DiscoveryEvidenceGraphResult } from './evidence-graph.js'
 import type { AiInvestigatorToolExecutor, AiToolResult } from './read-only-tools.js'
 
 export const DISCOVERY_CANDIDATE_LIMIT = 5
@@ -45,6 +45,7 @@ export interface DiscoveryPreflight {
   limitations: string[]
   analytics: { calculated: number; retained: number; grouped: number; modelCandidates: number; calculationMs: number }
   performance: { dataServiceQueries: number; preflightMs: number }
+  evidenceGraph: DiscoveryEvidenceGraphResult
   modelInput: Record<string, unknown>
 }
 
@@ -70,6 +71,9 @@ function facts(result: AiToolResult): AiGroundingFact[] {
   return Array.isArray(result.facts) ? result.facts.filter((item): item is AiGroundingFact => Boolean(item) && typeof item === 'object' && typeof (item as AiGroundingFact).factId === 'string') : []
 }
 
+const FLEET_OWNED_SUMMARY_METRICS = new Set(['coveragePercent', 'productionPercent', 'interruptions', 'longestInterruptionMinutes'])
+function supplementalEventFacts(result: AiToolResult): AiGroundingFact[] { return facts(result).filter((fact) => !FLEET_OWNED_SUMMARY_METRICS.has(fact.metric)) }
+
 function baselineFact(fact: AiGroundingFact, range: { start: string; end: string }): AiGroundingFact {
   return { ...fact, factId: fact.factId.replace(/\.current$/, '.baseline'), role: 'baseline', range }
 }
@@ -83,28 +87,25 @@ function deltaFact(current: FleetRow, metric: 'production' | 'interruptions' | '
   return { factId: `${current.pressKey}.${attributes[3]}`, pressKey: current.pressKey, press: current.press, source: 'comparison', metric: attributes[0], value, unit: attributes[1], role: 'delta', usable: value !== null, label: attributes[2], range }
 }
 
-function driverIdentity(driver: FleetDriver): string { return createHash('sha256').update(`${driver.eventType}\u0000${driver.statusCode ?? ''}\u0000${driver.statusDescription}`).digest('hex').slice(0, 10) }
-
-function driverComparisons(row: FleetRow, previous: FleetRow, currentRange: { start: string; end: string }, baselineRange: { start: string; end: string }): { facts: AiGroundingFact[]; metrics: IndustrialBaselineMetricInput[] } {
-  const previousById = new Map(previous.leadingRadiusStates.map((driver) => [driverIdentity(driver), driver]))
+function driverComparisons(registry: DiscoveryFactRegistry, row: FleetRow, previous: FleetRow, currentRange: { start: string; end: string }, baselineRange: { start: string; end: string }): { facts: AiGroundingFact[]; metrics: IndustrialBaselineMetricInput[] } {
+  const previousById = new Map(previous.leadingRadiusStates.map((driver) => [radiusDriverIdentity(driver), driver]))
   const resultFacts: AiGroundingFact[] = []
   const metrics: IndustrialBaselineMetricInput[] = []
   for (const driver of row.leadingRadiusStates.slice(0, 3)) {
-    const id = driverIdentity(driver); const baseline = previousById.get(id); if (!baseline) continue
+    const id = radiusDriverIdentity(driver); const baseline = previousById.get(id); if (!baseline) continue
     const label = `${driver.eventType} / ${driver.statusCode ?? '—'} / ${driver.statusDescription}`
     const baseId = `${row.pressKey}.radius_driver.${id}`
     if (driver.durationMinutes !== null && baseline.durationMinutes !== null) {
-      const delta = round(driver.durationMinutes - baseline.durationMinutes)
-      const deltaId = `${baseId}.duration_minutes.delta`
-      resultFacts.push({ factId: deltaId, pressKey: row.pressKey, press: row.press, source: 'comparison', metric: 'radiusDriverDurationDeltaMinutes', value: delta, unit: 'minutes', role: 'delta', usable: true, label: `${label} duration change`, range: currentRange })
-      metrics.push({ metricId: `radius.driver.${id}.duration`, label: `${label} duration`, unit: 'minutes', current: driver.durationMinutes, baseline: baseline.durationMinutes, materialDelta: 30, currentFactId: `${baseId}.duration_minutes.current`, baselineFactId: `${baseId}.duration_minutes.baseline`, deltaFactId: deltaId })
+      const comparison = registerRadiusDriverDurationComparison(registry, { pressKey: row.pressKey, press: row.press, current: { ...driver, durationMinutes: driver.durationMinutes }, baseline: { ...baseline, durationMinutes: baseline.durationMinutes }, currentRange, baselineRange })
+      resultFacts.push(...comparison.facts)
+      metrics.push({ metricId: `radius.driver.${id}.duration`, label: `${label} duration`, unit: 'minutes', current: driver.durationMinutes, baseline: baseline.durationMinutes, materialDelta: 30, currentFactId: comparison.factIds.current, baselineFactId: comparison.factIds.baseline, deltaFactId: comparison.factIds.delta })
     }
     const currentId = `${baseId}.occurrences.current`; const baselineId = `${baseId}.occurrences.baseline`; const deltaId = `${baseId}.occurrences.delta`; const delta = driver.occurrences - baseline.occurrences
-    resultFacts.push(
+    resultFacts.push(...registry.registerAll([
       { factId: currentId, pressKey: row.pressKey, press: row.press, source: 'radius', metric: 'radiusDriverOccurrences', value: driver.occurrences, unit: 'count', role: 'current', usable: true, label: `${label} occurrences`, range: currentRange },
       { factId: baselineId, pressKey: row.pressKey, press: row.press, source: 'radius', metric: 'radiusDriverOccurrences', value: baseline.occurrences, unit: 'count', role: 'baseline', usable: true, label: `${label} occurrences`, range: baselineRange },
       { factId: deltaId, pressKey: row.pressKey, press: row.press, source: 'comparison', metric: 'radiusDriverOccurrenceDelta', value: delta, unit: 'count', role: 'delta', usable: true, label: `${label} occurrence change`, range: currentRange },
-    )
+    ]))
     metrics.push({ metricId: `radius.driver.${id}.occurrences`, label: `${label} occurrences`, unit: 'count', current: driver.occurrences, baseline: baseline.occurrences, materialDelta: 2, currentFactId: currentId, baselineFactId: baselineId, deltaFactId: deltaId })
   }
   return { facts: resultFacts, metrics }
@@ -152,7 +153,7 @@ function selectFacts(pressKey: RadiusPressKey, all: AiGroundingFact[], observati
   const drivers = (role: AiGroundingFact['role']) => matching.filter((fact) => fact.metric === 'radiusDriverDurationMinutes' && fact.role === role).slice(0, 1)
   const eventPairs = matching.filter((fact) => ['eventTimestamp', 'eventDurationMinutes'].includes(fact.metric)).slice(0, 2)
   const context = ['job', 'order', 'recipe'].flatMap((metric) => matching.filter((fact) => fact.source === 'production_context' && fact.metric === metric).slice(0, 1))
-  const observationIds = new Set(observations.flatMap(({ factIds }) => factIds).slice(0, 8))
+  const observationIds = new Set(observations.flatMap(({ factIds }) => factIds))
   const observationFacts = matching.filter((fact) => observationIds.has(fact.factId))
   return uniqueFacts([...core, ...drivers('current'), ...drivers('baseline'), ...eventPairs, ...context, ...observationFacts])
 }
@@ -169,7 +170,10 @@ function compactModelInput(request: AiInvestigatorRequest, current: { start: str
     factColumns: ['id', 'metric', 'value', 'unitIndex', 'roleIndex', 'sourceIndex', 'timestamp', 'label'],
     dictionary: { units, roles, sources },
     observationColumns: ['id', 'family', 'eventId', 'variables', 'factIds', 'metrics', 'sampleCount', 'coveragePercent'],
-    candidates: candidates.map((candidate) => ({ id: candidate.pressKey, score: [candidate.signalCount, candidate.productionDelta, candidate.interruptionDelta, candidate.longestDelta], observations: candidate.observations.map((observation) => [observation.observationId, observation.family, observation.eventId, observation.variableIds, observation.factIds, compactObservationMetrics(observation), observation.support.sampleCount, observation.support.coveragePercent]), facts: candidate.facts.map((fact) => [fact.factId, fact.metric, fact.value, unitIndex(fact.unit), roles.indexOf(fact.role), sources.indexOf(fact.source), fact.timestamp ?? null, fact.label]) })),
+    candidates: candidates.map((candidate) => {
+      const candidateFacts = new Map(candidate.facts.map((fact) => [fact.factId, fact]))
+      return { id: candidate.pressKey, score: [candidate.signalCount, candidate.productionDelta, candidate.interruptionDelta, candidate.longestDelta], observations: candidate.observations.map((observation) => [observation.observationId, observation.family, observation.eventId, observation.variableIds, observation.factIds.map((factId) => candidateFacts.get(factId)!.factId), compactObservationMetrics(observation), observation.support.sampleCount, observation.support.coveragePercent]), facts: candidate.facts.map((fact) => [fact.factId, fact.metric, fact.value, unitIndex(fact.unit), roles.indexOf(fact.role), sources.indexOf(fact.source), fact.timestamp ?? null, fact.label]) }
+    }),
     limitations,
   }
 }
@@ -216,9 +220,11 @@ export async function buildDiscoveryPreflight(executor: AiInvestigatorToolExecut
   const analyticsBegan = Date.now()
   const industrialAnalytics = new IndustrialAnalyticsService()
   const industrialByPress = new Map<RadiusPressKey, IndustrialAnalyticalObservation[]>()
+  const factRegistry = new DiscoveryFactRegistry()
+  factRegistry.registerAll([...facts(currentResult), ...facts(baselineResult).map((fact) => baselineFact(fact, baseline))])
   const derivedFacts: AiGroundingFact[] = []
   for (const { row, previous, productionDelta, interruptionDelta, longestDelta } of selected) {
-    const comparisons = driverComparisons(row, previous, current, baseline)
+    const comparisons = driverComparisons(factRegistry, row, previous, current, baseline)
     derivedFacts.push(...comparisons.facts)
     const metrics: IndustrialBaselineMetricInput[] = [
       { metricId: 'radius.productionPercent', label: 'Production time', unit: 'percent', current: row.productionPercent, baseline: previous.productionPercent, materialDelta: 5, currentFactId: `${row.pressKey}.production_percent.current`, baselineFactId: `${row.pressKey}.production_percent.baseline`, deltaFactId: `${row.pressKey}.production_percent.delta` },
@@ -247,9 +253,10 @@ export async function buildDiscoveryPreflight(executor: AiInvestigatorToolExecut
     ...facts(baselineResult).map((fact) => baselineFact(fact, baseline)),
     ...selected.flatMap(({ row, productionDelta, interruptionDelta, longestDelta }) => [deltaFact(row, 'production', productionDelta, current), deltaFact(row, 'interruptions', interruptionDelta, current), deltaFact(row, 'longest', longestDelta, current)]),
     ...derivedFacts,
-    ...eventResults.flatMap(facts),
+    ...eventResults.flatMap(supplementalEventFacts),
   ]
-  const allFacts = uniqueFacts(baseFacts)
+  factRegistry.registerAll(baseFacts)
+  const allFacts = factRegistry.values()
   const retainedByPress = new Map(selected.map(({ row }) => [row.pressKey, rankObservations(industrialByPress.get(row.pressKey) ?? [])]))
   const candidates: DiscoveryCandidate[] = selected.map(({ row, productionDelta, interruptionDelta, longestDelta, signalCount }) => {
     const retained = retainedByPress.get(row.pressKey) ?? []; const observations = retained.slice(0, DISCOVERY_OBSERVATION_LIMIT_PER_CANDIDATE)
@@ -263,12 +270,17 @@ export async function buildDiscoveryPreflight(executor: AiInvestigatorToolExecut
     ...(eligible.length > selected.length ? [`Detailed evidence was bounded to the top ${selected.length} of ${eligible.length} eligible presses.`] : []),
   ])
   const selectedFacts = uniqueFacts(candidates.flatMap((candidate) => candidate.facts))
+  const observations = [...new Map(candidates.flatMap((candidate) => candidate.observations).map((observation) => [observation.observationId, observation])).values()]
+  const evidenceGraphInput = { facts: selectedFacts, observations, candidates }
+  requireValidDiscoveryEvidenceGraph(evidenceGraphInput)
+  const modelInput = compactModelInput(request, current, baseline, candidates, eligiblePresses, excludedPresses, limit, limitations)
+  const evidenceGraph = requireValidDiscoveryEvidenceGraph({ ...evidenceGraphInput, modelInput })
   const baselineCalculated = selected.reduce((sum, { row }) => sum + (industrialByPress.get(row.pressKey)?.filter(({ family }) => family === 'baseline_deviation').length ?? 0), 0)
   const eventCalculated = eventResults.reduce((sum, result) => sum + analyticsCount(result, 'calculatedCount'), 0)
   const retained = [...retainedByPress.values()].reduce((sum, observations) => sum + observations.length, 0)
   const analytics = { calculated: baselineCalculated + eventCalculated + crossPress.filter((observation) => selected.some(({ row }) => row.pressKey === observation.pressKey)).length, retained, grouped: candidates.reduce((sum, candidate) => sum + candidate.observations.length, 0), modelCandidates: candidates.length, calculationMs: Date.now() - analyticsBegan }
   const dataServiceQueries = evidence.reduce((sum, item) => sum + (typeof item.result.queryCount === 'number' && Number.isFinite(item.result.queryCount) ? item.result.queryCount : 1), 0)
-  return { evidence, facts: selectedFacts, candidates, eligiblePresses, excludedPresses, limitations, analytics, performance: { dataServiceQueries, preflightMs: Date.now() - preflightBegan }, modelInput: compactModelInput(request, current, baseline, candidates, eligiblePresses, excludedPresses, limit, limitations) }
+  return { evidence, facts: selectedFacts, candidates, eligiblePresses, excludedPresses, limitations, analytics, performance: { dataServiceQueries, preflightMs: Date.now() - preflightBegan }, evidenceGraph, modelInput }
 }
 
 function extractLimitations(result: AiToolResult): string[] { return Array.isArray(result.limitations) ? result.limitations.filter((item): item is string => typeof item === 'string') : [] }

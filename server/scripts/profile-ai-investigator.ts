@@ -29,7 +29,7 @@ async function scenario(pressKey: 'press14' | null) {
   const scored = { ...requestOnly, selection: compact.selection, candidates: (compact.candidates as unknown[]).map((candidate) => { const value = candidate as Record<string, unknown>; return { id: value.id, score: value.score } }) }
   const optimizedMulti = cumulativeOfflineProfile([optimizedPayload(requestOnly, false), optimizedPayload(scored, false), optimizedPayload(compact, false), optimizedPayload(compact, true)])
   const singlePayload = optimizedPayload(compact, true); const singleSynthesis = cumulativeOfflineProfile([singlePayload])
-  return { currentMulti, optimizedMulti, singleSynthesis, analytics: preflight.analytics, performance: preflight.performance, topContributors: currentMulti.contributors.slice(0, 10) }
+  return { currentMulti, optimizedMulti, singleSynthesis, analytics: preflight.analytics, performance: preflight.performance, evidenceGraph: preflight.evidenceGraph, topContributors: currentMulti.contributors.slice(0, 10) }
 }
 
 const press14 = await scenario('press14'); const allPresses = await scenario(null)
@@ -44,8 +44,8 @@ if (press14.singleSynthesis.estimatedInputTokens > 3_000) throw new Error(`press
 if (allPresses.singleSynthesis.estimatedInputTokens > 6_000) throw new Error(`all_press_discovery_input_budget_exceeded:${allPresses.singleSynthesis.estimatedInputTokens}`)
 if (process.argv.includes('--summary')) console.log(JSON.stringify({
   generatedOffline: report.generatedOffline, openAiCalls: report.openAiCalls,
-  press14: { currentMulti: press14.currentMulti.estimatedInputTokens, optimizedMulti: press14.optimizedMulti.estimatedInputTokens, singleSynthesis: press14.singleSynthesis.estimatedInputTokens, exactRequestBytes: press14.singleSynthesis.exactRequestBytes, outputSchemaBytes: press14.singleSynthesis.contributors.find((item) => item.name === 'structured output schema')?.exactBytes ?? 0, outputTokens: DISCOVERY_OUTPUT_TOKENS, analytics: press14.analytics, performance: press14.performance },
-  allPresses: { currentMulti: allPresses.currentMulti.estimatedInputTokens, optimizedMulti: allPresses.optimizedMulti.estimatedInputTokens, singleSynthesis: allPresses.singleSynthesis.estimatedInputTokens, outputTokens: DISCOVERY_OUTPUT_TOKENS, analytics: allPresses.analytics, performance: allPresses.performance },
+  press14: { currentMulti: press14.currentMulti.estimatedInputTokens, optimizedMulti: press14.optimizedMulti.estimatedInputTokens, singleSynthesis: press14.singleSynthesis.estimatedInputTokens, exactRequestBytes: press14.singleSynthesis.exactRequestBytes, outputSchemaBytes: press14.singleSynthesis.contributors.find((item) => item.name === 'structured output schema')?.exactBytes ?? 0, outputTokens: DISCOVERY_OUTPUT_TOKENS, analytics: press14.analytics, performance: press14.performance, evidenceGraph: press14.evidenceGraph },
+  allPresses: { currentMulti: allPresses.currentMulti.estimatedInputTokens, optimizedMulti: allPresses.optimizedMulti.estimatedInputTokens, singleSynthesis: allPresses.singleSynthesis.estimatedInputTokens, outputTokens: DISCOVERY_OUTPUT_TOKENS, analytics: allPresses.analytics, performance: allPresses.performance, evidenceGraph: allPresses.evidenceGraph },
   allPressesCurrentTopContributors: allPresses.topContributors,
   candidatePackages,
 }, null, 2))
