@@ -267,7 +267,9 @@ describe('Raw Radius Code Explorer', () => {
     source.getExactIdentityHistory = async (input) => {
       historyInput = input
       return {
-        queryCount: 3, rowsConsidered: 18, matchingOccurrencesAvailable: 4,
+        queryCount: 3, sliceCount: 1, rowsConsidered: 18, matchingOccurrencesAvailable: 4,
+        examinedFromUtc: '2026-08-01T00:00:00.000Z', examinedToUtc: startUtc,
+        historyComplete: true, historyPartialReason: null,
         occurrences: [
           { ...identity, startUtc: '2026-08-01T12:00:00.000Z', endUtc: '2026-08-01T12:01:00.000Z', durationSeconds: 60, previousIdentity: neighbor('G', '1', 'Run'), nextIdentity: neighbor('B', '401', 'Recorded B state') },
           { ...identity, startUtc: '2026-08-02T12:00:00.000Z', endUtc: '2026-08-02T12:02:00.000Z', durationSeconds: 120, previousIdentity: neighbor('B', '401', 'Recorded B state'), nextIdentity: neighbor('M', '16', 'Make Ready') },
@@ -284,7 +286,8 @@ describe('Raw Radius Code Explorer', () => {
     assert.equal(summary.metrics.medianDurationMinutes, 2.5); assert.equal(summary.metrics.durationLowerQuartileMinutes, 1); assert.equal(summary.metrics.durationUpperQuartileMinutes, 3)
     assert.match(String(summary.metrics.commonPreviousIdentities), /B \/ 401 \/ Recorded B state \(1\)/); assert.match(String(summary.metrics.commonNextIdentities), /G \/ 1 \/ Run \(2\)/)
     assert.deepEqual(summary.timeSpan, { startUtc: '2026-08-01T12:00:00.000Z', endUtc: '2026-08-04T12:04:00.000Z' })
-    assert.deepEqual({ ...summary.performance, totalMs: 0 }, { radiusQueryCount: 3, rowsConsidered: 18, matchingOccurrences: 4, matchingOccurrencesAvailable: 4, totalMs: 0, payloadBytes: summary.performance!.payloadBytes })
+    assert.deepEqual({ ...summary.performance, totalMs: 0 }, { radiusQueryCount: 3, historySliceCount: 1, rowsConsidered: 18, matchingOccurrences: 4, matchingOccurrencesAvailable: 4, historyExaminedFromUtc: '2026-08-01T00:00:00.000Z', historyExaminedToUtc: startUtc, historyComplete: true, historyPartialReason: null, totalMs: 0, payloadBytes: summary.performance!.payloadBytes })
+    assert.equal(summary.metrics.historyComplete, true); assert.equal(summary.metrics.historyExaminedFromUtc, '2026-08-01T00:00:00.000Z')
     assert.ok(summary.performance!.totalMs >= 0); assert.ok(summary.performance!.payloadBytes > 0); assert.match(summary.limitations.join(' '), /not a correctness standard/)
   })
 })

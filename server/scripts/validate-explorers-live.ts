@@ -144,10 +144,11 @@ async function run() {
   if (radiusHealth.status !== 'healthy') throw new Error('readonly_radius_connectivity_failed')
 
   activePhase = 'raw_radius_representative_validation'
-  const rawRadius = await validateRawRadiusOverHttp({ api, startUtc, endUtc })
+  const rawRadius = await validateRawRadiusOverHttp({ api, startUtc, endUtc, maximumRepresentatives: 1 })
   artifact.rawRadius = rawRadius
   await checkpoint('raw_radius_representative_validation')
   if (rawRadius.diagnostics.rawUnmappedCalls.total !== 0) throw new Error('raw_unmapped_automatic_scan_detected')
+  if (rawRadius.status !== 'PASS') throw new Error('raw_radius_history_validation_failed')
 
   activePhase = 'telemetry_event_representative_validation'
   const telemetryEvent = await validateTelemetryEventsOverHttp({ api, startUtc, endUtc })

@@ -289,33 +289,104 @@ test('observed identity catalog is read-only and null-safe across legacy and com
   assert.doesNotMatch(sql, /\b(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|TRUNCATE)\b/i)
 })
 
-test('exact identity history is one bounded hybrid SELECT with exact status-code isolation', async () => {
+const historyIdentity = { eventType: 'B', statusCode: '400', statusDescription: 'Recorded B state' }
+const historyState = (atUtc: string, identity = historyIdentity) => ({ ...identity, atUtc })
+const historyInput = (overrides: Partial<Parameters<RadiusRepository['getExactIdentityHistory']>[0]> = {}) => ({
+  machineId: 203,
+  fromUtc: '2026-07-18T12:00:00.000Z',
+  toUtc: '2026-08-18T12:00:00.000Z',
+  identity: historyIdentity,
+  maximumOccurrences: 100,
+  ...overrides,
+})
+
+test('exact identity history searches newest-first, stops at 100, isolates status code, and avoids legacy when compact evidence is sufficient', async () => {
   const calls: Array<{ sql: string; values?: unknown[] }> = []
+  const states = Array.from({ length: 200 }, (_value, index) => historyState(
+    new Date(Date.parse('2026-08-16T12:00:00.000Z') + index * 10 * 60_000).toISOString(),
+    index % 2 ? { eventType: 'B', statusCode: '401', statusDescription: 'Recorded B state' } : historyIdentity,
+  ))
   const executor: RadiusQueryExecutor = { query: async (sql, values) => {
     assertPostgresParameterContract(sql, values); calls.push({ sql, values })
-    return { rows: [{
-      rowsConsidered: 9,
-      matchingOccurrencesAvailable: 2,
-      occurrences: [
-        { eventType: 'B', statusCode: '400', statusDescription: 'Recorded B state', startUtc: '2026-08-11T10:00:00.000Z', endUtc: '2026-08-11T10:02:00.000Z', previousIdentity: { eventType: 'B', statusCode: '401', statusDescription: 'Recorded B state' }, nextIdentity: { eventType: 'G', statusCode: '1', statusDescription: 'Run' } },
-        { eventType: 'B', statusCode: '400', statusDescription: 'Recorded B state', startUtc: '2026-08-12T10:00:00.000Z', endUtc: '2026-08-12T10:03:00.000Z', previousIdentity: { eventType: 'M', statusCode: '16', statusDescription: 'Make Ready' }, nextIdentity: null },
-      ],
+    return { rows: [{ rowsConsidered: states.length, states }] }
+  } }
+  const result = await new RadiusRepository(executor, config, 'America/Chicago').getExactIdentityHistory(historyInput())
+  assert.equal(calls.length, 1); assert.equal(result.queryCount, 1); assert.equal(result.sliceCount, 1)
+  assert.equal(result.occurrences.length, 100); assert.ok(result.occurrences.every(({ statusCode }) => statusCode === '400'))
+  assert.equal(result.examinedFromUtc, '2026-08-16T12:00:00.000Z'); assert.equal(result.historyComplete, true)
+  assert.deepEqual(calls[0].values, ['203', '2026-08-16T12:00:00.000Z', '2026-08-18T12:00:00.000Z', config.effectiveCutoverUtc, 'B', '400', 'Recorded B state'])
+  assert.match(calls[0].sql, /machine_status_events/); assert.doesNotMatch(calls[0].sql, /machine_status_history/)
+  assert.match(calls[0].sql, /machine_id = \$1/); assert.match(calls[0].sql, /started_at >= \$2::timestamptz/); assert.match(calls[0].sql, /started_at < \$3::timestamptz/)
+  assert.match(calls[0].sql, /IS NOT DISTINCT FROM ROW\(\$5::text, \$6::text, \$7::text\)/)
+  assert.doesNotMatch(calls[0].sql, /machine_status_poll_runs|machine_status_current|raw_payload|telemetry/i)
+  assert.doesNotMatch(calls[0].sql, /\b(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|CREATE|ALTER|DROP|GRANT|REVOKE)\b/i)
+})
+
+test('exact identity history stops before 31 days once the requested match limit is reached', async () => {
+  let calls = 0
+  const executor: RadiusQueryExecutor = { query: async () => {
+    calls += 1
+    return { rows: [{ rowsConsidered: 5, states: [
+      historyState('2026-08-16T13:00:00.000Z'),
+      historyState('2026-08-16T13:01:00.000Z', { eventType: 'G', statusCode: '1', statusDescription: 'Run' }),
+      historyState('2026-08-17T13:00:00.000Z'),
+    ] }] }
+  } }
+  const result = await new RadiusRepository(executor, config, 'America/Chicago').getExactIdentityHistory(historyInput({ maximumOccurrences: 2 }))
+  assert.equal(calls, 1); assert.equal(result.occurrences.length, 2); assert.equal(result.examinedFromUtc, '2026-08-16T12:00:00.000Z')
+})
+
+test('exact identity history clamps exhaustive searching to a maximum of 31 days', async () => {
+  const calls: Array<{ values?: unknown[] }> = []
+  const executor: RadiusQueryExecutor = { query: async (_sql, values) => { calls.push({ values }); return { rows: [{ rowsConsidered: 0, states: [] }] } } }
+  const result = await new RadiusRepository(executor, config, 'America/Chicago').getExactIdentityHistory(historyInput({ fromUtc: '2026-06-01T12:00:00.000Z' }))
+  assert.equal(result.examinedFromUtc, '2026-07-18T12:00:00.000Z'); assert.equal(result.examinedToUtc, '2026-08-18T12:00:00.000Z')
+  assert.equal(result.historyComplete, true); assert.ok(calls.length > 1); assert.ok(calls.length <= 17)
+  assert.ok(calls.every(({ values }) => Date.parse(String(values?.[2])) - Date.parse(String(values?.[1])) <= 2 * 24 * 60 * 60_000))
+})
+
+test('exact identity history splits cleanly at cutover and uses compact then legacy slices', async () => {
+  const calls: Array<{ sql: string; values?: unknown[] }> = []
+  const executor: RadiusQueryExecutor = { query: async (sql, values) => { calls.push({ sql, values }); return { rows: [{ rowsConsidered: 0, states: [] }] } } }
+  await new RadiusRepository(executor, config, 'America/Chicago').getExactIdentityHistory(historyInput({ fromUtc: '2026-08-08T12:00:00.000Z', toUtc: '2026-08-12T12:00:00.000Z' }))
+  assert.match(calls[0]!.sql, /machine_status_events/); assert.ok(calls.slice(1).every(({ sql }) => /machine_status_history/.test(sql)))
+  assert.equal(calls[0]!.values?.[1], config.effectiveCutoverUtc); assert.equal(calls[1]!.values?.[2], config.effectiveCutoverUtc)
+  assert.ok(calls.every(({ sql }) => !(/machine_status_events/.test(sql) && /machine_status_history/.test(sql))))
+})
+
+test('exact identity history deduplicates slice boundaries and preserves previous and next identities', async () => {
+  let calls = 0
+  const otherBefore = { eventType: 'M', statusCode: '16', statusDescription: 'Make Ready' }
+  const otherAfter = { eventType: 'G', statusCode: '1', statusDescription: 'Run' }
+  const executor: RadiusQueryExecutor = { query: async () => {
+    calls += 1
+    return { rows: [{ rowsConsidered: 3, states: calls === 1
+      ? [historyState('2026-08-15T23:00:00.000Z'), historyState('2026-08-17T00:00:00.000Z', otherAfter)]
+      : [historyState('2026-08-14T00:00:00.000Z', otherBefore), historyState('2026-08-15T23:00:00.000Z')]
     }] }
   } }
-  const result = await new RadiusRepository(executor, config, 'America/Chicago').getExactIdentityHistory({
-    machineId: 203,
-    fromUtc: '2026-07-13T12:00:00.000Z',
-    toUtc: '2026-08-13T12:00:00.000Z',
-    identity: { eventType: 'B', statusCode: '400', statusDescription: 'Recorded B state' },
-    maximumOccurrences: 100,
-  })
-  assert.equal(calls.length, 1); assert.equal(result.queryCount, 1); assert.equal(result.rowsConsidered, 9); assert.equal(result.matchingOccurrencesAvailable, 2)
-  assert.deepEqual(result.occurrences.map(({ statusCode, durationSeconds }) => ({ statusCode, durationSeconds })), [{ statusCode: '400', durationSeconds: 120 }, { statusCode: '400', durationSeconds: 180 }])
-  assert.equal(result.occurrences[0]?.previousIdentity?.statusCode, '401')
-  assert.deepEqual(calls[0].values, ['203', '2026-07-13T12:00:00.000Z', '2026-08-13T12:00:00.000Z', config.effectiveCutoverUtc, 'B', '400', 'Recorded B state', 100])
-  assert.match(calls[0].sql, /machine_status_history/); assert.match(calls[0].sql, /machine_status_events/)
-  assert.match(calls[0].sql, /machine_id = \$1/g); assert.match(calls[0].sql, /"statusCode" IS NOT DISTINCT FROM \$6::text/)
-  assert.match(calls[0].sql, /"atUtc" >= \$2::timestamptz/); assert.match(calls[0].sql, /"atUtc" < \$3::timestamptz/); assert.match(calls[0].sql, /LIMIT \$8/)
-  assert.doesNotMatch(calls[0].sql, /machine_status_poll_runs|machine_status_current|raw_payload/i)
-  assert.doesNotMatch(calls[0].sql, /\b(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|CREATE|ALTER|DROP|GRANT|REVOKE)\b/i)
+  const result = await new RadiusRepository(executor, config, 'America/Chicago').getExactIdentityHistory(historyInput({ fromUtc: '2026-08-14T12:00:00.000Z', maximumOccurrences: 1 }))
+  assert.equal(calls, 2); assert.equal(result.occurrences.length, 1)
+  assert.equal(result.occurrences[0]?.durationSeconds, 25 * 60 * 60)
+  assert.equal(result.occurrences[0]?.previousIdentity?.statusCode, '16'); assert.equal(result.occurrences[0]?.nextIdentity?.statusCode, '1')
+})
+
+test('exact identity history returns newer evidence as partial when an older slice times out', async () => {
+  let calls = 0
+  const executor: RadiusQueryExecutor = { query: async () => {
+    calls += 1
+    if (calls === 2) throw new Error('canceling statement due to statement timeout')
+    return { rows: [{ rowsConsidered: 2, states: [historyState('2026-08-17T00:00:00.000Z')] }] }
+  } }
+  const result = await new RadiusRepository(executor, config, 'America/Chicago').getExactIdentityHistory(historyInput())
+  assert.equal(result.queryCount, 2); assert.equal(result.sliceCount, 2); assert.equal(result.occurrences.length, 1)
+  assert.equal(result.historyComplete, false); assert.equal(result.historyPartialReason, 'QUERY_TIMEOUT'); assert.equal(result.examinedFromUtc, '2026-08-16T12:00:00.000Z')
+})
+
+test('exact identity history fails explicitly when the newest slice times out', async () => {
+  const executor: RadiusQueryExecutor = { query: async () => { throw new Error('canceling statement due to statement timeout') } }
+  await assert.rejects(
+    new RadiusRepository(executor, config, 'America/Chicago').getExactIdentityHistory(historyInput()),
+    /statement timeout/,
+  )
 })

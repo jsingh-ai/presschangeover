@@ -69,7 +69,7 @@ export interface BasicHistoricalSummary {
   metrics: Record<string, IndustrialMetricValue>
   evidenceQuality: EvidenceQuality
   limitations: string[]
-  performance?: { radiusQueryCount: number; rowsConsidered: number; matchingOccurrences: number; matchingOccurrencesAvailable: number; totalMs: number; payloadBytes: number }
+  performance?: { radiusQueryCount: number; historySliceCount?: number; rowsConsidered: number; matchingOccurrences: number; matchingOccurrencesAvailable: number; historyExaminedFromUtc?: string; historyExaminedToUtc?: string; historyComplete?: boolean; historyPartialReason?: 'QUERY_TIMEOUT' | null; totalMs: number; payloadBytes: number }
 }
 
 export function evidenceQuality(input: { timestamps: string[]; range: EvidenceTimeRange; comparisonCount?: number | null; comparisonCoverage?: number | null; historicalSpan?: EvidenceTimeRange | null; contextMatchLevel?: number | null; contextMatchDimensions?: string[]; minimumSupport?: number; excludedReason?: string | null }): EvidenceQuality {

@@ -44,7 +44,19 @@ export interface RadiusIdentityHistoryResult {
   rowsConsidered: number
   matchingOccurrencesAvailable: number
   queryCount: number
+  sliceCount: number
+  examinedFromUtc: string
+  examinedToUtc: string
+  historyComplete: boolean
+  historyPartialReason: 'QUERY_TIMEOUT' | null
 }
+
+interface RadiusIdentityHistoryState extends RadiusExactIdentity {
+  atUtc: string
+}
+
+const HISTORY_SLICE_MS = 2 * 24 * 60 * 60_000
+const HISTORY_MAXIMUM_LOOKBACK_MS = 31 * 24 * 60 * 60_000
 
 const EXPECTED_COLUMNS: Record<string, Record<string, string>> = {
   machine_status_history: {
@@ -459,134 +471,146 @@ export class RadiusRepository {
     maximumOccurrences: number
   }): Promise<RadiusIdentityHistoryResult> {
     const maximumOccurrences = Math.min(100, Math.max(1, Math.floor(input.maximumOccurrences)))
-    const result = await this.executor.query(
-      `WITH legacy_seed AS (
-         SELECT id AS "sourceId", 0 AS "sourceOrder", event_type AS "eventType",
-                status_code AS "statusCode", status_description AS "statusDescription",
-                fetched_at AS "atUtc"
-         FROM ${this.legacyTable}
-         WHERE machine_id = $1
-           AND fetched_at < LEAST($2::timestamptz, $4::timestamptz)
-         ORDER BY fetched_at DESC, id DESC
-         LIMIT 1
-       ), legacy_window AS (
-         SELECT id AS "sourceId", 0 AS "sourceOrder", event_type AS "eventType",
-                status_code AS "statusCode", status_description AS "statusDescription",
-                fetched_at AS "atUtc"
-         FROM ${this.legacyTable}
-         WHERE machine_id = $1
-           AND fetched_at >= $2::timestamptz
-           AND fetched_at <= $3::timestamptz
-           AND fetched_at < $4::timestamptz
-       ), legacy_ordered AS (
-         SELECT legacy_rows.*,
-                lag("atUtc") OVER (ORDER BY "atUtc", "sourceId") AS "previousAtUtc",
-                lag("eventType") OVER (ORDER BY "atUtc", "sourceId") AS "previousEventType",
-                lag("statusCode") OVER (ORDER BY "atUtc", "sourceId") AS "previousStatusCode",
-                lag("statusDescription") OVER (ORDER BY "atUtc", "sourceId") AS "previousStatusDescription"
-         FROM (SELECT * FROM legacy_seed UNION ALL SELECT * FROM legacy_window) AS legacy_rows
-       ), legacy_states AS (
-         SELECT "sourceId", "sourceOrder", "eventType", "statusCode", "statusDescription", "atUtc"
-         FROM legacy_ordered
-         WHERE "atUtc" < $2::timestamptz
-            OR ROW("eventType", "statusCode", "statusDescription")
-               IS DISTINCT FROM ROW("previousEventType", "previousStatusCode", "previousStatusDescription")
-       ), compact_seed AS (
-         SELECT id AS "sourceId", 1 AS "sourceOrder", event_type AS "eventType",
-                status_code AS "statusCode", status_description AS "statusDescription",
-                started_at AS "atUtc"
-         FROM ${this.eventsTable}
-         WHERE machine_id = $1
-           AND started_at >= $4::timestamptz
-           AND started_at < GREATEST($2::timestamptz, $4::timestamptz)
-         ORDER BY started_at DESC, id DESC
-         LIMIT 1
-       ), compact_window AS (
-         SELECT id AS "sourceId", 1 AS "sourceOrder", event_type AS "eventType",
-                status_code AS "statusCode", status_description AS "statusDescription",
-                started_at AS "atUtc"
-         FROM ${this.eventsTable}
-         WHERE machine_id = $1
-           AND started_at >= GREATEST($2::timestamptz, $4::timestamptz)
-           AND started_at <= $3::timestamptz
-       ), hybrid_ordered AS (
-         SELECT hybrid_rows.*,
-                lag("atUtc") OVER (ORDER BY "atUtc", "sourceOrder", "sourceId") AS "previousAtUtc",
-                lag("eventType") OVER (ORDER BY "atUtc", "sourceOrder", "sourceId") AS "previousEventType",
-                lag("statusCode") OVER (ORDER BY "atUtc", "sourceOrder", "sourceId") AS "previousStatusCode",
-                lag("statusDescription") OVER (ORDER BY "atUtc", "sourceOrder", "sourceId") AS "previousStatusDescription"
-         FROM (SELECT * FROM legacy_states UNION ALL SELECT * FROM compact_seed UNION ALL SELECT * FROM compact_window) AS hybrid_rows
-       ), hybrid_states AS (
-         SELECT * FROM hybrid_ordered
-         WHERE "previousAtUtc" IS NULL
-            OR ROW("eventType", "statusCode", "statusDescription")
-               IS DISTINCT FROM ROW("previousEventType", "previousStatusCode", "previousStatusDescription")
-       ), annotated AS (
-         SELECT *,
-                lag("eventType") OVER (ORDER BY "atUtc", "sourceOrder", "sourceId") AS "neighborPreviousEventType",
-                lag("statusCode") OVER (ORDER BY "atUtc", "sourceOrder", "sourceId") AS "neighborPreviousStatusCode",
-                lag("statusDescription") OVER (ORDER BY "atUtc", "sourceOrder", "sourceId") AS "neighborPreviousStatusDescription",
-                lead("atUtc") OVER (ORDER BY "atUtc", "sourceOrder", "sourceId") AS "nextAtUtc",
-                lead("eventType") OVER (ORDER BY "atUtc", "sourceOrder", "sourceId") AS "neighborNextEventType",
-                lead("statusCode") OVER (ORDER BY "atUtc", "sourceOrder", "sourceId") AS "neighborNextStatusCode",
-                lead("statusDescription") OVER (ORDER BY "atUtc", "sourceOrder", "sourceId") AS "neighborNextStatusDescription"
-         FROM hybrid_states
-       ), candidates AS (
-         SELECT * FROM annotated
-         WHERE "atUtc" >= $2::timestamptz AND "atUtc" <= $3::timestamptz
-       ), matching AS (
-         SELECT * FROM candidates
-         WHERE "atUtc" < $3::timestamptz
-           AND "eventType" = $5::text
-           AND "statusCode" IS NOT DISTINCT FROM $6::text
-           AND "statusDescription" = $7::text
-       ), selected AS (
-         SELECT * FROM matching ORDER BY "atUtc" DESC, "sourceOrder" DESC, "sourceId" DESC LIMIT $8
-       )
-       SELECT (SELECT count(*)::integer FROM candidates) AS "rowsConsidered",
-              (SELECT count(*)::integer FROM matching) AS "matchingOccurrencesAvailable",
-              coalesce((
-                SELECT jsonb_agg(jsonb_build_object(
-                  'eventType', "eventType", 'statusCode', "statusCode", 'statusDescription', "statusDescription",
-                  'startUtc', "atUtc", 'endUtc', LEAST(coalesce("nextAtUtc", $3::timestamptz), $3::timestamptz),
-                  'previousIdentity', CASE WHEN "neighborPreviousEventType" IS NULL THEN NULL ELSE jsonb_build_object('eventType', "neighborPreviousEventType", 'statusCode', "neighborPreviousStatusCode", 'statusDescription', "neighborPreviousStatusDescription") END,
-                  'nextIdentity', CASE WHEN "neighborNextEventType" IS NULL THEN NULL ELSE jsonb_build_object('eventType', "neighborNextEventType", 'statusCode', "neighborNextStatusCode", 'statusDescription', "neighborNextStatusDescription") END
-                ) ORDER BY "atUtc" ASC)
-                FROM selected
-              ), '[]'::jsonb) AS "occurrences"`,
-      [
-        String(input.machineId), input.fromUtc, input.toUtc, this.config.effectiveCutoverUtc,
-        input.identity.eventType, input.identity.statusCode, input.identity.statusDescription,
-        maximumOccurrences,
-      ],
-    )
-    const row = result.rows[0] ?? {}
-    const rawOccurrences = Array.isArray(row.occurrences)
-      ? row.occurrences
-      : typeof row.occurrences === 'string'
-        ? JSON.parse(row.occurrences) as unknown[]
-        : []
-    const occurrences = rawOccurrences.flatMap((value): RadiusIdentityHistoryOccurrence[] => {
-      if (!value || typeof value !== 'object' || Array.isArray(value)) return []
-      const candidate = value as Record<string, unknown>
-      const identity = exactIdentityFromJson(candidate)
-      if (!identity) return []
-      const startUtc = toUtc(candidate.startUtc, 'history start timestamp')
-      const endUtc = toUtc(candidate.endUtc, 'history end timestamp')
-      return [{
-        ...identity,
-        startUtc,
+    const requestedToMs = Date.parse(input.toUtc)
+    const requestedFromMs = Math.max(Date.parse(input.fromUtc), requestedToMs - HISTORY_MAXIMUM_LOOKBACK_MS)
+    const cutoverMs = Date.parse(this.config.effectiveCutoverUtc)
+    if (!Number.isFinite(requestedFromMs) || !Number.isFinite(requestedToMs) || requestedFromMs >= requestedToMs) throw new Error('Invalid Radius identity history range')
+
+    const states: RadiusIdentityHistoryState[] = []
+    let rowsConsidered = 0
+    let queryCount = 0
+    let cursorMs = requestedToMs
+    let examinedFromMs = requestedToMs
+    let historyPartialReason: RadiusIdentityHistoryResult['historyPartialReason'] = null
+
+    const sameIdentity = (left: RadiusExactIdentity, right: RadiusExactIdentity) => left.eventType === right.eventType && left.statusCode === right.statusCode && left.statusDescription === right.statusDescription
+    const collapsedStates = () => {
+      const ordered = [...states].sort((left, right) => Date.parse(left.atUtc) - Date.parse(right.atUtc))
+      const collapsed: RadiusIdentityHistoryState[] = []
+      for (const state of ordered) {
+        const previous = collapsed.at(-1)
+        if (previous && sameIdentity(previous, state)) continue
+        collapsed.push(state)
+      }
+      return collapsed
+    }
+    const matchingCount = () => collapsedStates().filter((state) => {
+      const atMs = Date.parse(state.atUtc)
+      return atMs >= examinedFromMs && atMs < requestedToMs && sameIdentity(state, input.identity)
+    }).length
+
+    while (cursorMs > requestedFromMs && matchingCount() < maximumOccurrences) {
+      const compact = cursorMs > cutoverMs
+      const sourceBoundaryMs = compact ? cutoverMs : requestedFromMs
+      const sliceFromMs = Math.max(requestedFromMs, sourceBoundaryMs, cursorMs - HISTORY_SLICE_MS)
+      const sliceFromUtc = new Date(sliceFromMs).toISOString()
+      const sliceToUtc = new Date(cursorMs).toISOString()
+      const sourceTable = compact ? this.eventsTable : this.legacyTable
+      const timestampColumn = compact ? 'started_at' : 'fetched_at'
+      const sourceFloor = compact ? `AND ${timestampColumn} >= $4::timestamptz` : `AND ${timestampColumn} < $4::timestamptz`
+      const collapseSql = compact
+        ? 'SELECT * FROM source_rows'
+        : `SELECT * FROM source_ordered
+           WHERE "atUtc" < $2::timestamptz
+              OR ROW("eventType", "statusCode", "statusDescription")
+                 IS DISTINCT FROM ROW("collapsePreviousEventType", "collapsePreviousStatusCode", "collapsePreviousStatusDescription")`
+      try {
+        queryCount += 1
+        const result = await this.executor.query(
+          `WITH seed AS (
+             SELECT id AS "sourceId", event_type AS "eventType", status_code AS "statusCode",
+                    status_description AS "statusDescription", ${timestampColumn} AS "atUtc"
+             FROM ${sourceTable}
+             WHERE machine_id = $1 AND ${timestampColumn} < $2::timestamptz ${sourceFloor}
+             ORDER BY ${timestampColumn} DESC, id DESC LIMIT 1
+           ), window_rows AS (
+             SELECT id AS "sourceId", event_type AS "eventType", status_code AS "statusCode",
+                    status_description AS "statusDescription", ${timestampColumn} AS "atUtc"
+             FROM ${sourceTable}
+             WHERE machine_id = $1 AND ${timestampColumn} >= $2::timestamptz
+               AND ${timestampColumn} < $3::timestamptz ${sourceFloor}
+           ), source_rows AS (
+             SELECT * FROM seed UNION ALL SELECT * FROM window_rows
+           ), source_ordered AS (
+             SELECT source_rows.*,
+                    lag("eventType") OVER (ORDER BY "atUtc", "sourceId") AS "collapsePreviousEventType",
+                    lag("statusCode") OVER (ORDER BY "atUtc", "sourceId") AS "collapsePreviousStatusCode",
+                    lag("statusDescription") OVER (ORDER BY "atUtc", "sourceId") AS "collapsePreviousStatusDescription"
+             FROM source_rows
+           ), slice_states AS (${collapseSql}), annotated_states AS (
+             SELECT "sourceId", "eventType", "statusCode", "statusDescription", "atUtc",
+                    row_number() OVER (ORDER BY "atUtc", "sourceId") AS "stateOrder",
+                    lag("eventType") OVER (ORDER BY "atUtc", "sourceId") AS "previousEventType",
+                    lag("statusCode") OVER (ORDER BY "atUtc", "sourceId") AS "previousStatusCode",
+                    lag("statusDescription") OVER (ORDER BY "atUtc", "sourceId") AS "previousStatusDescription",
+                    lead("eventType") OVER (ORDER BY "atUtc", "sourceId") AS "nextEventType",
+                    lead("statusCode") OVER (ORDER BY "atUtc", "sourceId") AS "nextStatusCode",
+                    lead("statusDescription") OVER (ORDER BY "atUtc", "sourceId") AS "nextStatusDescription"
+             FROM slice_states
+           ), relevant_states AS (
+             SELECT "sourceId", "eventType", "statusCode", "statusDescription", "atUtc"
+             FROM annotated_states
+             WHERE "stateOrder" = 1
+                OR ROW("eventType", "statusCode", "statusDescription") IS NOT DISTINCT FROM ROW($5::text, $6::text, $7::text)
+                OR ROW("previousEventType", "previousStatusCode", "previousStatusDescription") IS NOT DISTINCT FROM ROW($5::text, $6::text, $7::text)
+                OR ROW("nextEventType", "nextStatusCode", "nextStatusDescription") IS NOT DISTINCT FROM ROW($5::text, $6::text, $7::text)
+           )
+           SELECT (SELECT count(*)::integer FROM window_rows) AS "rowsConsidered",
+                  coalesce((SELECT jsonb_agg(jsonb_build_object(
+                    'eventType', "eventType", 'statusCode', "statusCode",
+                    'statusDescription', "statusDescription", 'atUtc', "atUtc"
+                  ) ORDER BY "atUtc", "sourceId") FROM relevant_states), '[]'::jsonb) AS "states"`,
+          [String(input.machineId), sliceFromUtc, sliceToUtc, this.config.effectiveCutoverUtc, input.identity.eventType, input.identity.statusCode, input.identity.statusDescription],
+        )
+        const row = result.rows[0] ?? {}
+        rowsConsidered += positiveInteger(row.rowsConsidered ?? 0, 'history rows considered')
+        const rawStates = Array.isArray(row.states) ? row.states : typeof row.states === 'string' ? JSON.parse(row.states) as unknown[] : []
+        for (const value of rawStates) {
+          const identity = exactIdentityFromJson(value)
+          if (!identity || !value || typeof value !== 'object' || Array.isArray(value)) continue
+          states.push({ ...identity, atUtc: toUtc((value as Record<string, unknown>).atUtc, 'history state timestamp') })
+        }
+        examinedFromMs = sliceFromMs
+        cursorMs = sliceFromMs
+      } catch (error) {
+        if (examinedFromMs === requestedToMs || !/statement timeout|canceling statement due to statement timeout/i.test(error instanceof Error ? error.message : String(error))) throw error
+        historyPartialReason = 'QUERY_TIMEOUT'
+        break
+      }
+    }
+
+    const orderedStates = collapsedStates()
+    const matchingIndexes = orderedStates.flatMap((state, index) => {
+      const atMs = Date.parse(state.atUtc)
+      return atMs >= examinedFromMs && atMs < requestedToMs && sameIdentity(state, input.identity) ? [index] : []
+    })
+    const selectedIndexes = matchingIndexes.slice(-maximumOccurrences)
+    const occurrences = selectedIndexes.map((index): RadiusIdentityHistoryOccurrence => {
+      const state = orderedStates[index]!
+      const previous = orderedStates[index - 1] ?? null
+      const next = orderedStates[index + 1] ?? null
+      const endUtc = next && Date.parse(next.atUtc) < requestedToMs ? next.atUtc : new Date(requestedToMs).toISOString()
+      return {
+        eventType: state.eventType,
+        statusCode: state.statusCode,
+        statusDescription: state.statusDescription,
+        startUtc: state.atUtc,
         endUtc,
-        durationSeconds: Math.max(0, (Date.parse(endUtc) - Date.parse(startUtc)) / 1_000),
-        previousIdentity: exactIdentityFromJson(candidate.previousIdentity),
-        nextIdentity: exactIdentityFromJson(candidate.nextIdentity),
-      }]
+        durationSeconds: Math.max(0, (Date.parse(endUtc) - Date.parse(state.atUtc)) / 1_000),
+        previousIdentity: previous ? { eventType: previous.eventType, statusCode: previous.statusCode, statusDescription: previous.statusDescription } : null,
+        nextIdentity: next ? { eventType: next.eventType, statusCode: next.statusCode, statusDescription: next.statusDescription } : null,
+      }
     })
     return {
       occurrences,
-      rowsConsidered: positiveInteger(row.rowsConsidered ?? 0, 'history rows considered'),
-      matchingOccurrencesAvailable: positiveInteger(row.matchingOccurrencesAvailable ?? 0, 'history matching occurrences'),
-      queryCount: 1,
+      rowsConsidered,
+      matchingOccurrencesAvailable: matchingIndexes.length,
+      queryCount,
+      sliceCount: queryCount,
+      examinedFromUtc: new Date(examinedFromMs).toISOString(),
+      examinedToUtc: new Date(requestedToMs).toISOString(),
+      historyComplete: historyPartialReason === null,
+      historyPartialReason,
     }
   }
 

@@ -115,9 +115,9 @@ function rawRepresentative(occurrence: RawExplorerOccurrence, detail: RawDetail,
   }
 }
 
-export async function validateRawRadiusOverHttp(input: { api: ProcessIntelligenceExplorerHttpClient; startUtc: string; endUtc: string }) {
+export async function validateRawRadiusOverHttp(input: { api: ProcessIntelligenceExplorerHttpClient; startUtc: string; endUtc: string; maximumRepresentatives?: number }) {
   const began = Date.now(); const mark = input.api.mark()
-  const identities = (await input.api.rawIdentities(input.startUtc, input.endUtc)).sort((left, right) => Number(right.eventType !== 'G') - Number(left.eventType !== 'G') || Date.parse(right.lastSeenUtc ?? '') - Date.parse(left.lastSeenUtc ?? '') || right.eventCount - left.eventCount).slice(0, 2)
+  const identities = (await input.api.rawIdentities(input.startUtc, input.endUtc)).sort((left, right) => Number(right.eventType !== 'G') - Number(left.eventType !== 'G') || Date.parse(right.lastSeenUtc ?? '') - Date.parse(left.lastSeenUtc ?? '') || right.eventCount - left.eventCount).slice(0, Math.min(2, Math.max(1, input.maximumRepresentatives ?? 2)))
   const representatives = []
   for (const identity of identities) {
     const explored = await input.api.rawExplore({ fromUtc: input.startUtc, toUtc: input.endUtc, identity: exactIdentity(identity) as RawExplorerIdentity, changeLookbackMinutes: 30, chartContextMinutes: 40 })
