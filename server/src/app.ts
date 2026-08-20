@@ -105,6 +105,12 @@ function isJsonBodyParseError(error: unknown): boolean {
   return parseError.status === 400 && parseError.type === 'entity.parse.failed'
 }
 
+function isPayloadTooLargeError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false
+  const payloadError = error as { status?: unknown; type?: unknown }
+  return payloadError.status === 413 && payloadError.type === 'entity.too.large'
+}
+
 function requestIdFrom(request: Request): string {
   const supplied = request.header('X-Request-Id')
   return supplied && SAFE_REQUEST_ID_PATTERN.test(supplied)
@@ -941,6 +947,12 @@ export function createApp({
       _next: NextFunction,
     ) => {
       const requestId = String(response.locals.requestId)
+
+      if (isPayloadTooLargeError(error)) {
+        if (logger) logger.error(`[${requestId}] ${request.method} ${request.path} 413 request_payload_too_large`)
+        response.status(413).json({ error: 'request_payload_too_large' })
+        return
+      }
 
       if (isJsonBodyParseError(error)) {
         if (logger) logger.error(`[${requestId}] ${request.method} ${request.path} 400 invalid_request_body`)

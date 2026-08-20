@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { getTelemetryEventCatalog, getTelemetryEventDetail, getTelemetryEventHistoricalSummary, getTelemetryEventLearningReport, plotTelemetryEventRawSignal, plotTelemetryEventSignal, previewTelemetryEventVariable, searchTelemetryEventRawCatalog, searchTelemetryEvents } from '../api/process-intelligence-api'
+import { ApiRequestError, getTelemetryEventCatalog, getTelemetryEventDetail, getTelemetryEventHistoricalSummary, getTelemetryEventLearningReport, plotTelemetryEventRawSignal, plotTelemetryEventSignal, previewTelemetryEventVariable, searchTelemetryEventRawCatalog, searchTelemetryEvents } from '../api/process-intelligence-api'
 import { createCustomRange, createPresetRange, defaultCustomValues, formatPlantDateTime, formatSelectedRange, RangeValidationError, type SelectedRange } from '../time-ranges'
 import type { BasicHistoricalSummary, EventLearningReport as EventLearningReportContract, EventSignalPattern, RadiusPressKey, RawExplorerChangedSignal, RawExplorerOccurrence, RawExplorerPlotResult, RawExplorerSignalHistory, RawUnmappedChangedSignal, RawUnmappedHistory, RawUnmappedPlotResult, TelemetryEventCatalog, TelemetryEventDetail, TelemetryEventOccurrence, TelemetryEventPreview, TelemetryEventRawCatalogItem, TelemetryEventRawCatalogResult, TelemetryEventRule, TelemetryEventScalar, TelemetryEventSearchInput, TelemetryEventSource } from '../types/api'
 import type { TimedNumericSample } from '../types/evidence'
@@ -16,6 +16,12 @@ const PIN_STORAGE_KEY = 'process-intelligence-telemetry-event-pins'
 
 export function filterTelemetryEventOccurrences(occurrences: TelemetryEventOccurrence[], pressFilter: ResultPressFilter) {
   return pressFilter === 'all' ? occurrences : occurrences.filter(({ pressKey }) => pressKey === pressFilter)
+}
+
+export function telemetryEventReportFailureMessage(error: unknown) {
+  return error instanceof ApiRequestError && (error.status === 404 || error.status === 503)
+    ? 'The event report is temporarily unavailable. Manual evidence remains available above.'
+    : 'The bounded event report could not be generated. Manual evidence remains available above.'
 }
 
 function isAlwaysPinnedCanonical(pin: Pin) {
@@ -231,9 +237,9 @@ function EventInvestigation({ occurrence, occurrences, rule, pins, onPinsChange,
   useEffect(() => {
     if (!detail || report) return
     const controller = new AbortController(); setReportLoading(true); setReportError(undefined)
-    void getTelemetryEventLearningReport(occurrence, occurrences, controller.signal).then((value) => { if (!controller.signal.aborted) setReport(value) }).catch((caught) => { if ((caught as Error).name !== 'AbortError') setReportError('The bounded event report could not be generated. Manual evidence remains available above.') }).finally(() => { if (!controller.signal.aborted) setReportLoading(false) })
+    void getTelemetryEventLearningReport(occurrence, occurrences, rule, controller.signal).then((value) => { if (!controller.signal.aborted) setReport(value) }).catch((caught) => { if ((caught as Error).name !== 'AbortError') setReportError(telemetryEventReportFailureMessage(caught)) }).finally(() => { if (!controller.signal.aborted) setReportLoading(false) })
     return () => controller.abort()
-  }, [detail, occurrence, occurrences, report])
+  }, [detail, occurrence, occurrences, report, rule])
 
   async function loadPin(pin: Pin) {
     if (pin.kind === 'canonical') {

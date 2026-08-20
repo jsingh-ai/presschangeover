@@ -985,6 +985,8 @@ export interface EventFingerprintFinding extends EventSignalPattern {
 
 export interface EventLearningReport {
   version: 1; reportKind: 'raw_radius' | 'telemetry_event'; title: string
+  status?: 'SUCCESS' | 'PARTIAL' | 'INSUFFICIENT_EVIDENCE'
+  relationshipAnalysis?: { status: 'AVAILABLE' | 'UNAVAILABLE'; reason: 'RELATIONSHIP_ANALYSIS_FAILED' | null }
   target: Record<string, string | number | boolean | null>
   selectedOccurrence: { occurrenceId: string; startUtc: string; endUtc: string; label: string }
   recordedTime: { startUtc: string; endUtc: string }; physicalTiming: object

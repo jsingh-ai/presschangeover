@@ -36,6 +36,7 @@ import type {
   TelemetryEventRawCatalogResult,
   TelemetryEventDetail,
   TelemetryEventOccurrence,
+  TelemetryEventRule,
   TelemetryEventSearchInput,
   TelemetryEventSearchResult,
   TelemetryEventSource,
@@ -237,8 +238,16 @@ export function getTelemetryEventHistoricalSummary(occurrence: TelemetryEventOcc
   return sendJson<BasicHistoricalSummary>('/api/telemetry/event-explorer/history', 'POST', { occurrence, occurrences: occurrences.slice(0, 500) }, signal)
 }
 
-export function getTelemetryEventLearningReport(occurrence: TelemetryEventOccurrence, occurrences: TelemetryEventOccurrence[], signal?: AbortSignal) {
-  return sendJson<EventLearningReport>('/api/telemetry/event-explorer/report', 'POST', { occurrence, occurrences: occurrences.slice(0, 500) }, signal)
+export function boundedTelemetryEventReportOccurrences(selected: TelemetryEventOccurrence, occurrences: TelemetryEventOccurrence[]) {
+  const floor = Date.parse(selected.startUtc) - 24 * 60 * 60_000
+  const sameDefinition = (item: TelemetryEventOccurrence) => item.pressKey === selected.pressKey && item.sourceKind === selected.sourceKind && item.rawIdentity === selected.rawIdentity && item.deckNumber === selected.deckNumber && item.eventType === selected.eventType && (selected.eventType !== 'value_change' || item.previousValue === selected.previousValue && item.newValue === selected.newValue)
+  const comparable = occurrences.filter((item) => item.occurrenceId !== selected.occurrenceId && sameDefinition(item) && Date.parse(item.startUtc) >= floor && Date.parse(item.startUtc) <= Date.parse(selected.startUtc)).sort((left, right) => Date.parse(left.startUtc) - Date.parse(right.startUtc)).slice(-29)
+  return [...comparable, selected]
+}
+
+export function getTelemetryEventLearningReport(occurrence: TelemetryEventOccurrence, occurrences: TelemetryEventOccurrence[], rule: TelemetryEventRule, signal?: AbortSignal) {
+  const detector: Record<string, string | number | boolean | null> = rule.kind === 'threshold' ? { operator: rule.operator, threshold: rule.threshold } : rule.kind === 'delta' ? { configuredDirection: rule.direction, configuredDelta: rule.amount, deltaWindowMinutes: rule.windowMinutes } : { match: rule.match }
+  return sendJson<EventLearningReport>('/api/telemetry/event-explorer/report', 'POST', { occurrence, rule, occurrences: boundedTelemetryEventReportOccurrences(occurrence, occurrences) }, signal).then((report) => ({ ...report, target: { ...report.target, ...detector } }))
 }
 
 export function plotTelemetryEventSignal(occurrence: TelemetryEventOccurrence, plottedSignal: RawExplorerSignalIdentity, signal?: AbortSignal) {
