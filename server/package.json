@@ -7,6 +7,9 @@
     "dev": "set TELEMETRY_API_BASE_URL=http://10.0.1.157:5080&& tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
+    "backfill:job-intelligence": "node dist/job-intelligence/backfill.js",
+    "backfill:job-intelligence:dev": "tsx src/job-intelligence/backfill.ts",
+    "validate:job-intelligence-history": "node dist/job-intelligence/representative-validation.js",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json"
   },

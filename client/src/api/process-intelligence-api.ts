@@ -46,7 +46,11 @@ import type {
   EventLearningReport,
   JobAnalysisDimension,
   JobGroupDefinition,
-  JobIntelligenceReport,
+  JobRefinement,
+  FleetJobIntelligenceReport,
+  JobIntelligenceValues,
+  JobRunInspector,
+  HistoricalRunSort,
 } from '../types/api'
 import type {
   CuratedPhysicalEvidence,
@@ -178,16 +182,30 @@ export function getRadiusHealth(signal?: AbortSignal) {
   return getJson<RadiusHealth>('/api/radius/health', signal)
 }
 
-export function getJobIntelligenceReport(input: { pressKey: RadiusPressKey; fromUtc: string; toUtc: string; analyzeBy: JobAnalysisDimension; group?: JobGroupDefinition }, signal?: AbortSignal) {
-  const parameters = new URLSearchParams({ pressKey: input.pressKey, fromUtc: input.fromUtc, toUtc: input.toUtc, analyzeBy: input.analyzeBy })
-  if (input.group) {
-    parameters.set('operator', input.group.operator); parameters.set('query', input.group.query)
-    if (input.group.positionStart !== undefined) parameters.set('positionStart', String(input.group.positionStart))
-    if (input.group.positionEnd !== undefined) parameters.set('positionEnd', String(input.group.positionEnd))
-    if (input.group.segmentIndex !== undefined) parameters.set('segmentIndex', String(input.group.segmentIndex))
-    if (input.group.delimiter !== undefined) parameters.set('delimiter', input.group.delimiter)
-  }
-  return getJson<JobIntelligenceReport>(`/api/job-intelligence/report?${parameters}`, signal)
+function addJobGroup(parameters: URLSearchParams, group: JobGroupDefinition) {
+  parameters.set('operator', group.operator); parameters.set('query', group.query)
+  if (group.positionStart !== undefined) parameters.set('positionStart', String(group.positionStart))
+  if (group.positionEnd !== undefined) parameters.set('positionEnd', String(group.positionEnd))
+  if (group.segmentIndex !== undefined) parameters.set('segmentIndex', String(group.segmentIndex))
+  if (group.delimiter !== undefined) parameters.set('delimiter', group.delimiter)
+}
+
+export function getJobIntelligenceValues(input: { fromUtc: string; toUtc: string; analyzeBy: JobAnalysisDimension; query?: string; limit?: number }, signal?: AbortSignal) {
+  const parameters = new URLSearchParams({ fromUtc: input.fromUtc, toUtc: input.toUtc, analyzeBy: input.analyzeBy, limit: String(input.limit ?? 50) })
+  if (input.query) parameters.set('query', input.query)
+  return getJson<JobIntelligenceValues>(`/api/job-intelligence/values?${parameters}`, signal)
+}
+
+export function getJobIntelligenceReport(input: { fromUtc: string; toUtc: string; analyzeBy: JobAnalysisDimension; group: JobGroupDefinition; refinements?: JobRefinement[]; focusPressKey?: RadiusPressKey | null; offset?: number; limit?: number; sort?: HistoricalRunSort }, signal?: AbortSignal) {
+  const parameters = new URLSearchParams({ fromUtc: input.fromUtc, toUtc: input.toUtc, analyzeBy: input.analyzeBy, offset: String(input.offset ?? 0), limit: String(input.limit ?? 50), sort: input.sort ?? 'newest' })
+  addJobGroup(parameters, input.group)
+  if (input.refinements?.length) parameters.set('refinements', JSON.stringify(input.refinements))
+  if (input.focusPressKey) parameters.set('focusPressKey', input.focusPressKey)
+  return getJson<FleetJobIntelligenceReport>(`/api/job-intelligence/report?${parameters}`, signal)
+}
+
+export function getJobIntelligenceRun(runId: string, signal?: AbortSignal) {
+  return getJson<JobRunInspector>(`/api/job-intelligence/runs/${encodeURIComponent(runId)}`, signal)
 }
 
 function changeoverParameters(input: ChangeoverRequest): URLSearchParams {

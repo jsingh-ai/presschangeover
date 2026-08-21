@@ -23,6 +23,8 @@ The browser never calls MARKUSPRODSVR or TelemetryQueryApi directly. Process Int
 
 Radius and telemetry are never writable application stores. State-classification drafts and published versions use only `public.classification_documents` in the optional `processintelligence_db` boundary, with the restricted `processintelligence_app` login and `APP_DB_*` configuration. The application refuses source database names and remains read-only when that boundary is absent. Migration provisioning is documented in `docs/state-classification-storage.md`.
 
+Job Intelligence uses that isolated application database only for three minimal, rebuildable derived structures: compact run facts, per-run aggregated exact Radius loss reasons, and tiny materialization checkpoints. It stores no raw telemetry or full Radius episode history and never writes to a source system. Higher-level fleet analytics remain dynamic.
+
 The existing Radius/opc-radius production application on FORMPRODSVR02 remains isolated and untouched. Process Intelligence now contains an optional Radius boundary in the Node backend. It remains disabled until live schema, timestamp semantics, exact production status, machine mappings, and a dedicated SELECT-only role are verified and configured externally. React never connects to PostgreSQL.
 
 ## Source and deployment convention

@@ -18,6 +18,7 @@ const DEFAULT_AI_INVESTIGATOR_MAX_PARALLEL_TOOLS = 3
 export const DEFAULT_RADIUS_STALE_SECONDS = 180
 export const RADIUS_EFFECTIVE_CUTOVER_UTC = '2026-08-10T14:29:00.415Z'
 export const RADIUS_EXPECTED_MACHINE_COUNT = 12
+export const JOB_INTELLIGENCE_MATERIALIZER_RADIUS_ROLE = 'processintelligence_readonly'
 const MIN_RADIUS_STALE_SECONDS = 1
 const MAX_RADIUS_STALE_SECONDS = 86_400
 
@@ -81,6 +82,12 @@ export interface EnabledRadiusConfig {
 }
 
 export type RadiusConfig = DisabledRadiusConfig | EnabledRadiusConfig
+
+export function loadJobMaterializerRadiusConfig(productionRadius: RadiusConfig): EnabledRadiusConfig {
+  if (!productionRadius.enabled) throw new Error('job_materializer_requires_radius_configuration')
+  if (productionRadius.user !== JOB_INTELLIGENCE_MATERIALIZER_RADIUS_ROLE) throw new Error('job_materializer_requires_existing_production_readonly_role')
+  return { ...productionRadius }
+}
 
 function parseBaseUrl(value: string): string {
   let parsed: URL

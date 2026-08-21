@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net'
 import { createApp } from '../src/app.js'
 import { deriveProductionRuns, evidenceSupport, matchesJobGroup, summarizeIdentities, summarizeRadiusLosses, summarizeTransitions } from '../src/job-intelligence/engine.js'
 import { JobIntelligenceService, readJobProductionContext } from '../src/job-intelligence/service.js'
+import { JobIntelligenceRadiusAcquisitionLimiter } from '../src/job-intelligence/radius-acquisition-limiter.js'
 import type { RadiusService } from '../src/radius/radius-service.js'
 import type { RadiusStatusSegment } from '../src/radius/models.js'
 import type { TelemetryClient } from '../src/telemetry/telemetry-api-client.js'
@@ -89,6 +90,16 @@ describe('Job Intelligence production-run derivation', () => {
     assert.equal(runs[1]!.transitionTiming.metadataFirstSeenToStableSeconds, null)
     assert.equal(runs[1]!.transitionTiming.incomingStableRadiusProductionStartUtc, at(70))
   })
+
+  it('derives running-only stability and canonical actual-speed distributions without treating speed as state', () => {
+    const fixture = context(); fixture.changes = []; fixture.toUtc = at(120)
+    const samples = [10, 50, 65, 75, 110].map((minute, index) => ({ observedAtUtc: at(minute), receivedAtUtc: at(minute), sourceTimestampUtc: at(minute), qualityState: 'good', valueKind: 'number', value: [100, 200, 999, 300, 400][index] }))
+    const runs = deriveProductionRuns({ pressKey: 'press5', fromUtc: start, toUtc: at(120), context: fixture, radiusSegments: [segment(0, 60, 'G', 'Run Production', '10'), segment(60, 70, 'B', 'Web Break', '30'), segment(70, 120, 'G', 'Run Production', '10')], speed: { sourceUnit: 'fpm', canonicalUnitStatus: 'canonical', samples: samples as never[] } })
+    const running = runs[0]!.runningPerformance!
+    assert.equal(running.goodSeconds, 6_600); assert.equal(running.badSeconds, 600); assert.equal(running.interruptions, 1); assert.equal(running.restartCount, 1); assert.equal(running.medianUninterruptedGoodSeconds, 3_300)
+    assert.deepEqual(running.speed, { canonicalId: 'machine.speed.actual', sourceUnit: 'fpm', canonicalUnitStatus: 'canonical', sampleCount: 4, median: 250, p25: 175, p75: 325, p90: 370, timeWeightedMean: 215 })
+    assert.equal(deriveProductionRuns({ pressKey: 'press5', fromUtc: start, toUtc: at(120), context: fixture, radiusSegments: [segment(0, 120, 'G', 'Run Production', '10')] })[0]?.runningPerformance?.speed, null)
+  })
 })
 
 describe('Job Intelligence bounded group matching', () => {
@@ -159,6 +170,60 @@ describe('Job Intelligence grouped acquisition reuse', () => {
     assert.equal(semanticRequests[0]!.canonicalIds.includes('deck.active:1'), true)
     assert.equal(semanticRequests[0]!.canonicalIds.includes('production.material:'), true)
   })
+
+  function fleetAcquisitionFixture() {
+    let radiusAcquisitions = 0; let activeRadiusAcquisitions = 0; let peakRadiusAcquisitions = 0
+    const limiter = new JobIntelligenceRadiusAcquisitionLimiter()
+    const identityFields = ['job', 'order', 'recipe', 'customer', 'material', 'roll'] as const
+    const telemetry = {
+      capabilities: { get: async (pressKey: string) => ({
+        pressKey, sourceId: Number(pressKey.slice(5)), sourceKey: pressKey, displayName: pressKey.replace('press', 'Press '), metadataStatus: 'FRESH',
+        capabilities: [...identityFields.map((name) => ({ canonicalId: `production.${name}`, state: 'SUPPORTED', deckNumbers: [], historyQueryable: true, evidenceKind: 'semantic_history' })), { canonicalId: 'deck.active', state: 'UNSUPPORTED', deckNumbers: [], historyQueryable: false, evidenceKind: null }],
+      }) },
+      context: async (pressKey: string) => ({ ...context(), pressKey, sourceKey: pressKey, displayName: pressKey.replace('press', 'Press ') }),
+    } as unknown as TelemetryFoundationService
+    const radius = {
+      getRawTimeline: async (pressKey: string) => {
+        radiusAcquisitions += 1; activeRadiusAcquisitions += 1; peakRadiusAcquisitions = Math.max(peakRadiusAcquisitions, activeRadiusAcquisitions)
+        await new Promise((resolve) => setTimeout(resolve, 5))
+        activeRadiusAcquisitions -= 1
+        return { pressKey, displayName: pressKey.replace('press', 'Press '), fromUtc: start, toUtc: at(240), segments: [] }
+      },
+    } as unknown as RadiusService
+    return { service: new JobIntelligenceService(radius, telemetry, undefined, () => Date.parse(at(240)), limiter), acquisitions: () => radiusAcquisitions, peakAcquisitions: () => peakRadiusAcquisitions, limiter }
+  }
+
+  it('single-flights two simultaneous equivalent fleet requests into one Radius acquisition per press', async () => {
+    const fixture = fleetAcquisitionFixture()
+    await Promise.all([
+      fixture.service.values({ fromUtc: start, toUtc: at(240), analyzeBy: 'recipe' }, 'equivalent-a'),
+      fixture.service.values({ fromUtc: start, toUtc: at(240), analyzeBy: 'recipe' }, 'equivalent-b'),
+    ])
+    assert.equal(fixture.acquisitions(), 12)
+    const diagnostics = fixture.service.radiusAcquisitionDiagnostics().lastFleet!
+    assert.equal(diagnostics.concurrencyCap, 1); assert.equal(diagnostics.active, 0); assert.equal(diagnostics.queued, 0); assert.equal(diagnostics.peakQueued <= 1, true); assert.equal(diagnostics.peakActive, 1); assert.equal(diagnostics.totalAcquisitions, 12); assert.equal(diagnostics.completed, 12); assert.equal(diagnostics.failed, 0); assert.equal(diagnostics.cancelledWhileQueued, 0)
+  })
+
+  it('single-flights simultaneous values and report requests over the same fleet evidence window', async () => {
+    const fixture = fleetAcquisitionFixture()
+    await Promise.all([
+      fixture.service.values({ fromUtc: start, toUtc: at(240), analyzeBy: 'recipe' }, 'values'),
+      fixture.service.fleetReport({ fromUtc: start, toUtc: at(240), analyzeBy: 'recipe', group: { operator: 'exact', query: 'R1' } }, 'report'),
+    ])
+    assert.equal(fixture.acquisitions(), 12)
+    assert.equal(fixture.service.radiusAcquisitionDiagnostics().lastFleet?.peakActive, 1)
+    assert.equal(fixture.service.radiusAcquisitionDiagnostics().lastFleet?.totalAcquisitions, 12)
+  })
+
+  it('enforces the global cap across distinct fleet scans that cannot single-flight together', async () => {
+    const fixture = fleetAcquisitionFixture()
+    await Promise.all([
+      fixture.service.values({ fromUtc: start, toUtc: at(240), analyzeBy: 'recipe' }, 'distinct-recipe'),
+      fixture.service.values({ fromUtc: start, toUtc: at(240), analyzeBy: 'material' }, 'distinct-material'),
+    ])
+    assert.equal(fixture.acquisitions(), 24); assert.equal(fixture.peakAcquisitions(), 1)
+    assert.equal(fixture.limiter.diagnostics().peakActive, 1); assert.equal(fixture.limiter.diagnostics().active, 0); assert.equal(fixture.limiter.diagnostics().queued, 0)
+  })
 })
 
 describe('Job Intelligence HTTP validation', () => {
@@ -176,11 +241,11 @@ describe('Job Intelligence HTTP validation', () => {
     finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())) }
   }
 
-  it('rejects invalid dimensions and unbounded ranges before source access', async () => {
-    const invalid = await request(`/api/job-intelligence/report?pressKey=press5&analyzeBy=job&fromUtc=${encodeURIComponent(start)}&toUtc=${encodeURIComponent(at(60))}`)
+  it('rejects invalid dimensions and ranges beyond the bounded materialized-history horizon before source access', async () => {
+    const invalid = await request(`/api/job-intelligence/report?analyzeBy=job&operator=exact&query=R-100&fromUtc=${encodeURIComponent(start)}&toUtc=${encodeURIComponent(at(60))}`)
     assert.deepEqual(invalid, { status: 400, body: { error: 'invalid_job_analysis_dimension' } })
-    const tooLargeEnd = new Date(Date.parse(start) + 8 * 24 * 60 * 60_000).toISOString()
-    const tooLarge = await request(`/api/job-intelligence/report?pressKey=press5&analyzeBy=recipe&fromUtc=${encodeURIComponent(start)}&toUtc=${encodeURIComponent(tooLargeEnd)}`)
+    const tooLargeEnd = new Date(Date.parse(start) + 11 * 366 * 24 * 60 * 60_000).toISOString()
+    const tooLarge = await request(`/api/job-intelligence/report?analyzeBy=recipe&operator=exact&query=R-100&fromUtc=${encodeURIComponent(start)}&toUtc=${encodeURIComponent(tooLargeEnd)}`)
     assert.deepEqual(tooLarge, { status: 400, body: { error: 'job_intelligence_range_too_large' } })
   })
 })

@@ -32,8 +32,20 @@ export interface JobRadiusEpisode {
   durationSeconds: number
 }
 
+export interface JobRunLossAggregate {
+  eventType: string
+  statusCode: string | null
+  statusDescription: string
+  category: 'make_ready' | 'bad' | 'other'
+  totalSeconds: number
+  occurrenceCount: number
+  medianEpisodeSeconds: number
+}
+
 export interface ProductionRun {
   runId: string
+  previousRunId?: string | null
+  nextRunId?: string | null
   pressKey: RadiusPressKey
   startUtc: string
   endUtc: string
@@ -53,14 +65,21 @@ export interface ProductionRun {
     inferredBoundary: boolean
   }
   dataInterrupted: boolean
+  identityAvailability?: Partial<Record<JobAnalysisDimension, 'available' | 'unavailable' | 'temporarily_unavailable'>>
   coveragePercent: number
   identityConfidence: 'high' | 'moderate' | 'limited'
   goodSeconds: number
   makeReadySeconds: number
   badSeconds: number
   otherRadiusSeconds: number
+  unavailableSeconds?: number
+  productionStateEfficiency?: number | null
   productionInterruptionCount: number
+  interruptionsPerProductionHour?: number | null
   transitionToStableProductionSeconds: number | null
+  transitionMakeReadySeconds?: number | null
+  transitionBadSeconds?: number | null
+  transitionValid?: boolean
   transitionMetric: 'radius_stable_production_proxy' | 'unavailable'
   transitionTiming: {
     outgoingStableRadiusProductionEndUtc: string | null
@@ -72,6 +91,7 @@ export interface ProductionRun {
     timingUncertaintySeconds: number | null
   }
   radiusEpisodes: JobRadiusEpisode[]
+  radiusLossAggregates?: JobRunLossAggregate[]
   deckConfiguration: {
     activeDecks: number[]
     reusedDecks: number[]
@@ -80,6 +100,77 @@ export interface ProductionRun {
     changedDeckCount: number
     evidenceCanonicalId: 'deck.active'
   } | null
+  runningPerformance?: {
+    stableProductionStartUtc: string | null
+    observedSeconds: number
+    goodSeconds: number
+    badSeconds: number
+    interruptions: number
+    interruptionsPerProductionHour: number | null
+    medianUninterruptedGoodSeconds: number | null
+    restartCount: number
+    speed: null | {
+      canonicalId: 'machine.speed.actual'
+      sourceUnit: string | null
+      canonicalUnitStatus: string | null
+      sampleCount: number
+      median: number
+      p25: number
+      p75: number
+      p90: number
+      timeWeightedMean: number | null
+    }
+  }
+}
+
+export interface JobMetricDistribution { n: number; median: number | null; p25: number | null; p75: number | null; p90: number | null }
+
+export interface JobRefinement { dimension: JobAnalysisDimension; group: JobGroupDefinition; previousIdentity?: boolean }
+
+export interface FleetPressResult extends PressAffinity {
+  unavailablePercent: number
+  changeover: { transitionCount: number; durationSeconds: JobMetricDistribution; makeReadySecondsPerTransition: number | null; badSecondsPerTransition: number | null; changedDecks: JobMetricDistribution | null }
+  running: { runCount: number; goodPercent: number; badPercent: number; interruptionCount: number; interruptionsPerProductionHour: number | null; uninterruptedGoodSeconds: JobMetricDistribution; restartCount: number; speed: null | { sourceUnit: string | null; canonicalUnitStatus: string | null; distribution: JobMetricDistribution; timeWeightedMean: number | null } }
+  radiusLosses: RadiusLossSummary[]
+  transitions: TransitionSummary[]
+  deckEvidence: 'available' | 'unavailable'
+}
+
+export interface FleetRadiusLossComparison {
+  eventType: string; statusCode: string | null; statusDescription: string
+  presses: Array<{ pressKey: RadiusPressKey; totalSeconds: number; secondsPerRun: number; occurrenceCount: number; occurrencesPerRun: number; medianEpisodeSeconds: number; evidenceRuns: Array<{ runId: string; startUtc: string; totalSeconds: number; occurrenceCount: number }> }>
+}
+
+export interface FleetTransitionMatrixCell { previousValue: string; currentValue: string; transitionCount: number; durationSeconds: JobMetricDistribution; makeReadySeconds: JobMetricDistribution; badSeconds: JobMetricDistribution; support: EvidenceSupport; pressKeys: RadiusPressKey[] }
+
+export const HISTORICAL_RUN_SORTS = ['newest', 'worst_good', 'longest_make_ready', 'most_bad', 'longest_transition', 'most_interruptions', 'highest_speed', 'lowest_speed'] as const
+export type HistoricalRunSort = (typeof HISTORICAL_RUN_SORTS)[number]
+
+export interface HistoricalRunSummary {
+  runId: string; pressKey: RadiusPressKey; startUtc: string; endUtc: string; identities: ProductionRun['identities']; previousIdentities: ProductionRun['previousIdentities']; transitionSeconds: number | null
+  goodPercent: number; makeReadyPercent: number; badPercent: number; unavailablePercent: number; interruptions: number; medianSpeed: number | null; changedDeckCount: number | null; confidence: ProductionRun['identityConfidence']; dataInterrupted: boolean
+}
+
+export interface FleetJobIntelligenceReport {
+  version: 'job-intelligence-fleet-v2'; generatedAtUtc: string; algorithmVersion: string; fromUtc: string; toUtc: string; analyzeBy: JobAnalysisDimension; group: JobGroupDefinition; refinements: JobRefinement[]; focusPressKey: RadiusPressKey | null
+  selection: { includedValues: string[]; matchingPresses: RadiusPressKey[]; runCount: number; observedHours: number; historyFromUtc: string | null; historyToUtc: string | null; historicalRunCount: number; liveTailRunCount: number }
+  fleetSummary: { matchingPressCount: number; runCount: number; observedSeconds: number; goodPercent: number; makeReadyPercent: number; badPercent: number; unavailablePercent: number; support: EvidenceSupport }
+  decisions: JobDecisionCard[]; presses: FleetPressResult[]; radiusLossComparison: FleetRadiusLossComparison[]; predecessorRanking: TransitionSummary[]; transitionMatrix: FleetTransitionMatrixCell[]
+  historicalRuns: { items: HistoricalRunSummary[]; total: number; offset: number; limit: number; hasMore: boolean; sort: HistoricalRunSort }
+  coverage: Array<{ pressKey: RadiusPressKey; fields: JobIdentityCoverage[]; limitation: string | null }>; limitations: string[]
+}
+
+export interface JobRunInspector {
+  version: 'job-intelligence-run-v3'; algorithmVersion: string; support: EvidenceSupport
+  run: {
+    runId: string; pressKey: RadiusPressKey; startUtc: string; endUtc: string; durationSeconds: number
+    identities: ProductionRun['identities']; previousIdentities: ProductionRun['previousIdentities']
+    goodPercent: number; makeReadyPercent: number; badPercent: number; unavailablePercent: number
+    transitionSeconds: number | null; interruptions: number; medianRunningSpeed: number | null; runningSpeedUnit: string | null
+    identityConfidence: ProductionRun['identityConfidence']; dataInterrupted: boolean
+    identityTransition: ProductionRun['identityTransition']; transitionTiming: ProductionRun['transitionTiming']; deckConfiguration: ProductionRun['deckConfiguration']
+    mainRadiusLosses: JobRunLossAggregate[]
+  }
 }
 
 export interface EvidenceSupport {

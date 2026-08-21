@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { ProductionContextEvidence, TelemetryScalarValue } from '../telemetry/telemetry-contracts.js'
+import type { ProductionContextEvidence, TelemetrySample, TelemetryScalarValue } from '../telemetry/telemetry-contracts.js'
 import type { RadiusPressKey, RadiusStatusSegment } from '../radius/models.js'
 import { JOB_ANALYSIS_DIMENSIONS, type EvidenceSupport, type JobAnalysisDimension, type JobGroupDefinition, type JobIdentityCoverage, type JobIdentitySummary, type JobRadiusEpisode, type PressAffinity, type ProductionRun, type RadiusLossSummary, type TransitionSummary } from './contracts.js'
 
@@ -20,6 +20,25 @@ const badQuality = (value?: string) => Boolean(value && /bad|invalid|unavailable
 const round = (value: number, digits = 1) => { const factor = 10 ** digits; return Math.round(value * factor) / factor }
 const median = (values: number[]): number | null => { if (!values.length) return null; const sorted = [...values].sort((a, b) => a - b); const middle = Math.floor(sorted.length / 2); return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2 }
 const percentile = (values: number[], fraction: number): number | null => { if (!values.length) return null; const sorted = [...values].sort((a, b) => a - b); const position = (sorted.length - 1) * fraction; const low = Math.floor(position); const high = Math.ceil(position); return low === high ? sorted[low]! : sorted[low]! + (sorted[high]! - sorted[low]!) * (position - low) }
+
+function numericSpeed(point: TelemetrySample): number | null { return typeof point.value === 'number' && Number.isFinite(point.value) && !badQuality(point.qualityState) ? point.value : null }
+
+function runningPerformance(run: Omit<ProductionRun, 'previousIdentities' | 'nextIdentities' | 'deckConfiguration' | 'runningPerformance'>, speed?: { sourceUnit: string | null; canonicalUnitStatus: string | null; samples: TelemetrySample[] }): NonNullable<ProductionRun['runningPerformance']> {
+  const stableStart = run.transitionTiming.incomingStableRadiusProductionStartUtc; const stableMs = stableStart ? Date.parse(stableStart) : Infinity
+  const episodes = run.radiusEpisodes.filter((episode) => Date.parse(episode.endUtc) > stableMs).map((episode) => ({ ...episode, startUtc: new Date(Math.max(stableMs, Date.parse(episode.startUtc))).toISOString(), durationSeconds: (Date.parse(episode.endUtc) - Math.max(stableMs, Date.parse(episode.startUtc))) / 1_000 })).filter((episode) => episode.durationSeconds > 0)
+  const goodEpisodes = episodes.filter((episode) => episode.eventType === 'G' && episode.statusDescription === 'Run Production'); const badEpisodes = episodes.filter((episode) => episode.eventType === 'B'); const good = goodEpisodes.reduce((sum, episode) => sum + episode.durationSeconds, 0); const bad = badEpisodes.reduce((sum, episode) => sum + episode.durationSeconds, 0); const observed = episodes.reduce((sum, episode) => sum + episode.durationSeconds, 0)
+  let priorProduction = false; let interruptions = 0
+  for (const episode of episodes) { const production = episode.eventType === 'G' && episode.statusDescription === 'Run Production'; if (priorProduction && !production) interruptions += 1; priorProduction = production }
+  const points = (speed?.samples ?? []).flatMap((point) => { const value = numericSpeed(point); const at = Date.parse(point.observedAtUtc); return value === null || at < stableMs || at > Date.parse(run.endUtc) || !goodEpisodes.some((episode) => at >= Date.parse(episode.startUtc) && at <= Date.parse(episode.endUtc)) ? [] : [{ at, value }] }).sort((a, b) => a.at - b.at)
+  let weighted = 0; let weight = 0
+  for (let index = 0; index < points.length; index += 1) {
+    const point = points[index]!; const next = Math.min(points[index + 1]?.at ?? Date.parse(run.endUtc), Date.parse(run.endUtc))
+    const milliseconds = goodEpisodes.reduce((sum, episode) => sum + Math.max(0, Math.min(next, Date.parse(episode.endUtc)) - Math.max(point.at, Date.parse(episode.startUtc))), 0)
+    weighted += point.value * milliseconds; weight += milliseconds
+  }
+  const values = points.map((point) => point.value); const speedSummary = values.length ? { canonicalId: 'machine.speed.actual' as const, sourceUnit: speed?.sourceUnit ?? null, canonicalUnitStatus: speed?.canonicalUnitStatus ?? null, sampleCount: values.length, median: round(median(values)!), p25: round(percentile(values, .25)!), p75: round(percentile(values, .75)!), p90: round(percentile(values, .9)!), timeWeightedMean: weight ? round(weighted / weight) : null } : null
+  return { stableProductionStartUtc: stableStart, observedSeconds: round(observed), goodSeconds: round(good), badSeconds: round(bad), interruptions, interruptionsPerProductionHour: good ? round(interruptions / (good / 3600), 2) : null, medianUninterruptedGoodSeconds: median(goodEpisodes.map((episode) => episode.durationSeconds)), restartCount: Math.max(0, goodEpisodes.length - 1), speed: speedSummary }
+}
 
 export function usableJobIdentity(value: unknown, qualityState?: string): string | null {
   if (badQuality(qualityState) || value === null || value === undefined) return null
@@ -115,13 +134,14 @@ function baseRuns(input: { pressKey: RadiusPressKey; fromUtc: string; toUtc: str
   return result
 }
 
-export function deriveProductionRuns(input: { pressKey: RadiusPressKey; fromUtc: string; toUtc: string; context: ProductionContextEvidence; radiusSegments: RadiusStatusSegment[]; deckActive?: DeckActiveEvidence[] }): ProductionRun[] {
+export function deriveProductionRuns(input: { pressKey: RadiusPressKey; fromUtc: string; toUtc: string; context: ProductionContextEvidence; radiusSegments: RadiusStatusSegment[]; deckActive?: DeckActiveEvidence[]; speed?: { sourceUnit: string | null; canonicalUnitStatus: string | null; samples: TelemetrySample[] } }): ProductionRun[] {
   const raw = baseRuns(input)
   return raw.map((run, index) => {
     const previous = raw[index - 1]; const next = raw[index + 1]
     const currentDecks = activeDecksAt(run.startUtc, input.deckActive ?? []); const previousDecks = previous ? activeDecksAt(previous.startUtc, input.deckActive ?? []) : null
     const deckConfiguration = currentDecks === null || previousDecks === null ? null : { activeDecks: currentDecks, reusedDecks: currentDecks.filter((deck) => previousDecks.includes(deck)), addedDecks: currentDecks.filter((deck) => !previousDecks.includes(deck)), removedDecks: previousDecks.filter((deck) => !currentDecks.includes(deck)), changedDeckCount: currentDecks.filter((deck) => !previousDecks.includes(deck)).length + previousDecks.filter((deck) => !currentDecks.includes(deck)).length, evidenceCanonicalId: 'deck.active' as const }
-    return { ...run, previousIdentities: previous && !run.dataInterrupted ? previous.identities : null, nextIdentities: next && !next.dataInterrupted ? next.identities : null, deckConfiguration }
+    const stateSeconds = run.goodSeconds + run.makeReadySeconds + run.badSeconds; const unavailableSeconds = Math.max(0, run.durationSeconds - run.goodSeconds - run.makeReadySeconds - run.badSeconds - run.otherRadiusSeconds)
+    return { ...run, previousRunId: previous && !run.dataInterrupted ? previous.runId : null, nextRunId: next && !next.dataInterrupted ? next.runId : null, previousIdentities: previous && !run.dataInterrupted ? previous.identities : null, nextIdentities: next && !next.dataInterrupted ? next.identities : null, identityAvailability: Object.fromEntries(JOB_ANALYSIS_DIMENSIONS.map((field) => [field, input.context.fields[field].capabilityState === 'TEMPORARILY_UNAVAILABLE' ? 'temporarily_unavailable' : input.context.fields[field].capabilityState === 'SUPPORTED' && run.identities[field] ? 'available' : 'unavailable'])) as NonNullable<ProductionRun['identityAvailability']>, unavailableSeconds: round(unavailableSeconds), productionStateEfficiency: stateSeconds ? round(run.goodSeconds / stateSeconds * 100) : null, interruptionsPerProductionHour: run.goodSeconds ? round(run.productionInterruptionCount / (run.goodSeconds / 3600), 2) : null, deckConfiguration, runningPerformance: runningPerformance(run, input.speed) }
   })
 }
 
@@ -165,14 +185,17 @@ export function summarizeIdentities(runs: ProductionRun[], dimension: JobAnalysi
 function explorerUrl(path: string, pressKey: RadiusPressKey, fromUtc: string, toUtc: string): string { const query = new URLSearchParams({ press: pressKey, fromUtc, toUtc, preset: 'custom' }); return `${path}?${query}` }
 
 export function summarizeRadiusLosses(runs: ProductionRun[], pressKey: RadiusPressKey, fromUtc: string, toUtc: string): RadiusLossSummary[] {
-  const grouped = new Map<string, JobRadiusEpisode[]>()
-  for (const episode of runs.flatMap((run) => run.radiusEpisodes).filter((episode) => episode.eventType === 'M' || episode.eventType === 'B')) { const key = `${episode.eventType}\u0000${episode.statusCode ?? ''}\u0000${episode.statusDescription}`; grouped.set(key, [...(grouped.get(key) ?? []), episode]) }
-  return [...grouped.values()].map((episodes) => { const first = episodes[0]!; const total = episodes.reduce((sum, episode) => sum + episode.durationSeconds, 0); return { eventType: first.eventType, statusCode: first.statusCode, statusDescription: first.statusDescription, totalSeconds: round(total), secondsPerRun: runs.length ? round(total / runs.length) : 0, occurrenceCount: episodes.length, occurrencesPerRun: runs.length ? round(episodes.length / runs.length, 2) : 0, medianEpisodeSeconds: round(median(episodes.map((episode) => episode.durationSeconds)) ?? 0), evidenceUrl: explorerUrl('/raw-radius-explorer', pressKey, fromUtc, toUtc) } }).sort((a, b) => b.totalSeconds - a.totalSeconds || a.statusDescription.localeCompare(b.statusDescription))
+  const grouped = new Map<string, { eventType: string; statusCode: string | null; statusDescription: string; totalSeconds: number; occurrenceCount: number; medians: number[] }>()
+  for (const run of runs) {
+    const aggregates = run.radiusEpisodes.length ? [...new Map(run.radiusEpisodes.filter((episode) => episode.eventType === 'M' || episode.eventType === 'B').map((episode) => [`${episode.eventType}\u0000${episode.statusCode ?? ''}\u0000${episode.statusDescription}`, episode])).keys()].map((key) => { const [eventType, statusCode, statusDescription] = key.split('\u0000'); const episodes = run.radiusEpisodes.filter((episode) => episode.eventType === eventType && (episode.statusCode ?? '') === statusCode && episode.statusDescription === statusDescription); return { eventType: eventType!, statusCode: statusCode || null, statusDescription: statusDescription!, totalSeconds: episodes.reduce((sum, episode) => sum + episode.durationSeconds, 0), occurrenceCount: episodes.length, medianEpisodeSeconds: median(episodes.map((episode) => episode.durationSeconds)) ?? 0 } }) : run.radiusLossAggregates ?? []
+    for (const aggregate of aggregates) { const key = `${aggregate.eventType}\u0000${aggregate.statusCode ?? ''}\u0000${aggregate.statusDescription}`; const value = grouped.get(key) ?? { eventType: aggregate.eventType, statusCode: aggregate.statusCode, statusDescription: aggregate.statusDescription, totalSeconds: 0, occurrenceCount: 0, medians: [] }; value.totalSeconds += aggregate.totalSeconds; value.occurrenceCount += aggregate.occurrenceCount; value.medians.push(aggregate.medianEpisodeSeconds); grouped.set(key, value) }
+  }
+  return [...grouped.values()].map((value) => ({ eventType: value.eventType, statusCode: value.statusCode, statusDescription: value.statusDescription, totalSeconds: round(value.totalSeconds), secondsPerRun: runs.length ? round(value.totalSeconds / runs.length) : 0, occurrenceCount: value.occurrenceCount, occurrencesPerRun: runs.length ? round(value.occurrenceCount / runs.length, 2) : 0, medianEpisodeSeconds: round(median(value.medians) ?? 0), evidenceUrl: explorerUrl('/raw-radius-explorer', pressKey, fromUtc, toUtc) })).sort((a, b) => b.totalSeconds - a.totalSeconds || a.statusDescription.localeCompare(b.statusDescription))
 }
 
 export function summarizeTransitions(runs: ProductionRun[], dimension: JobAnalysisDimension, selected?: JobGroupDefinition): TransitionSummary[] {
   const grouped = new Map<string, ProductionRun[]>()
-  for (const run of runs) { const current = run.identities[dimension]; const previous = run.previousIdentities?.[dimension]; if (!current || !previous || current === previous || selected && !matchesJobGroup(current, selected)) continue; const key = `${previous}\u0000${current}`; grouped.set(key, [...(grouped.get(key) ?? []), run]) }
+  for (const run of runs) { const current = run.identities[dimension]; const previous = run.previousIdentities?.[dimension]; if (!current || !previous || current === previous || run.dataInterrupted || selected && !matchesJobGroup(current, selected)) continue; const key = `${previous}\u0000${current}`; grouped.set(key, [...(grouped.get(key) ?? []), run]) }
   return [...grouped].map<TransitionSummary>(([key, items]) => {
     const [previousValue, currentValue] = key.split('\u0000') as [string, string]; const good = items.reduce((sum, run) => sum + run.goodSeconds, 0); const makeReady = items.reduce((sum, run) => sum + run.makeReadySeconds, 0); const bad = items.reduce((sum, run) => sum + run.badSeconds, 0); const observed = good + makeReady + bad; const fromUtc = items[0]!.startUtc; const toUtc = items.at(-1)!.endUtc
     const sequences = new Map<string, { count: number; sequence: TransitionSummary['fingerprint']['exactRadiusSequence'] }>()

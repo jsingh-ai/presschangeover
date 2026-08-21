@@ -35,13 +35,15 @@ import { buildDeterministicDiscovery } from './ai-investigator/discovery-present
 import { AI_INVESTIGATOR_TOOL_NAMES, AiInvestigatorReadOnlyToolRegistry } from './ai-investigator/read-only-tools.js'
 import { AiInvestigatorOrchestrator, createAiInvestigatorOrchestrator, investigatorDisplayName, type AiInvestigatorModelClient } from './ai-investigator/orchestrator.js'
 import { EXPLORER_HTTP_VALIDATION_CAPABILITIES } from './explorer-validation-capabilities.js'
-import { JOB_ANALYSIS_DIMENSIONS, JOB_GROUP_OPERATORS, type JobGroupDefinition } from './job-intelligence/contracts.js'
-import { JOB_INTELLIGENCE_MAX_RANGE_MS, JobIntelligenceService } from './job-intelligence/service.js'
+import { HISTORICAL_RUN_SORTS, JOB_ANALYSIS_DIMENSIONS, JOB_GROUP_OPERATORS, type HistoricalRunSort, type JobAnalysisDimension, type JobGroupDefinition, type JobRefinement } from './job-intelligence/contracts.js'
+import { JobIntelligenceService } from './job-intelligence/service.js'
+import type { JobHistoryRepository } from './job-intelligence/history-repository.js'
 import { CHANGEOVER_CONFIRMATION_SECONDS_DEFAULT, CHANGEOVER_RECOVERY_SPEED_DEFAULT, CHANGEOVER_STOP_SPEED_DEFAULT, type ChangeoverMode } from './changeover-intelligence/contracts.js'
 import { ChangeoverIntelligenceService } from './changeover-intelligence/service.js'
 
 const MAX_PHYSICAL_STATE_RANGE_MS = 2 * 60 * 60 * 1_000
 const MAX_RADIUS_RANGE_MS = 31 * 24 * 60 * 60 * 1_000
+const MAX_JOB_INTELLIGENCE_HISTORY_RANGE_MS = 10 * 366 * 24 * 60 * 60 * 1_000
 const SAFE_REQUEST_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/
 const UTC_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/
 const DEFAULT_CLASSIFICATION_SEARCH_LIMIT = 10
@@ -94,6 +96,7 @@ export interface CreateAppOptions {
   classificationService?: ClassificationService
   classificationAuthorizer?: ClassificationAuthorizer
   rawTelemetryReviewService?: RawTelemetryReviewService
+  jobHistoryRepository?: JobHistoryRepository
   aiInvestigatorConfig?: AiInvestigatorConfig
   aiInvestigatorModelClient?: AiInvestigatorModelClient
 }
@@ -452,6 +455,15 @@ function validateRadiusRange(query: Request['query']): {
   return { fromUtc, toUtc }
 }
 
+function validateJobIntelligenceRange(query: Request['query']): { fromUtc: string; toUtc: string } {
+  const fromUtc = parseUtcTimestamp(query.fromUtc, 'invalid_from_utc')
+  const toUtc = parseUtcTimestamp(query.toUtc, 'invalid_to_utc')
+  const rangeMs = Date.parse(toUtc) - Date.parse(fromUtc)
+  if (rangeMs <= 0) throw new RequestValidationError('invalid_time_range')
+  if (rangeMs > MAX_JOB_INTELLIGENCE_HISTORY_RANGE_MS) throw new RequestValidationError('job_intelligence_range_too_large')
+  return { fromUtc, toUtc }
+}
+
 function parseChangeoverNumber(value: unknown, fallback: number, minimum: number, maximum: number, code: string): number {
   if (value === undefined) return fallback
   if (typeof value !== 'string' || !value.trim()) throw new RequestValidationError(code)
@@ -469,6 +481,44 @@ function parseChangeoverQuery(query: Request['query']) {
   if (recoverySpeed <= stopSpeed) throw new RequestValidationError('invalid_changeover_thresholds')
   const focusPressKey = query.focusPressKey === undefined ? null : parsePressKey(String(query.focusPressKey))
   return { fromUtc, toUtc, mode, stopSpeed, recoverySpeed, recoveryConfirmationSeconds, focusPressKey }
+}
+
+function parseJobDimension(value: unknown): JobAnalysisDimension {
+  if (typeof value !== 'string' || !JOB_ANALYSIS_DIMENSIONS.includes(value as JobAnalysisDimension)) throw new RequestValidationError('invalid_job_analysis_dimension')
+  return value as JobAnalysisDimension
+}
+
+function parseJobGroup(raw: Record<string, unknown>, errorCode = 'invalid_job_group'): JobGroupDefinition {
+  const operator = raw.operator
+  const query = typeof raw.query === 'string' ? raw.query.trim() : ''
+  if (typeof operator !== 'string' || !JOB_GROUP_OPERATORS.includes(operator as JobGroupDefinition['operator']) || !query || query.length > 240) throw new RequestValidationError(errorCode)
+  const optionalInteger = (value: unknown, maximum: number) => { if (value === undefined) return undefined; const parsed = Number(value); if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > maximum) throw new RequestValidationError(errorCode); return parsed }
+  const delimiter = raw.delimiter
+  if (delimiter !== undefined && (typeof delimiter !== 'string' || !delimiter.length || delimiter.length > 3)) throw new RequestValidationError(errorCode)
+  const group: JobGroupDefinition = { operator: operator as JobGroupDefinition['operator'], query, positionStart: optionalInteger(raw.positionStart, 240), positionEnd: optionalInteger(raw.positionEnd, 240), segmentIndex: optionalInteger(raw.segmentIndex, 20), ...(delimiter === undefined ? {} : { delimiter }) }
+  if (group.operator === 'position_range' && (group.positionStart === undefined || group.positionEnd === undefined || group.positionEnd < group.positionStart) || group.operator === 'segment_equals' && group.segmentIndex === undefined) throw new RequestValidationError(errorCode)
+  return group
+}
+
+function parseJobRefinements(value: unknown): JobRefinement[] {
+  if (value === undefined) return []
+  if (typeof value !== 'string' || value.length > 5_000) throw new RequestValidationError('invalid_job_refinements')
+  let parsed: unknown
+  try { parsed = JSON.parse(value) } catch { throw new RequestValidationError('invalid_job_refinements') }
+  if (!Array.isArray(parsed) || parsed.length > 5) throw new RequestValidationError('invalid_job_refinements')
+  return parsed.map((candidate) => {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) throw new RequestValidationError('invalid_job_refinements')
+    const item = candidate as Record<string, unknown>; const groupRaw = item.group
+    if (item.previousIdentity !== undefined && typeof item.previousIdentity !== 'boolean' || !groupRaw || typeof groupRaw !== 'object' || Array.isArray(groupRaw)) throw new RequestValidationError('invalid_job_refinements')
+    return { dimension: parseJobDimension(item.dimension), group: parseJobGroup(groupRaw as Record<string, unknown>, 'invalid_job_refinements'), ...(item.previousIdentity === undefined ? {} : { previousIdentity: item.previousIdentity }) }
+  })
+}
+
+function parseBoundedInteger(value: unknown, defaultValue: number, maximum: number, minimum = 0): number {
+  if (value === undefined) return defaultValue
+  const parsed = Number(value)
+  if (!Number.isSafeInteger(parsed) || parsed < minimum || parsed > maximum) throw new RequestValidationError('invalid_paging')
+  return parsed
 }
 
 function parsePressKey(value: string | string[]): RadiusPressKey {
@@ -503,6 +553,7 @@ export function createApp({
   classificationService,
   classificationAuthorizer = () => ({ id: 'anonymous', canEdit: false }),
   rawTelemetryReviewService,
+  jobHistoryRepository,
   aiInvestigatorConfig,
   aiInvestigatorModelClient,
 }: CreateAppOptions) {
@@ -512,7 +563,7 @@ export function createApp({
   const stopRestart = new StopRestartAnalysisService(telemetry)
   const rawRadiusExplorer = new RawRadiusExplorerService(radiusService, telemetry, rawTelemetryReviewService)
   const telemetryEventExplorer = new TelemetryEventExplorerService(telemetry, radiusService, rawRadiusExplorer)
-  const jobIntelligence = new JobIntelligenceService(radiusService, telemetry)
+  const jobIntelligence = new JobIntelligenceService(radiusService, telemetry, jobHistoryRepository)
   const changeoverIntelligence = new ChangeoverIntelligenceService(radiusService, telemetry)
   const aiToolRegistry = new AiInvestigatorReadOnlyToolRegistry(radiusService, telemetry)
   const aiInvestigator = aiInvestigatorConfig?.enabled && aiInvestigatorModelClient
@@ -700,24 +751,34 @@ export function createApp({
     }),
   )
 
+  app.get('/api/job-intelligence/values', asyncRoute(async (request, response) => {
+    const { fromUtc, toUtc } = validateJobIntelligenceRange(request.query)
+    const analyzeBy = parseJobDimension(request.query.analyzeBy)
+    const query = request.query.query
+    if (query !== undefined && (typeof query !== 'string' || query.length > 240)) throw new RequestValidationError('invalid_job_value_query')
+    response.status(200).json(await jobIntelligence.values({ fromUtc, toUtc, analyzeBy, ...(query === undefined ? {} : { query }), limit: parseBoundedInteger(request.query.limit, 50, 100, 1) }, String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.get('/api/job-intelligence/diagnostics', (_request, response) => {
+    response.status(200).json(jobIntelligence.radiusAcquisitionDiagnostics())
+  })
+
   app.get('/api/job-intelligence/report', asyncRoute(async (request, response) => {
-    const { fromUtc, toUtc } = validateRadiusRange(request.query)
-    if (Date.parse(toUtc) - Date.parse(fromUtc) > JOB_INTELLIGENCE_MAX_RANGE_MS) throw new RequestValidationError('job_intelligence_range_too_large')
-    const pressKey = parsePressKey(String(request.query.pressKey ?? ''))
-    const analyzeBy = String(request.query.analyzeBy ?? '')
-    if (!JOB_ANALYSIS_DIMENSIONS.includes(analyzeBy as (typeof JOB_ANALYSIS_DIMENSIONS)[number])) throw new RequestValidationError('invalid_job_analysis_dimension')
-    const operator = request.query.operator === undefined ? undefined : String(request.query.operator)
-    const query = request.query.query === undefined ? undefined : String(request.query.query).trim()
-    let group: JobGroupDefinition | undefined
-    if (operator !== undefined || query !== undefined) {
-      if (!operator || !JOB_GROUP_OPERATORS.includes(operator as (typeof JOB_GROUP_OPERATORS)[number]) || !query || query.length > 240) throw new RequestValidationError('invalid_job_group')
-      const optionalInteger = (value: unknown, maximum: number) => { if (value === undefined) return undefined; const parsed = Number(value); if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > maximum) throw new RequestValidationError('invalid_job_group'); return parsed }
-      const delimiter = request.query.delimiter === undefined ? undefined : String(request.query.delimiter)
-      if (delimiter !== undefined && (!delimiter.length || delimiter.length > 3)) throw new RequestValidationError('invalid_job_group')
-      group = { operator: operator as JobGroupDefinition['operator'], query, positionStart: optionalInteger(request.query.positionStart, 240), positionEnd: optionalInteger(request.query.positionEnd, 240), segmentIndex: optionalInteger(request.query.segmentIndex, 20), delimiter }
-      if (group.operator === 'position_range' && (group.positionStart === undefined || group.positionEnd === undefined || group.positionEnd < group.positionStart) || group.operator === 'segment_equals' && group.segmentIndex === undefined) throw new RequestValidationError('invalid_job_group')
-    }
-    response.status(200).json(await jobIntelligence.report({ pressKey, fromUtc, toUtc, analyzeBy: analyzeBy as (typeof JOB_ANALYSIS_DIMENSIONS)[number], group }, String(response.locals.requestId), cancellationSignal(request, response)))
+    const { fromUtc, toUtc } = validateJobIntelligenceRange(request.query)
+    const analyzeBy = parseJobDimension(request.query.analyzeBy)
+    const group = parseJobGroup(request.query as Record<string, unknown>)
+    const focusPressKey = request.query.focusPressKey === undefined ? null : parsePressKey(String(request.query.focusPressKey))
+    const historicalRunSort = request.query.sort === undefined ? 'newest' : request.query.sort
+    if (typeof historicalRunSort !== 'string' || !HISTORICAL_RUN_SORTS.includes(historicalRunSort as HistoricalRunSort)) throw new RequestValidationError('invalid_job_history_sort')
+    response.status(200).json(await jobIntelligence.fleetReport({ fromUtc, toUtc, analyzeBy, group, refinements: parseJobRefinements(request.query.refinements), focusPressKey, offset: parseBoundedInteger(request.query.offset, 0, 25_000), limit: parseBoundedInteger(request.query.limit, 50, 100, 1), historicalRunSort: historicalRunSort as HistoricalRunSort }, String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.get('/api/job-intelligence/runs/:runId', asyncRoute(async (request, response) => {
+    const runId = request.params.runId
+    if (Array.isArray(runId) || !/^[A-Za-z0-9._-]{1,160}$/.test(runId)) throw new RequestValidationError('invalid_job_run_id')
+    const result = await jobIntelligence.runInspector(runId, String(response.locals.requestId), cancellationSignal(request, response))
+    if (!result) { response.status(404).json({ error: 'job_run_not_found' }); return }
+    response.status(200).json(result)
   }))
 
   app.get('/api/changeover-intelligence/report', asyncRoute(async (request, response) => {
