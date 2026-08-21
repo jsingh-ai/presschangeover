@@ -7,6 +7,7 @@ import { TelemetryFoundationService } from '../telemetry/telemetry-foundation-se
 import type { ProductionRun } from './contracts.js'
 import { JobHistoryMaterializer } from './history-materializer.js'
 import { createJobHistoryRepository } from './history-repository.js'
+import { canonicalMaterializedJobFacts } from './canonical-run.js'
 import { acquireMaterializationPreflight } from './materialization-preflight.js'
 import { createMaterializationRadiusService } from './materialization-runtime.js'
 import { assertRepresentativeParity } from './representative-parity.js'
@@ -64,7 +65,7 @@ try {
   const secondParity = assertRepresentativeParity(second.liveRuns, secondStored, fromUtc, toUtc)
   const secondLossRows = secondStored.reduce((sum, item) => sum + (item.run.radiusLossAggregates?.length ?? 0), 0)
   const checkpoint = await history.getCheckpoint(pressKey)
-  const idempotent = firstStored.length === secondStored.length && firstLossRows === secondLossRows && isDeepStrictEqual(firstStored, secondStored) && firstCheckpoint?.watermarkUtc === checkpoint?.watermarkUtc && checkpoint?.state === 'complete'
+  const idempotent = firstStored.length === secondStored.length && firstLossRows === secondLossRows && isDeepStrictEqual(firstStored.map(canonicalMaterializedJobFacts), secondStored.map(canonicalMaterializedJobFacts)) && firstCheckpoint?.watermarkUtc === checkpoint?.watermarkUtc && checkpoint?.state === 'complete'
   if (!idempotent) throw new Error('job_history_idempotency_failed')
 
   console.log(JSON.stringify({

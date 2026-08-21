@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises'
 import { mergeContinuousProductionRuns, mergeHistoricalAndLiveRuns, JobHistoryMaterializer } from '../src/job-intelligence/history-materializer.js'
 import { aggregateRunLosses, InMemoryJobHistoryRepository, JOB_INTELLIGENCE_ALGORITHM_VERSION, materializedRun, persistenceText, persistenceTimestamp, PostgresJobHistoryRepository } from '../src/job-intelligence/history-repository.js'
 import { assertRepresentativeParity } from '../src/job-intelligence/representative-parity.js'
+import { canonicalJobFingerprint, canonicalJobNumber, canonicalJobRun, canonicalMaterializedJobFacts } from '../src/job-intelligence/canonical-run.js'
 import type { ProductionRun } from '../src/job-intelligence/contracts.js'
 
 const day = 24 * 60 * 60_000
@@ -114,12 +115,84 @@ describe('Job Intelligence historical store', () => {
     assert.throws(() => assertRepresentativeParity([live], [lossy], start, at(2 * day)), /job_history_parity_failed/)
   })
 
+  it('reproduces the exact 200536 negative-zero and previous-resolved-identity round trip', async () => {
+    const first = run('press5.job.4901a4a8708260e5', 0, day)
+    first.runningPerformance = { stableProductionStartUtc: start, observedSeconds: 100, goodSeconds: 90, badSeconds: 10, interruptions: 1, interruptionsPerProductionHour: 40, medianUninterruptedGoodSeconds: 45, restartCount: 0, speed: { canonicalId: 'machine.speed.actual', sourceUnit: null, canonicalUnitStatus: 'unverified', sampleCount: 27, median: 0, p25: -0, p75: .1, p90: 926.6, timeWeightedMean: 799.7 } }
+    const previous = { order: '913242', recipe: '1600-GAP01-E490', customer: 'QNUSS 6M', material: 'HD-PE' }
+    const second = run('press5.job.39eab6493cd99385', day, 2 * day)
+    second.previousRunId = first.runId; second.previousIdentities = previous; second.identityTransition.previousResolvedIdentity = {}
+
+    assert.equal(Object.is(first.runningPerformance.speed!.p25, -0), true)
+    assert.equal(canonicalJobNumber(first.runningPerformance.speed!.p25), 0)
+    assert.deepEqual(canonicalJobRun(second).identityTransition.previousResolvedIdentity, previous)
+
+    const firstReadBack = materializedRun(first, start, at(3 * day), { isClosed: true })
+    firstReadBack.run.runningPerformance!.speed!.p25 = 0
+    const secondReadBack = materializedRun(second, start, at(3 * day), { isClosed: true })
+    secondReadBack.run.identityTransition.previousResolvedIdentity = previous
+    assert.doesNotThrow(() => assertRepresentativeParity([first, second], [firstReadBack, secondReadBack], start, at(3 * day)))
+
+    const calls: Array<{ sql: string; values: unknown[] }> = []
+    const client = { query: async (sql: string, values: unknown[] = []) => { calls.push({ sql, values }); return { rowCount: sql.includes('INSERT INTO public.job_intelligence_runs') ? 1 : 0, rows: [] } }, release() {} }
+    const postgres = new PostgresJobHistoryRepository({ connect: async () => client } as never)
+    await postgres.upsertRuns([firstReadBack, secondReadBack])
+    const inserts = calls.filter((call) => call.sql.includes('INSERT INTO public.job_intelligence_runs'))
+    assert.equal(inserts.length, 2)
+    assert.equal(Object.is(inserts[0]!.values[47], -0), false); assert.equal(inserts[0]!.values[47], 0)
+    assert.deepEqual(inserts[1]!.values.slice(11, 15), [previous.order, previous.recipe, previous.customer, previous.material])
+  })
+
+  it('keeps canonical fingerprint and compact facts stable across materializer reruns', async () => {
+    const repository = new InMemoryJobHistoryRepository()
+    const value = run('canonical-round-trip', 0, day)
+    value.previousIdentities = { order: 'PREVIOUS' }; value.identityTransition.previousResolvedIdentity = {}
+    value.runningPerformance = { stableProductionStartUtc: start, observedSeconds: 120, goodSeconds: 90, badSeconds: 10, interruptions: 1, interruptionsPerProductionHour: 40, medianUninterruptedGoodSeconds: 45, restartCount: 0, speed: { canonicalId: 'machine.speed.actual', sourceUnit: '', canonicalUnitStatus: 'unverified', sampleCount: 3, median: 0, p25: -0, p75: 1, p90: 2, timeWeightedMean: 0 } }
+    value.radiusEpisodes.unshift({ eventType: 'M', statusCode: '47', statusDescription: 'Setup Job', startUtc: at(0), endUtc: at(60_000), durationSeconds: 60 })
+    let now = Date.parse('2026-02-01T00:00:00.000Z')
+    const materializer = new JobHistoryMaterializer(repository, async () => [structuredClone(value)], () => new Date(now += 1_000))
+
+    await materializer.backfillPress({ pressKey: 'press5', fromUtc: start, toUtc: at(2 * day), resume: false })
+    const firstRows = await repository.listRuns({}); const firstCheckpoint = await repository.getCheckpoint('press5')
+    await materializer.backfillPress({ pressKey: 'press5', fromUtc: start, toUtc: at(2 * day), resume: false })
+    const secondRows = await repository.listRuns({}); const secondCheckpoint = await repository.getCheckpoint('press5')
+
+    assert.equal(firstRows.length, 1); assert.equal(secondRows.length, 1)
+    assert.equal(firstRows[0]!.run.runId, secondRows[0]!.run.runId)
+    assert.equal(firstRows[0]!.sourceFingerprint, canonicalJobFingerprint(firstRows[0]!.algorithmVersion, firstRows[0]!.run))
+    assert.equal(firstRows[0]!.sourceFingerprint, secondRows[0]!.sourceFingerprint)
+    assert.deepEqual(canonicalMaterializedJobFacts(firstRows[0]!), canonicalMaterializedJobFacts(secondRows[0]!))
+    assert.deepEqual(firstRows[0]!.run.radiusLossAggregates, secondRows[0]!.run.radiusLossAggregates)
+    assert.equal(firstCheckpoint?.watermarkUtc, secondCheckpoint?.watermarkUtc); assert.equal(secondCheckpoint?.state, 'complete'); assert.equal(secondCheckpoint?.leaseId, null)
+  })
+
+  it('canonicalizes only persisted sets and unordered losses while retaining semantic differences', () => {
+    const left = run('canonical-semantics', 0, day)
+    left.deckConfiguration = { activeDecks: [3, 1, 3], reusedDecks: [3, 1], addedDecks: [4, 2], removedDecks: [8, 7], changedDeckCount: 4, evidenceCanonicalId: 'deck.active' }
+    left.radiusLossAggregates = [
+      { eventType: 'M', statusCode: '47', statusDescription: 'Setup', category: 'make_ready', totalSeconds: 60, occurrenceCount: 1, medianEpisodeSeconds: 60 },
+      { eventType: 'B', statusCode: null, statusDescription: 'Stop', category: 'bad', totalSeconds: 30, occurrenceCount: 1, medianEpisodeSeconds: 30 },
+    ]
+    const right = structuredClone(left)
+    right.deckConfiguration!.activeDecks = [1, 3]; right.deckConfiguration!.reusedDecks = [1, 3]; right.deckConfiguration!.addedDecks = [2, 4]; right.deckConfiguration!.removedDecks = [7, 8]
+    right.radiusLossAggregates!.reverse()
+    assert.equal(canonicalJobFingerprint(JOB_INTELLIGENCE_ALGORITHM_VERSION, left), canonicalJobFingerprint(JOB_INTELLIGENCE_ALGORITHM_VERSION, right))
+
+    right.radiusLossAggregates![0]!.statusDescription = 'Different exact description'
+    assert.notEqual(canonicalJobFingerprint(JOB_INTELLIGENCE_ALGORITHM_VERSION, left), canonicalJobFingerprint(JOB_INTELLIGENCE_ALGORITHM_VERSION, right))
+    const plusOne = structuredClone(left); plusOne.endUtc = new Date(Date.parse(left.endUtc) + 1).toISOString()
+    assert.notEqual(canonicalJobFingerprint(JOB_INTELLIGENCE_ALGORITHM_VERSION, left), canonicalJobFingerprint(JOB_INTELLIGENCE_ALGORITHM_VERSION, plusOne))
+    const nullText = structuredClone(left); const emptyText = structuredClone(left)
+    nullText.runningPerformance = { stableProductionStartUtc: start, observedSeconds: 0, goodSeconds: 0, badSeconds: 0, interruptions: 0, interruptionsPerProductionHour: null, medianUninterruptedGoodSeconds: null, restartCount: 0, speed: { canonicalId: 'machine.speed.actual', sourceUnit: null, canonicalUnitStatus: null, sampleCount: 1, median: 0, p25: 0, p75: 0, p90: 0, timeWeightedMean: 0 } }
+    emptyText.runningPerformance = structuredClone(nullText.runningPerformance); emptyText.runningPerformance.speed!.sourceUnit = ''
+    assert.notEqual(canonicalJobFingerprint(JOB_INTELLIGENCE_ALGORITHM_VERSION, nullText), canonicalJobFingerprint(JOB_INTELLIGENCE_ALGORITHM_VERSION, emptyText))
+  })
+
   it('refreshes a lossy closed row from live evidence but preserves an unchanged closed fingerprint', () => {
     const live = run('closed-refresh', 0, day); live.endUtc = '2026-01-02T00:00:00.280414Z'
     const expected = materializedRun(live, start, at(2 * day), { isClosed: true })
     const lossy = structuredClone(expected); lossy.run.endUtc = '2026-01-02T00:00:00.000Z'; lossy.sourceFingerprint = materializedRun(lossy.run, start, at(2 * day), { isClosed: true }).sourceFingerprint
     const refreshed = mergeHistoricalAndLiveRuns([lossy], [live], start, at(2 * day))
-    assert.equal(refreshed[0]?.sourceFingerprint, expected.sourceFingerprint); assert.equal(refreshed[0]?.run.endUtc, live.endUtc)
+    assert.equal(refreshed[0]?.sourceFingerprint, expected.sourceFingerprint); assert.equal(refreshed[0]?.run.endUtc, expected.run.endUtc)
     const unchanged = mergeHistoricalAndLiveRuns([expected], [live], start, at(2 * day))
     assert.deepEqual(unchanged, [expected])
   })
