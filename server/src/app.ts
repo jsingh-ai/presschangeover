@@ -37,6 +37,8 @@ import { AiInvestigatorOrchestrator, createAiInvestigatorOrchestrator, investiga
 import { EXPLORER_HTTP_VALIDATION_CAPABILITIES } from './explorer-validation-capabilities.js'
 import { JOB_ANALYSIS_DIMENSIONS, JOB_GROUP_OPERATORS, type JobGroupDefinition } from './job-intelligence/contracts.js'
 import { JOB_INTELLIGENCE_MAX_RANGE_MS, JobIntelligenceService } from './job-intelligence/service.js'
+import { CHANGEOVER_CONFIRMATION_SECONDS_DEFAULT, CHANGEOVER_RECOVERY_SPEED_DEFAULT, CHANGEOVER_STOP_SPEED_DEFAULT, type ChangeoverMode } from './changeover-intelligence/contracts.js'
+import { ChangeoverIntelligenceService } from './changeover-intelligence/service.js'
 
 const MAX_PHYSICAL_STATE_RANGE_MS = 2 * 60 * 60 * 1_000
 const MAX_RADIUS_RANGE_MS = 31 * 24 * 60 * 60 * 1_000
@@ -450,6 +452,25 @@ function validateRadiusRange(query: Request['query']): {
   return { fromUtc, toUtc }
 }
 
+function parseChangeoverNumber(value: unknown, fallback: number, minimum: number, maximum: number, code: string): number {
+  if (value === undefined) return fallback
+  if (typeof value !== 'string' || !value.trim()) throw new RequestValidationError(code)
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < minimum || parsed > maximum) throw new RequestValidationError(code)
+  return parsed
+}
+
+function parseChangeoverQuery(query: Request['query']) {
+  const { fromUtc, toUtc } = validateRadiusRange(query)
+  const mode: ChangeoverMode = query.mode === undefined ? 'CHANGEOVERS' : query.mode === 'CHANGEOVERS' || query.mode === 'ALL_STOPS' ? query.mode : (() => { throw new RequestValidationError('invalid_changeover_mode') })()
+  const stopSpeed = parseChangeoverNumber(query.stopSpeed, CHANGEOVER_STOP_SPEED_DEFAULT, 0, 100, 'invalid_changeover_stop_speed')
+  const recoverySpeed = parseChangeoverNumber(query.recoverySpeed, CHANGEOVER_RECOVERY_SPEED_DEFAULT, 1, 10_000, 'invalid_changeover_recovery_speed')
+  const recoveryConfirmationSeconds = parseChangeoverNumber(query.recoveryConfirmationSeconds, CHANGEOVER_CONFIRMATION_SECONDS_DEFAULT, 30, 1_800, 'invalid_changeover_confirmation')
+  if (recoverySpeed <= stopSpeed) throw new RequestValidationError('invalid_changeover_thresholds')
+  const focusPressKey = query.focusPressKey === undefined ? null : parsePressKey(String(query.focusPressKey))
+  return { fromUtc, toUtc, mode, stopSpeed, recoverySpeed, recoveryConfirmationSeconds, focusPressKey }
+}
+
 function parsePressKey(value: string | string[]): RadiusPressKey {
   if (
     Array.isArray(value) ||
@@ -492,6 +513,7 @@ export function createApp({
   const rawRadiusExplorer = new RawRadiusExplorerService(radiusService, telemetry, rawTelemetryReviewService)
   const telemetryEventExplorer = new TelemetryEventExplorerService(telemetry, radiusService, rawRadiusExplorer)
   const jobIntelligence = new JobIntelligenceService(radiusService, telemetry)
+  const changeoverIntelligence = new ChangeoverIntelligenceService(radiusService, telemetry)
   const aiToolRegistry = new AiInvestigatorReadOnlyToolRegistry(radiusService, telemetry)
   const aiInvestigator = aiInvestigatorConfig?.enabled && aiInvestigatorModelClient
     ? new AiInvestigatorOrchestrator(aiInvestigatorConfig, aiToolRegistry, aiInvestigatorModelClient, logger)
@@ -696,6 +718,23 @@ export function createApp({
       if (group.operator === 'position_range' && (group.positionStart === undefined || group.positionEnd === undefined || group.positionEnd < group.positionStart) || group.operator === 'segment_equals' && group.segmentIndex === undefined) throw new RequestValidationError('invalid_job_group')
     }
     response.status(200).json(await jobIntelligence.report({ pressKey, fromUtc, toUtc, analyzeBy: analyzeBy as (typeof JOB_ANALYSIS_DIMENSIONS)[number], group }, String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.get('/api/changeover-intelligence/report', asyncRoute(async (request, response) => {
+    response.status(200).json(await changeoverIntelligence.report(parseChangeoverQuery(request.query), String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.get('/api/changeover-intelligence/changeovers/:changeoverId', asyncRoute(async (request, response) => {
+    const changeoverId = request.params.changeoverId
+    if (Array.isArray(changeoverId) || !/^[A-Za-z0-9._-]{1,160}$/.test(changeoverId)) throw new RequestValidationError('invalid_changeover_id')
+    const query = parseChangeoverQuery(request.query)
+    const pressKey = parsePressKey(String(request.query.pressKey ?? ''))
+    const physicalStartUtc = parseUtcTimestamp(request.query.physicalStartUtc, 'invalid_physical_start_utc')
+    const physicalRecoveryUtc = parseUtcTimestamp(request.query.physicalRecoveryUtc, 'invalid_physical_recovery_utc')
+    if (Date.parse(physicalRecoveryUtc) <= Date.parse(physicalStartUtc)) throw new RequestValidationError('invalid_physical_changeover_range')
+    const result = await changeoverIntelligence.inspect({ ...query, changeoverId, pressKey, physicalStartUtc, physicalRecoveryUtc }, String(response.locals.requestId), cancellationSignal(request, response))
+    if (!result) { response.status(404).json({ error: 'changeover_not_found' }); return }
+    response.status(200).json(result)
   }))
 
   app.get(

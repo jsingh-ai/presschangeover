@@ -1,6 +1,8 @@
 #Requires -Version 5.1
 [CmdletBinding()]
-param()
+param(
+    [string]$ArtifactRoot = 'C:\ProcessIntelligence'
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -55,15 +57,20 @@ function Write-Utf8NoBom {
 $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Get-NormalizedPath (Join-Path $scriptDirectory '..')
 $expectedRoot = Get-NormalizedPath 'C:\ProcessIntelligence'
+$normalizedArtifactRoot = Get-NormalizedPath $ArtifactRoot
+$worktreeRoot = Get-NormalizedPath (Join-Path $expectedRoot '.tmp')
 
-if (!$projectRoot.Equals($expectedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
-    throw "This release script must run from the ProcessIntelligence repository at $expectedRoot"
+if (!$projectRoot.Equals($expectedRoot, [System.StringComparison]::OrdinalIgnoreCase) -and !$projectRoot.StartsWith($worktreeRoot + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "This release script must run from the ProcessIntelligence repository or an isolated worktree under $worktreeRoot"
+}
+if (!$normalizedArtifactRoot.Equals($expectedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Release artifacts must remain under the established ProcessIntelligence root at $expectedRoot"
 }
 
 $clientSource = Join-Path $projectRoot 'client'
 $serverSource = Join-Path $projectRoot 'server'
-$stagingRoot = Join-Path $projectRoot 'staging'
-$packageRoot = Join-Path $projectRoot 'backups\packages'
+$stagingRoot = Join-Path $normalizedArtifactRoot 'staging'
+$packageRoot = Join-Path $normalizedArtifactRoot 'backups\packages'
 
 foreach ($requiredPath in @(
     $clientSource,
@@ -78,8 +85,16 @@ foreach ($requiredPath in @(
     }
 }
 
-Assert-PathWithin -Path $stagingRoot -Root $projectRoot
-Assert-PathWithin -Path $packageRoot -Root $projectRoot
+Assert-PathWithin -Path $stagingRoot -Root $normalizedArtifactRoot
+Assert-PathWithin -Path $packageRoot -Root $normalizedArtifactRoot
+
+$gitStatus = @(& git -C $projectRoot status --porcelain --untracked-files=all)
+if ($LASTEXITCODE -ne 0) {
+    throw 'Unable to verify the release source Git status'
+}
+if ($gitStatus.Count -gt 0) {
+    throw 'Release packaging requires a clean Git worktree'
+}
 
 $npmCommand = (Get-Command npm.cmd -ErrorAction Stop).Source
 

@@ -64,6 +64,7 @@ import type {
   FleetSpeedContextResponse,
   TelemetryRepresentation,
 } from '../types/evidence'
+import type { ChangeoverInspector, ChangeoverReport, ChangeoverRequest } from '../types/changeover'
 
 export class ApiRequestError extends Error {
   constructor(public readonly status: number) {
@@ -187,6 +188,22 @@ export function getJobIntelligenceReport(input: { pressKey: RadiusPressKey; from
     if (input.group.delimiter !== undefined) parameters.set('delimiter', input.group.delimiter)
   }
   return getJson<JobIntelligenceReport>(`/api/job-intelligence/report?${parameters}`, signal)
+}
+
+function changeoverParameters(input: ChangeoverRequest): URLSearchParams {
+  const parameters = new URLSearchParams({ fromUtc: input.fromUtc, toUtc: input.toUtc, mode: input.mode, stopSpeed: String(input.stopSpeed), recoverySpeed: String(input.recoverySpeed), recoveryConfirmationSeconds: String(input.recoveryConfirmationSeconds) })
+  if (input.focusPressKey) parameters.set('focusPressKey', input.focusPressKey)
+  return parameters
+}
+
+export function getChangeoverIntelligenceReport(input: ChangeoverRequest, signal?: AbortSignal) {
+  return getJson<ChangeoverReport>(`/api/changeover-intelligence/report?${changeoverParameters(input)}`, signal)
+}
+
+export function getChangeoverInspector(input: ChangeoverRequest & { changeoverId: string; pressKey: RadiusPressKey; physicalStartUtc: string; physicalRecoveryUtc: string }, signal?: AbortSignal) {
+  const parameters = changeoverParameters(input)
+  parameters.set('pressKey', input.pressKey); parameters.set('physicalStartUtc', input.physicalStartUtc); parameters.set('physicalRecoveryUtc', input.physicalRecoveryUtc)
+  return getJson<ChangeoverInspector>(`/api/changeover-intelligence/changeovers/${encodeURIComponent(input.changeoverId)}?${parameters}`, signal)
 }
 
 export function getRadiusOverview(fromUtc: string, toUtc: string, decisionOnly = false, signal?: AbortSignal) {
