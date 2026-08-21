@@ -3,8 +3,9 @@ import OpenAI from 'openai'
 import type { ResponseInput, ResponseInputItem } from 'openai/resources/responses/responses'
 import type { AiInvestigatorConfig } from '../config.js'
 import type { RadiusPressKey } from '../radius/models.js'
-import { AI_INVESTIGATOR_CONTENT_SCHEMA, AiInvestigatorValidationError, aiInvestigatorDiscoveryTextFormat, parseAiInvestigatorDiscoveryDraft, type AiGroundingFact, type AiInvestigatorContent, type AiInvestigatorDraftContent, type AiInvestigatorRequest, type AiInvestigatorResult, validateAiInvestigatorDiscoveryDraft, validateAiInvestigatorDraft } from './contracts.js'
+import { AI_INVESTIGATOR_CONTENT_SCHEMA, AiInvestigatorValidationError, aiInvestigatorDiscoveryTextFormat, parseAiInvestigatorDiscoveryDraft, type AiDeterministicDiscovery, type AiGroundingFact, type AiInvestigatorContent, type AiInvestigatorDraftContent, type AiInvestigatorRequest, type AiInvestigatorResult, validateAiInvestigatorDiscoveryDraft, validateAiInvestigatorDraft } from './contracts.js'
 import { buildDiscoveryPreflight, DISCOVERY_CANDIDATE_LIMIT, DISCOVERY_INSTRUCTIONS, DISCOVERY_OUTPUT_TOKENS, DISCOVERY_PROMPT_CACHE_KEY, expandDiscoveryDraft, validateDiscoveryReferences } from './discovery.js'
+import { buildDeterministicDiscovery } from './discovery-presentation.js'
 import { DiscoveryEvidenceValidationError } from './evidence-graph.js'
 import { groundAiInvestigatorDraft } from './grounding.js'
 import { AiInvestigatorReadOnlyToolRegistry, type AiInvestigatorToolDefinition, type AiInvestigatorToolExecutor, type AiToolResult } from './read-only-tools.js'
@@ -368,10 +369,10 @@ export class AiInvestigatorOrchestrator {
     const analysisId = randomUUID(); const started = this.now(); const startedAt = started.toISOString()
     const deadline = new AbortController(); const deadlineTimer = setTimeout(() => deadline.abort(new AiTimeoutError('overall')), this.config.totalTimeoutMs)
     const signal = requestSignal ? AbortSignal.any([deadline.signal, requestSignal]) : deadline.signal
-    let evidence: ToolEvidence[] = []
+    let evidence: ToolEvidence[] = []; let discovery: AiDeterministicDiscovery | undefined
     const finish = (status: AiInvestigatorResult['status'], content: AiInvestigatorContent, grounding: AiInvestigatorResult['grounding']) => {
       const completedAt = this.now().toISOString()
-      const result: AiInvestigatorResult = { analysisId, status, scope: { pressKey: request.scope.pressKey, startUtc: request.range.startUtc, endUtc: request.range.endUtc, analysis: request.analysis }, startedAt, completedAt, elapsedMs: Math.max(0, Date.parse(completedAt) - started.getTime()), toolCallsUsed: evidence.length, grounding, ...content }
+      const result: AiInvestigatorResult = { analysisId, status, scope: { pressKey: request.scope.pressKey, startUtc: request.range.startUtc, endUtc: request.range.endUtc, analysis: request.analysis }, startedAt, completedAt, elapsedMs: Math.max(0, Date.parse(completedAt) - started.getTime()), toolCallsUsed: evidence.length, grounding, ...content, ...(discovery ? { discovery } : {}) }
       safeLog(this.logger, status === 'error' ? 'error' : 'info', { event: 'ai_investigator_finished', architecture: 'single_synthesis', analysisId, status, elapsedMs: result.elapsedMs, toolCallsUsed: evidence.length, grounding })
       return result
     }
@@ -379,12 +380,14 @@ export class AiInvestigatorOrchestrator {
     try {
       const candidateLimit = Math.min(request.scope.pressKey ? 1 : DISCOVERY_CANDIDATE_LIMIT, Math.max(0, this.config.maxToolCalls - 2))
       let preflight
-      try { preflight = await buildDiscoveryPreflight(this.registry, request, signal, { requestId: analysisId, candidateLimit, maxParallelTools: this.config.maxParallelTools, toolTimeoutMs: this.config.toolTimeoutMs }) }
+      const discoveryToolTimeoutMs = request.scope.pressKey ? Math.max(this.config.toolTimeoutMs, Math.min(30_000, this.config.totalTimeoutMs - 3_000)) : this.config.toolTimeoutMs
+      try { preflight = await buildDiscoveryPreflight(this.registry, request, signal, { requestId: analysisId, candidateLimit, maxParallelTools: this.config.maxParallelTools, toolTimeoutMs: discoveryToolTimeoutMs }) }
       catch (error) {
         if (error instanceof DiscoveryEvidenceValidationError) safeLog(this.logger, 'error', { event: 'ai_investigator_evidence_graph_validation_failed', architecture: 'single_synthesis', analysisId, ...error.diagnostic })
         throw error
       }
       evidence = preflight.evidence
+      discovery = buildDeterministicDiscovery(preflight, request)
       for (const item of evidence) safeLog(this.logger, 'info', { event: 'ai_investigator_tool', architecture: 'single_synthesis', analysisId, tool: item.name, durationMs: item.durationMs, success: true, payloadBytes: utf8Bytes(item.result) })
       const input: unknown[] = [{ role: 'user', content: JSON.stringify(preflight.modelInput) } satisfies ResponseInputItem]
       const discoveryFormat = aiInvestigatorDiscoveryTextFormat(preflight.candidates.length)

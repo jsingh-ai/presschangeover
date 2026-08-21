@@ -94,6 +94,38 @@ export interface AiInvestigatorFinding {
   traceEvidence: AiTemporalEvidenceProgram[]
 }
 
+export type AiDiscoveryFindingCategory = 'telemetry' | 'radius' | 'state' | 'speed' | 'context'
+
+export interface AiDiscoveryVisualFinding {
+  id: string
+  rank: number
+  press: string
+  category: AiDiscoveryFindingCategory
+  title: string
+  metric: string
+  comparison: string
+  occurredAt: string
+  range: { start: string; end: string }
+  whyShown: string[]
+  evidenceChips: string[]
+  coveragePercent: number | null
+  rankingFactors: Array<{ label: string; value: string }>
+  visualization: { kind: 'sparkline' | 'recurrence' | 'state' | 'sequence' | 'none'; points: Array<{ atUtc: string; value: number }>; current: number | null; baseline: number | null; sequence: string[] }
+  fingerprint: { qualifiedOccurrences: number; bars: Array<{ label: string; ratePercent: number; observedOccurrences: number; validOccurrences: number }>; sequence: Array<{ label: string; relativeMinutes: number }>; common: string[]; exceptions: string[] } | null
+  links: Array<{ label: string; href: string }>
+  details: { observationFamily: string | null; variables: string[]; factIds: string[]; traceIds: string[]; limitations: string[] }
+}
+
+export interface AiDeterministicDiscovery {
+  version: 1
+  summary: { candidateCount: number; screenedObservations: number; findingCount: number; categories: Partial<Record<AiDiscoveryFindingCategory, number>>; coveragePercent: number | null }
+  findings: AiDiscoveryVisualFinding[]
+  bounds: { maximumFindings: 8; automaticRawSignalScans: 0; signalsScanned: number; signalsSelected: number; tracesCreated: number }
+  eventLearning: { reusedSharedEngine: true; enrichedFindings: number; qualifiedOccurrences: number }
+  performance: { preflightMs: number; presentationMs: number; dataServiceQueries: number; payloadBytes: number }
+  evidenceGraph: { registeredFacts: number; unresolvedReferences: number; crossPressViolations: number }
+}
+
 export interface AiTemporalEvidenceProgram {
   traceId: string
   canonicalId: string
@@ -123,6 +155,7 @@ export interface AiInvestigatorResult {
   findings: AiInvestigatorFinding[]
   tables: Array<{ title: string; columns: string[]; rows: string[][] }>
   limitations: string[]
+  discovery?: AiDeterministicDiscovery
 }
 
 export interface RadiusHealth {
@@ -1002,4 +1035,24 @@ export interface EventLearningReport {
   occurrenceMatrix: Array<{ occurrenceId: string; startUtc: string; patterns: string[] }>
   coverage: { candidateSignals: number; automaticRawSignalScans: 0; limitations: string[] }
   performance: { semanticHistoryRequests: number; cohortOccurrences: number; totalMs: number; payloadBytes: number }
+}
+export type JobAnalysisDimension = 'order' | 'recipe' | 'customer' | 'material'
+export type JobGroupOperator = 'exact' | 'contains' | 'starts_with' | 'ends_with' | 'position_range' | 'segment_equals'
+export type JobEvidenceLevel = 'strong' | 'moderate' | 'limited' | 'insufficient'
+export interface JobGroupDefinition { operator: JobGroupOperator; query: string; positionStart?: number; positionEnd?: number; segmentIndex?: number; delimiter?: string }
+export interface JobEvidenceSupport { level: JobEvidenceLevel; runCount: number; observedHours: number; coveragePercent: number; variabilityPoints: number | null; comparableCount: number; reason: string }
+export interface JobIdentitySummary { value: string; segments: string[]; runCount: number; observedSeconds: number; goodPercent: number; makeReadyPercent: number; badPercent: number; medianRunSeconds: number; medianTransitionSeconds: number | null; interruptions: number; interruptionsPerProductionHour: number | null; variabilityPoints: number | null; consistency: 'consistent' | 'variable' | 'highly_variable' | 'insufficient'; support: JobEvidenceSupport }
+export interface JobRadiusLoss { eventType: string; statusCode: string | null; statusDescription: string; totalSeconds: number; secondsPerRun: number; occurrenceCount: number; occurrencesPerRun: number; medianEpisodeSeconds: number; evidenceUrl: string }
+export interface JobTransitionSummary { transitionKey: string; pressKey: RadiusPressKey; previousValue: string; currentValue: string; transitionCount: number; medianTransitionSeconds: number | null; goodPercent: number; makeReadyPercent: number; badPercent: number; interruptionRatePerTransition: number; support: JobEvidenceSupport; radiusCauses: JobRadiusLoss[]; fingerprint: { exactRadiusSequence: Array<{ eventType: string; statusCode: string | null; statusDescription: string }>; recurringSequenceCount: number; medianIdentitySettlingSeconds: number; medianTimingUncertaintySeconds: number | null; deckChangeEvidence: null | { supportedRunCount: number; medianChangedDecks: number; commonlyReusedDecks: number[]; commonlyAddedDecks: number[]; commonlyRemovedDecks: number[] }; telemetryPhysicalTiming: 'not_loaded_in_summary'; telemetryEvidenceUrl: string }; evidenceUrl: string }
+export interface JobPressAffinity { pressKey: RadiusPressKey; displayName: string; runCount: number; observedSeconds: number; goodPercent: number; makeReadyPercent: number; badPercent: number; medianTransitionSeconds: number | null; variabilityPoints: number | null; actualVersusComparableGoodPoints: number | null; comparableRunCount: number; comparisonDescription: string; recoverableOpportunitySeconds: number | null; recoverableBaseline: string | null; support: JobEvidenceSupport }
+export interface JobDecisionCard { kind: 'preferred_press' | 'sequence_risk' | 'largest_loss' | 'stability' | 'insufficient_evidence'; label: string; headline: string; value: string; detail: string; evidenceLevel: JobEvidenceLevel; inspectUrl: string }
+export interface JobIntelligenceReport {
+  version: 'job-intelligence-v1'; generatedAtUtc: string; fromUtc: string; toUtc: string; pressKey: RadiusPressKey; displayName: string; analyzeBy: JobAnalysisDimension; metricName: 'Production State Efficiency'
+  boundaryPolicy: { settlingWindowSeconds: 300; stableProductionConfirmationSeconds: 300; description: string }
+  coverage: Array<{ field: JobAnalysisDimension; capability: 'available' | 'unavailable' | 'temporarily_unavailable'; valueCoveragePercent: number; confidence: 'high' | 'moderate' | 'limited' | 'unavailable'; limitation: string | null }>
+  ranking: JobIdentitySummary[]
+  selectedGroup: null | { definition: JobGroupDefinition; includedValues: string[]; runCount: number }
+  decisions: JobDecisionCard[]; crossPress: JobPressAffinity[]; transitions: JobTransitionSummary[]; radiusLosses: JobRadiusLoss[]
+  findings: Array<{ findingId: string; category: string; title: string; evidenceLevel: JobEvidenceLevel; evidenceUrl: string; deterministicInputs: string[] }>
+  evidenceLinks: { rawRadius: string; telemetryEvents: string }; limitations: string[]
 }

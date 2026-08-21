@@ -30,9 +30,13 @@ import { RAW_TELEMETRY_REVIEW_STATUSES, type RawTelemetryReviewService, type Raw
 import { TELEMETRY_EVENT_MAX_CONTEXT_MINUTES, TELEMETRY_EVENT_MAX_RANGE_MS, TelemetryEventExplorerService, type TelemetryEventOccurrence, type TelemetryEventSearchInput } from './telemetry-event-explorer/telemetry-event-explorer-service.js'
 import type { AiInvestigatorConfig } from './config.js'
 import { parseAiInvestigatorRequest } from './ai-investigator/contracts.js'
+import { buildDiscoveryPreflight, DISCOVERY_CANDIDATE_LIMIT } from './ai-investigator/discovery.js'
+import { buildDeterministicDiscovery } from './ai-investigator/discovery-presentation.js'
 import { AI_INVESTIGATOR_TOOL_NAMES, AiInvestigatorReadOnlyToolRegistry } from './ai-investigator/read-only-tools.js'
 import { AiInvestigatorOrchestrator, createAiInvestigatorOrchestrator, investigatorDisplayName, type AiInvestigatorModelClient } from './ai-investigator/orchestrator.js'
 import { EXPLORER_HTTP_VALIDATION_CAPABILITIES } from './explorer-validation-capabilities.js'
+import { JOB_ANALYSIS_DIMENSIONS, JOB_GROUP_OPERATORS, type JobGroupDefinition } from './job-intelligence/contracts.js'
+import { JOB_INTELLIGENCE_MAX_RANGE_MS, JobIntelligenceService } from './job-intelligence/service.js'
 
 const MAX_PHYSICAL_STATE_RANGE_MS = 2 * 60 * 60 * 1_000
 const MAX_RADIUS_RANGE_MS = 31 * 24 * 60 * 60 * 1_000
@@ -487,6 +491,7 @@ export function createApp({
   const stopRestart = new StopRestartAnalysisService(telemetry)
   const rawRadiusExplorer = new RawRadiusExplorerService(radiusService, telemetry, rawTelemetryReviewService)
   const telemetryEventExplorer = new TelemetryEventExplorerService(telemetry, radiusService, rawRadiusExplorer)
+  const jobIntelligence = new JobIntelligenceService(radiusService, telemetry)
   const aiToolRegistry = new AiInvestigatorReadOnlyToolRegistry(radiusService, telemetry)
   const aiInvestigator = aiInvestigatorConfig?.enabled && aiInvestigatorModelClient
     ? new AiInvestigatorOrchestrator(aiInvestigatorConfig, aiToolRegistry, aiInvestigatorModelClient, logger)
@@ -545,6 +550,18 @@ export function createApp({
     try { input = parseAiInvestigatorRequest(request.body) }
     catch (error) { throw new RequestValidationError(error instanceof Error ? error.message : 'invalid_ai_investigator_request') }
     response.status(200).json(await aiInvestigator.analyzeDiscovery(input, cancellationSignal(request, response)))
+  }))
+
+  app.post('/api/ai-investigator/discover', asyncRoute(async (request, response) => {
+    let input
+    try { input = parseAiInvestigatorRequest(request.body) }
+    catch (error) { throw new RequestValidationError(error instanceof Error ? error.message : 'invalid_ai_investigator_request') }
+    const requestSignal = cancellationSignal(request, response)
+    const timeoutSignal = AbortSignal.timeout(aiInvestigatorConfig?.totalTimeoutMs ?? 45_000)
+    const configuredToolTimeout = aiInvestigatorConfig?.toolTimeoutMs ?? 8_000; const totalTimeout = aiInvestigatorConfig?.totalTimeoutMs ?? 45_000
+    const discoveryToolTimeout = input.scope.pressKey ? Math.max(configuredToolTimeout, Math.min(30_000, totalTimeout - 3_000)) : configuredToolTimeout
+    const preflight = await buildDiscoveryPreflight(aiToolRegistry, input, AbortSignal.any([requestSignal, timeoutSignal]), { requestId: String(response.locals.requestId), candidateLimit: input.scope.pressKey ? 1 : DISCOVERY_CANDIDATE_LIMIT, maxParallelTools: aiInvestigatorConfig?.maxParallelTools ?? 3, toolTimeoutMs: discoveryToolTimeout, includeDiagnostics: true })
+    response.status(200).json(buildDeterministicDiscovery(preflight, input))
   }))
 
   app.get(
@@ -660,6 +677,26 @@ export function createApp({
       response.status(health.status === 'healthy' ? 200 : 503).json(health)
     }),
   )
+
+  app.get('/api/job-intelligence/report', asyncRoute(async (request, response) => {
+    const { fromUtc, toUtc } = validateRadiusRange(request.query)
+    if (Date.parse(toUtc) - Date.parse(fromUtc) > JOB_INTELLIGENCE_MAX_RANGE_MS) throw new RequestValidationError('job_intelligence_range_too_large')
+    const pressKey = parsePressKey(String(request.query.pressKey ?? ''))
+    const analyzeBy = String(request.query.analyzeBy ?? '')
+    if (!JOB_ANALYSIS_DIMENSIONS.includes(analyzeBy as (typeof JOB_ANALYSIS_DIMENSIONS)[number])) throw new RequestValidationError('invalid_job_analysis_dimension')
+    const operator = request.query.operator === undefined ? undefined : String(request.query.operator)
+    const query = request.query.query === undefined ? undefined : String(request.query.query).trim()
+    let group: JobGroupDefinition | undefined
+    if (operator !== undefined || query !== undefined) {
+      if (!operator || !JOB_GROUP_OPERATORS.includes(operator as (typeof JOB_GROUP_OPERATORS)[number]) || !query || query.length > 240) throw new RequestValidationError('invalid_job_group')
+      const optionalInteger = (value: unknown, maximum: number) => { if (value === undefined) return undefined; const parsed = Number(value); if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > maximum) throw new RequestValidationError('invalid_job_group'); return parsed }
+      const delimiter = request.query.delimiter === undefined ? undefined : String(request.query.delimiter)
+      if (delimiter !== undefined && (!delimiter.length || delimiter.length > 3)) throw new RequestValidationError('invalid_job_group')
+      group = { operator: operator as JobGroupDefinition['operator'], query, positionStart: optionalInteger(request.query.positionStart, 240), positionEnd: optionalInteger(request.query.positionEnd, 240), segmentIndex: optionalInteger(request.query.segmentIndex, 20), delimiter }
+      if (group.operator === 'position_range' && (group.positionStart === undefined || group.positionEnd === undefined || group.positionEnd < group.positionStart) || group.operator === 'segment_equals' && group.segmentIndex === undefined) throw new RequestValidationError('invalid_job_group')
+    }
+    response.status(200).json(await jobIntelligence.report({ pressKey, fromUtc, toUtc, analyzeBy: analyzeBy as (typeof JOB_ANALYSIS_DIMENSIONS)[number], group }, String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
 
   app.get(
     '/api/radius/overview',

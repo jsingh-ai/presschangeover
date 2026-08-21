@@ -44,6 +44,9 @@ import type {
   AiInvestigatorResult,
   BasicHistoricalSummary,
   EventLearningReport,
+  JobAnalysisDimension,
+  JobGroupDefinition,
+  JobIntelligenceReport,
 } from '../types/api'
 import type {
   CuratedPhysicalEvidence,
@@ -172,6 +175,18 @@ function rangeQuery(fromUtc: string, toUtc: string): string {
 
 export function getRadiusHealth(signal?: AbortSignal) {
   return getJson<RadiusHealth>('/api/radius/health', signal)
+}
+
+export function getJobIntelligenceReport(input: { pressKey: RadiusPressKey; fromUtc: string; toUtc: string; analyzeBy: JobAnalysisDimension; group?: JobGroupDefinition }, signal?: AbortSignal) {
+  const parameters = new URLSearchParams({ pressKey: input.pressKey, fromUtc: input.fromUtc, toUtc: input.toUtc, analyzeBy: input.analyzeBy })
+  if (input.group) {
+    parameters.set('operator', input.group.operator); parameters.set('query', input.group.query)
+    if (input.group.positionStart !== undefined) parameters.set('positionStart', String(input.group.positionStart))
+    if (input.group.positionEnd !== undefined) parameters.set('positionEnd', String(input.group.positionEnd))
+    if (input.group.segmentIndex !== undefined) parameters.set('segmentIndex', String(input.group.segmentIndex))
+    if (input.group.delimiter !== undefined) parameters.set('delimiter', input.group.delimiter)
+  }
+  return getJson<JobIntelligenceReport>(`/api/job-intelligence/report?${parameters}`, signal)
 }
 
 export function getRadiusOverview(fromUtc: string, toUtc: string, decisionOnly = false, signal?: AbortSignal) {

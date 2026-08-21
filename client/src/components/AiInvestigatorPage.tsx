@@ -25,7 +25,7 @@ function InvestigatorEvidenceTrace({ traces }: { traces: AiTemporalEvidenceProgr
   return <section className="ai-temporal-trace" aria-label="Synchronized deterministic evidence trace"><div className="ai-temporal-trace__heading"><div><h4>Grounded temporal trace</h4><p>Qualitative interpretation is grounded to these deterministic programs; it is not a root-cause conclusion.</p></div><span>{traces.length} trace{traces.length === 1 ? '' : 's'}</span></div><div className="ai-temporal-trace__rows">{traces.map((trace) => <div className="ai-temporal-trace__row" key={trace.traceId}><div><strong>{trace.canonicalId}</strong><small>{trace.coveragePercent}% coverage · {trace.gapState.toLowerCase().replaceAll('_', ' ')}</small></div><div className="ai-temporal-trace__program">{trace.segments?.map((segment, index) => <span key={`${trace.traceId}-segment-${index}`} title={`${relativeTime(segment.startRelativeMinutes)} to ${relativeTime(segment.endRelativeMinutes)}: ${segment.startValue} to ${segment.endValue}`}><b>{segment.trend.toLowerCase()}</b> {relativeTime(segment.startRelativeMinutes)}…{relativeTime(segment.endRelativeMinutes)}</span>)}{trace.intervals?.map((interval, index) => <span key={`${trace.traceId}-interval-${index}`} title={`${relativeTime(interval.startRelativeMinutes)} to ${relativeTime(interval.endRelativeMinutes)}`}><b>{String(interval.value)}</b> {relativeTime(interval.startRelativeMinutes)}…{relativeTime(interval.endRelativeMinutes)}</span>)}</div><a href={trace.explorer.href}>{trace.explorer.label}</a></div>)}</div></section>
 }
 
-export function AiInvestigatorPage() {
+export function LegacyAiInvestigatorPage() {
   const [status, setStatus] = useState<AiInvestigatorServerStatus>()
   const [statusError, setStatusError] = useState(false)
   const [pressKey, setPressKey] = useState<RadiusPressKey | 'all'>('all')
@@ -121,3 +121,5 @@ export function AiInvestigatorPage() {
     </>}
   </div>
 }
+
+export { AiInvestigatorVisualPage as AiInvestigatorPage } from './AiInvestigatorVisualPage'

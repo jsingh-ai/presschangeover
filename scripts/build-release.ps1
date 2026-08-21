@@ -88,7 +88,14 @@ try {
     Write-Host 'Validating source...'
     Invoke-Checked -FilePath $npmCommand -Arguments @('run', 'typecheck')
     Invoke-Checked -FilePath $npmCommand -Arguments @('test')
-    Invoke-Checked -FilePath $npmCommand -Arguments @('run', 'build')
+    try {
+        Invoke-Checked -FilePath $npmCommand -Arguments @('run', 'build')
+    }
+    catch {
+        Write-Host 'Initial production build failed; retrying once after completed test workers release build artifacts.'
+        Start-Sleep -Seconds 3
+        Invoke-Checked -FilePath $npmCommand -Arguments @('run', 'build')
+    }
 }
 finally {
     Pop-Location

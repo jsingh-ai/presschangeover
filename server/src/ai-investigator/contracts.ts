@@ -66,6 +66,63 @@ export interface AiInvestigatorFinding {
 export interface AiInvestigatorTable { title: string; columns: string[]; rows: string[][] }
 export interface AiInvestigatorContent { summary: string; findings: AiInvestigatorFinding[]; tables: AiInvestigatorTable[]; limitations: string[] }
 
+export type AiDiscoveryFindingCategory = 'telemetry' | 'radius' | 'state' | 'speed' | 'context'
+
+export interface AiDiscoveryFingerprintBar {
+  label: string
+  ratePercent: number
+  observedOccurrences: number
+  validOccurrences: number
+}
+
+export interface AiDiscoveryVisualFinding {
+  id: string
+  rank: number
+  press: string
+  category: AiDiscoveryFindingCategory
+  title: string
+  metric: string
+  comparison: string
+  occurredAt: string
+  range: { start: string; end: string }
+  whyShown: string[]
+  evidenceChips: string[]
+  coveragePercent: number | null
+  rankingFactors: Array<{ label: string; value: string }>
+  visualization: {
+    kind: 'sparkline' | 'recurrence' | 'state' | 'sequence' | 'none'
+    points: Array<{ atUtc: string; value: number }>
+    current: number | null
+    baseline: number | null
+    sequence: string[]
+  }
+  fingerprint: {
+    qualifiedOccurrences: number
+    bars: AiDiscoveryFingerprintBar[]
+    sequence: Array<{ label: string; relativeMinutes: number }>
+    common: string[]
+    exceptions: string[]
+  } | null
+  links: AiInvestigatorLink[]
+  details: {
+    observationFamily: string | null
+    variables: string[]
+    factIds: string[]
+    traceIds: string[]
+    limitations: string[]
+  }
+}
+
+export interface AiDeterministicDiscovery {
+  version: 1
+  summary: { candidateCount: number; screenedObservations: number; findingCount: number; categories: Partial<Record<AiDiscoveryFindingCategory, number>>; coveragePercent: number | null }
+  findings: AiDiscoveryVisualFinding[]
+  bounds: { maximumFindings: 8; automaticRawSignalScans: 0; signalsScanned: number; signalsSelected: number; tracesCreated: number }
+  eventLearning: { reusedSharedEngine: true; enrichedFindings: number; qualifiedOccurrences: number }
+  performance: { preflightMs: number; presentationMs: number; dataServiceQueries: number; payloadBytes: number }
+  evidenceGraph: { registeredFacts: number; unresolvedReferences: number; crossPressViolations: number }
+}
+
 export interface AiInvestigatorGroundingSummary {
   acceptedUnchanged: number
   corrected: number
@@ -82,6 +139,7 @@ export interface AiInvestigatorResult extends AiInvestigatorContent {
   elapsedMs: number
   toolCallsUsed: number
   grounding: AiInvestigatorGroundingSummary
+  discovery?: AiDeterministicDiscovery
 }
 
 export interface AiInvestigatorServerStatus {

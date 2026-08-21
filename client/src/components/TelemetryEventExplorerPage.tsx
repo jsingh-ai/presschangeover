@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { ApiRequestError, getTelemetryEventCatalog, getTelemetryEventDetail, getTelemetryEventHistoricalSummary, getTelemetryEventLearningReport, plotTelemetryEventRawSignal, plotTelemetryEventSignal, previewTelemetryEventVariable, searchTelemetryEventRawCatalog, searchTelemetryEvents } from '../api/process-intelligence-api'
-import { createCustomRange, createPresetRange, defaultCustomValues, formatPlantDateTime, formatSelectedRange, RangeValidationError, type SelectedRange } from '../time-ranges'
+import { createCustomRange, createPresetRange, defaultCustomValues, formatPlantDateTime, formatSelectedRange, RangeValidationError, restoreSelectedRange, type SelectedRange } from '../time-ranges'
 import type { BasicHistoricalSummary, EventLearningReport as EventLearningReportContract, EventSignalPattern, RadiusPressKey, RawExplorerChangedSignal, RawExplorerOccurrence, RawExplorerPlotResult, RawExplorerSignalHistory, RawUnmappedChangedSignal, RawUnmappedHistory, RawUnmappedPlotResult, TelemetryEventCatalog, TelemetryEventDetail, TelemetryEventOccurrence, TelemetryEventPreview, TelemetryEventRawCatalogItem, TelemetryEventRawCatalogResult, TelemetryEventRule, TelemetryEventScalar, TelemetryEventSearchInput, TelemetryEventSource } from '../types/api'
 import type { TimedNumericSample } from '../types/evidence'
 import { CURRENT_ROLL_LENGTH_CANONICAL_ID, RawExplorerInspectionTooltip, rawExplorerNumberSamples, rawExplorerStateIntervals, rawUnmappedNumberSamples, rawUnmappedStateIntervals } from './RawRadiusExplorerPage'
@@ -13,6 +13,39 @@ type BrowserTab = 'all' | 'canonical' | 'raw'
 type Pin = { kind: 'canonical'; key: string; signal: RawExplorerChangedSignal } | { kind: 'raw'; key: string; rawIdentity: string; label: string }
 type ResultPressFilter = 'all' | RadiusPressKey
 const PIN_STORAGE_KEY = 'process-intelligence-telemetry-event-pins'
+
+export interface TelemetryEventDeepLinkState {
+  range?: SelectedRange
+  canonicalId?: string
+  pressKey: TelemetryEventSearchInput['pressKey']
+  deckNumber: TelemetryEventSearchInput['deckNumber']
+  eventType: 'threshold' | 'delta' | 'value_change'
+  direction: 'increase' | 'decrease' | 'either'
+  amount: string
+  windowMinutes: string
+  contextMinutes: string
+  valueMatch: 'any' | 'becomes' | 'from_to'
+  fromValue: string
+  toValue: string
+  autorun: boolean
+  occurrenceStart?: string
+}
+
+export function parseTelemetryEventDeepLink(search: string): TelemetryEventDeepLinkState {
+  const params = new URLSearchParams(search)
+  const eventType = params.get('eventType'); const press = params.get('press'); const deck = params.get('deck'); const direction = params.get('direction'); const match = params.get('match')
+  return {
+    range: restoreSelectedRange(params.get('fromUtc'), params.get('toUtc'), params.get('preset')),
+    canonicalId: params.get('canonicalId') || undefined,
+    pressKey: press && /^press(?:3|5|6|7|8|9|10|11|12|13|14|15)$/.test(press) ? press as RadiusPressKey : 'all',
+    deckNumber: deck && /^\d+$/.test(deck) ? Number(deck) : 'any',
+    eventType: eventType === 'delta' || eventType === 'value_change' ? eventType : 'threshold',
+    direction: direction === 'decrease' || direction === 'either' ? direction : 'increase',
+    amount: params.get('amount') || '5', windowMinutes: params.get('windowMinutes') || '10', contextMinutes: params.get('context') || '30',
+    valueMatch: match === 'becomes' || match === 'from_to' ? match : 'any', fromValue: params.get('fromValue') || '', toValue: params.get('toValue') || '',
+    autorun: params.get('autorun') === '1', occurrenceStart: params.get('occurrenceStart') || undefined,
+  }
+}
 
 export function filterTelemetryEventOccurrences(occurrences: TelemetryEventOccurrence[], pressFilter: ResultPressFilter) {
   return pressFilter === 'all' ? occurrences : occurrences.filter(({ pressKey }) => pressKey === pressFilter)
@@ -328,23 +361,26 @@ function EventInvestigation({ occurrence, occurrences, rule, pins, onPinsChange,
 function historyRawIdentityNotPrimary(occurrence: TelemetryEventOccurrence, history: { rawIdentity: string }) { return occurrence.sourceKind !== 'raw' || occurrence.rawIdentity !== history.rawIdentity }
 
 export function TelemetryEventExplorerPage() {
-  const [range, setRange] = useState<SelectedRange>(() => createPresetRange('last24'))
-  const [rangeMode, setRangeMode] = useState<'last24' | 'custom'>('last24')
+  const deepLink = useMemo(() => parseTelemetryEventDeepLink(typeof window === 'undefined' ? '' : window.location.search), [])
+  const initialRange = useMemo(() => deepLink.range ?? createPresetRange('last24'), [deepLink])
+  const [range, setRange] = useState<SelectedRange>(initialRange)
+  const [rangeMode, setRangeMode] = useState<'last24' | 'custom'>(initialRange.preset === 'last24' ? 'last24' : 'custom')
   const customDefaults = useMemo(defaultCustomValues, [])
-  const [customFrom, setCustomFrom] = useState(customDefaults.from); const [customTo, setCustomTo] = useState(customDefaults.to)
+  const [customFrom, setCustomFrom] = useState(initialRange.customFromLocal ?? customDefaults.from); const [customTo, setCustomTo] = useState(initialRange.customToLocal ?? customDefaults.to)
   const [catalog, setCatalog] = useState<TelemetryEventCatalog>({ canonicalVariables: [] })
   const [catalogLoading, setCatalogLoading] = useState(true); const [catalogError, setCatalogError] = useState<string>()
   const [sourceTab, setSourceTab] = useState<SourceTab>('canonical'); const [variableSearch, setVariableSearch] = useState('')
-  const [selectedCanonicalId, setSelectedCanonicalId] = useState<string>(); const [rawPressKey, setRawPressKey] = useState<RadiusPressKey>('press3'); const [selectedRaw, setSelectedRaw] = useState<TelemetryEventRawCatalogItem>()
+  const [selectedCanonicalId, setSelectedCanonicalId] = useState<string | undefined>(deepLink.canonicalId); const [rawPressKey, setRawPressKey] = useState<RadiusPressKey>('press3'); const [selectedRaw, setSelectedRaw] = useState<TelemetryEventRawCatalogItem>()
   const [rawCatalog, setRawCatalog] = useState<TelemetryEventRawCatalogResult>(); const [rawCatalogLoading, setRawCatalogLoading] = useState(false); const [rawCatalogError, setRawCatalogError] = useState<string>(); const [rawPage, setRawPage] = useState(0)
-  const [pressKey, setPressKey] = useState<TelemetryEventSearchInput['pressKey']>('all'); const [deckNumber, setDeckNumber] = useState<TelemetryEventSearchInput['deckNumber']>('any')
-  const [eventType, setEventType] = useState<'threshold' | 'delta' | 'value_change'>('threshold'); const [operator, setOperator] = useState<'>' | '>=' | '<' | '<='>('>'); const [threshold, setThreshold] = useState('200')
-  const [direction, setDirection] = useState<'increase' | 'decrease' | 'either'>('increase'); const [amount, setAmount] = useState('5'); const [windowMinutes, setWindowMinutes] = useState('10'); const [contextMinutes, setContextMinutes] = useState('30')
-  const [valueMatch, setValueMatch] = useState<'any' | 'becomes' | 'from_to'>('any'); const [becomesValue, setBecomesValue] = useState(''); const [fromValue, setFromValue] = useState(''); const [toValue, setToValue] = useState('')
+  const [pressKey, setPressKey] = useState<TelemetryEventSearchInput['pressKey']>(deepLink.pressKey); const [deckNumber, setDeckNumber] = useState<TelemetryEventSearchInput['deckNumber']>(deepLink.deckNumber)
+  const [eventType, setEventType] = useState<'threshold' | 'delta' | 'value_change'>(deepLink.eventType); const [operator, setOperator] = useState<'>' | '>=' | '<' | '<='>('>'); const [threshold, setThreshold] = useState('200')
+  const [direction, setDirection] = useState<'increase' | 'decrease' | 'either'>(deepLink.direction); const [amount, setAmount] = useState(deepLink.amount); const [windowMinutes, setWindowMinutes] = useState(deepLink.windowMinutes); const [contextMinutes, setContextMinutes] = useState(deepLink.contextMinutes)
+  const [valueMatch, setValueMatch] = useState<'any' | 'becomes' | 'from_to'>(deepLink.valueMatch); const [becomesValue, setBecomesValue] = useState(''); const [fromValue, setFromValue] = useState(deepLink.fromValue); const [toValue, setToValue] = useState(deepLink.toValue)
   const [previewOption, setPreviewOption] = useState<PreviewOption>(); const [preview, setPreview] = useState<TelemetryEventPreview>(); const [previewLoading, setPreviewLoading] = useState(false); const [previewError, setPreviewError] = useState<string>()
   const [previewRefreshKey, setPreviewRefreshKey] = useState(0); const [rangeApplyPending, setRangeApplyPending] = useState(false); const previewRequestId = useRef(0)
   const [result, setResult] = useState<Awaited<ReturnType<typeof searchTelemetryEvents>>>(); const [resultPressFilter, setResultPressFilter] = useState<ResultPressFilter>('all'); const [selectedIndex, setSelectedIndex] = useState(-1); const [loading, setLoading] = useState(false); const [error, setError] = useState<string>(); const [setupCollapsed, setSetupCollapsed] = useState(false); const [sidebarOpen, setSidebarOpen] = useState(true)
   const [pins, setPins] = useState<Pin[]>(() => { try { return typeof sessionStorage === 'undefined' ? [] : JSON.parse(sessionStorage.getItem(PIN_STORAGE_KEY) ?? '[]') as Pin[] } catch { return [] } })
+  const deepLinkRunStarted = useRef(false)
   useEffect(() => { try { if (typeof sessionStorage !== 'undefined') sessionStorage.setItem(PIN_STORAGE_KEY, JSON.stringify(pins)) } catch {} }, [pins])
 
   useEffect(() => { const controller = new AbortController(); setCatalogLoading(true); setCatalogError(undefined); void getTelemetryEventCatalog(controller.signal).then(setCatalog).catch(() => setCatalogError('Trusted telemetry mappings could not be loaded.')).finally(() => setCatalogLoading(false)); return () => controller.abort() }, [])
@@ -381,6 +417,16 @@ export function TelemetryEventExplorerPage() {
   }, [sourceTab, selectedCanonicalId, selectedRaw?.rawIdentity, previewOption?.pressKey, previewOption?.deckNumber, range.fromUtc, range.toUtc, previewRefreshKey])
 
   useEffect(() => { if (selectedDataKind && selectedDataKind !== 'numeric') setEventType('value_change') }, [selectedDataKind])
+  useEffect(() => {
+    if (!deepLink.autorun || deepLinkRunStarted.current || catalogLoading || !selectedCanonical) return
+    deepLinkRunStarted.current = true
+    void runSearch()
+  }, [catalogLoading, selectedCanonicalId])
+  useEffect(() => {
+    if (!result || !deepLink.occurrenceStart) return
+    const index = result.occurrences.findIndex((item) => Math.abs(Date.parse(item.startUtc) - Date.parse(deepLink.occurrenceStart!)) <= 60_000)
+    if (index >= 0) setSelectedIndex(index)
+  }, [result])
 
   function selectLast24Hours() { setRangeMode('last24'); setRange(createPresetRange('last24')); setError(undefined) }
   function searchAnotherCondition() {

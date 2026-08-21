@@ -15,9 +15,10 @@ describe('application shell', () => {
       area: 'operational-analysis', theme: 'light', onNavigate() {}, onToggleTheme() {},
       context: createElement('span', null, 'Context'), children: createElement('h1', null, 'Operational Analysis'), footer: createElement('span', null, 'Health'),
     }))
-    assert.equal((html.match(/class="primary-nav-link/g) ?? []).length, 8)
+    assert.equal((html.match(/class="primary-nav-link/g) ?? []).length, 9)
     assert.match(html, /Overview/)
     assert.match(html, /Operational Analysis/)
+    assert.match(html, /Job Intelligence/)
     assert.match(html, /Raw Radius Explorer/)
     assert.match(html, /Telemetry Event Explorer/)
     assert.match(html, /Patterns &amp; Episodes/)

@@ -4,44 +4,41 @@ import { describe, it } from 'node:test'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { AiInvestigatorPage } from '../src/components/AiInvestigatorPage'
+import { parseTelemetryEventDeepLink } from '../src/components/TelemetryEventExplorerPage'
 import { areaFromPathname, areaPath } from '../src/navigation'
 
-const source = readFileSync(new URL('../src/components/AiInvestigatorPage.tsx', import.meta.url), 'utf8')
+const source = readFileSync(new URL('../src/components/AiInvestigatorVisualPage.tsx', import.meta.url), 'utf8')
 const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
 const api = readFileSync(new URL('../src/api/process-intelligence-api.ts', import.meta.url), 'utf8')
 
 describe('AI Investigator page', () => {
-  it('adds the requested route and advisory structured-analysis controls', () => {
+  it('keeps only press and time as the automatic discovery inputs', () => {
     assert.equal(areaFromPathname('/ai-investigator'), 'ai-investigator')
     assert.equal(areaPath('ai-investigator'), '/ai-investigator')
     const html = renderToStaticMarkup(createElement(AiInvestigatorPage))
-    assert.match(html, /AI Investigator/)
+    assert.match(html, /What was unusual/)
     assert.match(html, /Advisory and read-only/)
     assert.match(html, /All Presses/)
     assert.match(html, /Last 24 Hours/)
     assert.match(html, /Last 8 Hours/)
-    assert.match(html, /Discover unusual behavior/)
-    assert.match(html, /Maximum analysis time: 45 seconds/)
+    assert.match(html, /Press \+ time/)
+    assert.doesNotMatch(html, /Analysis<select/)
+    assert.match(html, /Maximum 45 seconds/)
   })
 
-  it('renders bounded progress, not-configured, timeout, findings, tables, metadata, and retry states', () => {
+  it('renders compact visuals with collapsed evidence and clears stale results on every input edit', () => {
     assert.match(source, /AI Investigator is not configured on this server/)
-    assert.match(source, /Preparing operational summary/)
-    assert.match(source, /Comparing recent behavior/)
-    assert.match(source, /Investigating candidate presses/)
-    assert.match(source, /Building findings/)
-    assert.match(source, /Analysis reached its \{maxSeconds\}-second time budget/)
-    assert.match(source, /Ranked findings/)
-    assert.match(source, /Deterministic evidence/)
-    assert.match(source, /Analysis metadata/)
-    assert.match(source, /Read-only data calls/)
-    assert.doesNotMatch(source, /Approved tool calls/)
-    assert.match(source, /Object\.entries\(finding\.productionContext\)/)
-    assert.match(source, /Grounded temporal trace/)
-    assert.match(source, /finding\.traceEvidence/)
-    assert.match(source, /not a root-cause conclusion/)
-    assert.match(styles, /ai-temporal-trace/)
-    assert.doesNotMatch(source, /Job<\/dt><dd>\{finding\.productionContext\.job \|\| 'Unavailable'/)
+    assert.match(source, /Screening trusted canonical signals/)
+    assert.match(source, /Anomaly \/ event timeline/)
+    assert.match(source, /MiniSparkline/)
+    assert.match(source, /ai-recurrence-chart/)
+    assert.match(source, /Historical fingerprint/)
+    assert.match(source, /<summary>Details<\/summary>/)
+    assert.match(source, />Verify<\/a>/)
+    assert.match(source, /clearStale\(\)/)
+    assert.match(styles, /ai-event-timeline/)
+    assert.match(styles, /ai-compact-findings/)
+    assert.match(styles, /ai-fingerprint-bar/)
     assert.match(source, /Retry/)
     assert.match(source, /Cancel/)
   })
@@ -54,5 +51,11 @@ describe('AI Investigator page', () => {
     assert.match(styles, /ai-investigator-page/)
     assert.match(styles, /data-theme="dark".*importance-high/)
     assert.match(styles, /@media \(max-width: 680px\)/)
+  })
+
+  it('restores an exact bounded canonical Verify link and requests one automatic search', () => {
+    const restored = parseTelemetryEventDeepLink('?preset=custom&fromUtc=2026-08-20T10%3A00%3A00.000Z&toUtc=2026-08-20T12%3A00%3A00.000Z&canonicalId=machine.speed.actual&press=press14&eventType=delta&direction=decrease&amount=12.5&windowMinutes=10&context=30&autorun=1&occurrenceStart=2026-08-20T11%3A00%3A00.000Z')
+    assert.equal(restored.canonicalId, 'machine.speed.actual'); assert.equal(restored.pressKey, 'press14'); assert.equal(restored.eventType, 'delta'); assert.equal(restored.direction, 'decrease'); assert.equal(restored.amount, '12.5'); assert.equal(restored.autorun, true)
+    assert.deepEqual([restored.range?.fromUtc, restored.range?.toUtc], ['2026-08-20T10:00:00.000Z', '2026-08-20T12:00:00.000Z'])
   })
 })

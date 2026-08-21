@@ -7,6 +7,8 @@ describe('analytics and administration navigation context', () => {
   it('recognizes analytics, Intelligent Search, and State Classification routes', () => {
     assert.equal(areaFromPathname('/overview'), 'overview')
     assert.equal(areaFromPathname('/operational-analysis'), 'operational-analysis')
+    assert.equal(areaFromPathname('/job-intelligence'), 'job-intelligence')
+    assert.equal(areaPath('job-intelligence'), '/job-intelligence')
     assert.equal(areaFromPathname('/patterns-episodes'), 'patterns-episodes')
     assert.equal(areaPath('patterns-episodes'), '/patterns-episodes')
     assert.equal(areaFromPathname('/intelligent-search'), 'intelligent-search')
