@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 import { readFile } from 'node:fs/promises'
 import { mergeContinuousProductionRuns, mergeHistoricalAndLiveRuns, JobHistoryMaterializer } from '../src/job-intelligence/history-materializer.js'
 import { aggregateRunLosses, InMemoryJobHistoryRepository, JOB_INTELLIGENCE_ALGORITHM_VERSION, materializedRun, PostgresJobHistoryRepository } from '../src/job-intelligence/history-repository.js'
+import { assertRepresentativeParity } from '../src/job-intelligence/representative-parity.js'
 import type { ProductionRun } from '../src/job-intelligence/contracts.js'
 
 const day = 24 * 60 * 60_000
@@ -68,6 +69,28 @@ describe('Job Intelligence historical store', () => {
     await repository.upsertRuns([value, value]); await repository.upsertRuns([structuredClone(value)])
     const stored = await repository.listRuns({})
     assert.equal(stored.length, 1); assert.equal(stored[0]!.run.runId, 'stable-run'); assert.equal(stored[0]!.algorithmVersion, JOB_INTELLIGENCE_ALGORITHM_VERSION)
+  })
+
+  it('accepts only sub-millisecond PostgreSQL timestamp normalization during representative parity', () => {
+    const live = run('precision-run', 0, day)
+    live.startUtc = '2026-01-01T00:00:00.000417Z'
+    live.endUtc = '2026-01-02T00:00:00.000731Z'
+    live.identityTransition.identityChangeFirstSeenAtUtc = '2026-01-01T00:00:01.234917Z'
+    live.identityTransition.identityLastChangeAtUtc = '2026-01-01T00:00:02.345817Z'
+    live.identityTransition.identitySettledAtUtc = '2026-01-01T00:05:02.345817Z'
+    live.runningPerformance = { stableProductionStartUtc: '2026-01-01T00:10:03.456719Z', observedSeconds: 100, goodSeconds: 90, badSeconds: 10, interruptions: 1, interruptionsPerProductionHour: 40, medianUninterruptedGoodSeconds: 45, restartCount: 1, speed: null }
+    const expected = materializedRun(live, start, at(2 * day), { isClosed: true })
+    const readBack = structuredClone(expected)
+    readBack.run.startUtc = '2026-01-01T00:00:00.000Z'
+    readBack.run.endUtc = '2026-01-02T00:00:00.000Z'
+    readBack.run.identityTransition.identityChangeFirstSeenAtUtc = '2026-01-01T00:00:01.234Z'
+    readBack.run.identityTransition.identityLastChangeAtUtc = '2026-01-01T00:00:02.345Z'
+    readBack.run.identityTransition.identitySettledAtUtc = '2026-01-01T00:05:02.345Z'
+    readBack.run.runningPerformance!.stableProductionStartUtc = '2026-01-01T00:10:03.456Z'
+    assert.doesNotThrow(() => assertRepresentativeParity([live], [readBack], start, at(2 * day)))
+
+    readBack.run.endUtc = '2026-01-02T00:00:00.001Z'
+    assert.throws(() => assertRepresentativeParity([live], [readBack], start, at(2 * day)), /job_history_parity_failed/)
   })
 
   it('updates an open run to closed without changing its identity', async () => {
