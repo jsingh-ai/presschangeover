@@ -30,7 +30,7 @@ export function mergeHistoricalAndLiveRuns(historical: MaterializedProductionRun
   const merged = new Map(historical.map((item) => [item.run.runId, structuredClone(item)]))
   for (const run of live) {
     const exact = merged.get(run.runId)
-    if (exact) { if (!exact.isClosed) merged.set(run.runId, materializedRun(run, sourceFromUtc, sourceToUtc)); continue }
+    if (exact) { const current = materializedRun(run, sourceFromUtc, sourceToUtc); if (!exact.isClosed || exact.sourceFingerprint !== current.sourceFingerprint) merged.set(run.runId, current); continue }
     const continuation = [...merged.values()].filter((item) => !item.isClosed).sort((a, b) => Date.parse(b.run.endUtc) - Date.parse(a.run.endUtc)).find((item) => mergeContinuousProductionRuns(item.run, run))
     if (continuation) { const combined = mergeContinuousProductionRuns(continuation.run, run)!; merged.set(continuation.run.runId, materializedRun({ ...combined, runId: continuation.run.runId }, continuation.sourceFromUtc, sourceToUtc)); continue }
     merged.set(run.runId, materializedRun(run, sourceFromUtc, sourceToUtc))
@@ -83,7 +83,7 @@ export class JobHistoryMaterializer {
         stage = 'history_read'
         const prior = await this.repository.listRuns({ fromUtc: new Date(Math.max(fromMs, sourceStart - SETTLING_OVERLAP_MS)).toISOString(), toUtc: sourceToUtc, pressKeys: [input.pressKey] })
         stage = 'derivation'
-        const reconciled = mergeHistoricalAndLiveRuns(prior, live, sourceFromUtc, sourceToUtc).filter((item) => Date.parse(item.run.endUtc) > cursor || prior.some((existing) => existing.run.runId === item.run.runId && existing.sourceFingerprint !== item.sourceFingerprint))
+        const reconciled = mergeHistoricalAndLiveRuns(prior, live, sourceFromUtc, sourceToUtc).filter((item) => { const existing = prior.find((candidate) => candidate.run.runId === item.run.runId); return !existing || !existing.isClosed || existing.sourceFingerprint !== item.sourceFingerprint })
         const finalChunk = chunkEnd >= toMs
         const boundaryRuns = reconciled.filter((item) => Date.parse(item.run.endUtc) >= chunkEnd)
         const nextCursor = boundaryRuns.length ? Math.min(...boundaryRuns.map((item) => Date.parse(item.run.startUtc))) : chunkEnd

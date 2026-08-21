@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { readFile } from 'node:fs/promises'
 import { mergeContinuousProductionRuns, mergeHistoricalAndLiveRuns, JobHistoryMaterializer } from '../src/job-intelligence/history-materializer.js'
-import { aggregateRunLosses, InMemoryJobHistoryRepository, JOB_INTELLIGENCE_ALGORITHM_VERSION, materializedRun, PostgresJobHistoryRepository } from '../src/job-intelligence/history-repository.js'
+import { aggregateRunLosses, InMemoryJobHistoryRepository, JOB_INTELLIGENCE_ALGORITHM_VERSION, materializedRun, persistenceText, persistenceTimestamp, PostgresJobHistoryRepository } from '../src/job-intelligence/history-repository.js'
 import { assertRepresentativeParity } from '../src/job-intelligence/representative-parity.js'
 import type { ProductionRun } from '../src/job-intelligence/contracts.js'
 
@@ -91,6 +91,37 @@ describe('Job Intelligence historical store', () => {
 
     readBack.run.endUtc = '2026-01-02T00:00:00.001Z'
     assert.throws(() => assertRepresentativeParity([live], [readBack], start, at(2 * day)), /job_history_parity_failed/)
+  })
+
+  it('reproduces the 183729 Date and empty-text readback mismatch without weakening parity', () => {
+    assert.equal(persistenceTimestamp(new Date('2026-08-19T11:03:59.280Z')), '2026-08-19T11:03:59.280Z')
+    assert.equal(persistenceText(''), '')
+    const live = run('press5.job.4901a4a8708260e5', 0, day)
+    live.endUtc = '2026-01-02T00:00:00.280414Z'
+    live.runningPerformance = { stableProductionStartUtc: start, observedSeconds: 100, goodSeconds: 90, badSeconds: 10, interruptions: 1, interruptionsPerProductionHour: 40, medianUninterruptedGoodSeconds: 45, restartCount: 0, speed: { canonicalId: 'machine.speed.actual', sourceUnit: '', canonicalUnitStatus: 'unverified', sampleCount: 27, median: 0, p25: 0, p75: .1, p90: 926.6, timeWeightedMean: 799.7 } }
+    const expected = materializedRun(live, start, at(2 * day), { isClosed: true })
+    const lossy = structuredClone(expected)
+    lossy.run.endUtc = '2026-01-02T00:00:00.000Z'
+    lossy.run.runningPerformance!.speed!.sourceUnit = null
+    lossy.sourceFingerprint = 'lossy-readback-fingerprint'
+    assert.throws(
+      () => assertRepresentativeParity([live], [lossy], start, at(2 * day)),
+      (error: unknown) => error instanceof Error && error.message.includes('"fingerprint":false') && error.message.includes('"field":"endUtc","expected":"2026-01-02T00:00:00.280Z","actual":"2026-01-02T00:00:00.000Z"') && error.message.includes('"field":"speed.sourceUnit","expected":"","actual":null'),
+    )
+    lossy.run.endUtc = '2026-01-02T00:00:00.280Z'; lossy.run.runningPerformance!.speed!.sourceUnit = ''; lossy.sourceFingerprint = expected.sourceFingerprint
+    assert.doesNotThrow(() => assertRepresentativeParity([live], [lossy], start, at(2 * day)))
+    lossy.run.endUtc = '2026-01-02T00:00:00.281Z'
+    assert.throws(() => assertRepresentativeParity([live], [lossy], start, at(2 * day)), /job_history_parity_failed/)
+  })
+
+  it('refreshes a lossy closed row from live evidence but preserves an unchanged closed fingerprint', () => {
+    const live = run('closed-refresh', 0, day); live.endUtc = '2026-01-02T00:00:00.280414Z'
+    const expected = materializedRun(live, start, at(2 * day), { isClosed: true })
+    const lossy = structuredClone(expected); lossy.run.endUtc = '2026-01-02T00:00:00.000Z'; lossy.sourceFingerprint = materializedRun(lossy.run, start, at(2 * day), { isClosed: true }).sourceFingerprint
+    const refreshed = mergeHistoricalAndLiveRuns([lossy], [live], start, at(2 * day))
+    assert.equal(refreshed[0]?.sourceFingerprint, expected.sourceFingerprint); assert.equal(refreshed[0]?.run.endUtc, live.endUtc)
+    const unchanged = mergeHistoricalAndLiveRuns([expected], [live], start, at(2 * day))
+    assert.deepEqual(unchanged, [expected])
   })
 
   it('updates an open run to closed without changing its identity', async () => {
