@@ -50,6 +50,8 @@ export interface ProductionRun {
   startUtc: string
   endUtc: string
   durationSeconds: number
+  boundaryCompleteness: 'natural' | 'left_fragment' | 'right_fragment' | 'isolated_fragment' | 'gap_fragment'
+  persistenceEligible: boolean
   identities: Partial<Record<JobAnalysisDimension, string>>
   previousIdentities: Partial<Record<JobAnalysisDimension, string>> | null
   nextIdentities: Partial<Record<JobAnalysisDimension, string>> | null

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import type { ProductionContextEvidence, TelemetrySample, TelemetryScalarValue } from '../telemetry/telemetry-contracts.js'
 import type { RadiusPressKey, RadiusStatusSegment } from '../radius/models.js'
 import { JOB_ANALYSIS_DIMENSIONS, type EvidenceSupport, type JobAnalysisDimension, type JobGroupDefinition, type JobIdentityCoverage, type JobIdentitySummary, type JobRadiusEpisode, type PressAffinity, type ProductionRun, type RadiusLossSummary, type TransitionSummary } from './contracts.js'
+import { fragmentProductionRunId, jobIdentityKey, naturalProductionRunId } from './natural-run-contract.js'
 
 export const JOB_CONTEXT_SETTLING_MS = 5 * 60_000
 export const JOB_STABLE_PRODUCTION_MS = 5 * 60_000
@@ -13,8 +14,9 @@ export interface DeckActiveEvidence {
 }
 
 interface ContextChange { atUtc: string; field: JobAnalysisDimension; value: string | null }
-interface ContextCluster { startUtc: string; endUtc: string; changes: ContextChange[] }
+interface ContextCluster { startUtc: string; endUtc: string; changes: ContextChange[]; startProven: boolean }
 type Identities = Partial<Record<JobAnalysisDimension, string>>
+type BoundaryOrigin = 'evidence_start' | 'identity_transition' | 'unresolved_identity_transition'
 
 const badQuality = (value?: string) => Boolean(value && /bad|invalid|unavailable|no_data|nodata/i.test(value))
 const round = (value: number, digits = 1) => { const factor = 10 ** digits; return Math.round(value * factor) / factor }
@@ -47,15 +49,12 @@ export function usableJobIdentity(value: unknown, qualityState?: string): string
   return normalized.slice(0, 240)
 }
 
-function identityKey(values: Identities): string {
-  return JOB_ANALYSIS_DIMENSIONS.map((field) => `${field}=${values[field] ?? ''}`).join('\u0000')
-}
-
-function clusters(changes: ContextChange[]): ContextCluster[] {
+function clusters(changes: ContextChange[], evidenceFromUtc: string): ContextCluster[] {
   const result: ContextCluster[] = []
+  const evidenceFrom = Date.parse(evidenceFromUtc)
   for (const change of [...changes].sort((a, b) => Date.parse(a.atUtc) - Date.parse(b.atUtc) || a.field.localeCompare(b.field))) {
     const prior = result.at(-1)
-    if (!prior || Date.parse(change.atUtc) - Date.parse(prior.endUtc) > JOB_CONTEXT_SETTLING_MS) result.push({ startUtc: change.atUtc, endUtc: change.atUtc, changes: [change] })
+    if (!prior || Date.parse(change.atUtc) - Date.parse(prior.endUtc) > JOB_CONTEXT_SETTLING_MS) result.push({ startUtc: change.atUtc, endUtc: change.atUtc, changes: [change], startProven: Date.parse(change.atUtc) - evidenceFrom >= JOB_CONTEXT_SETTLING_MS })
     else { prior.endUtc = change.atUtc; prior.changes.push(change) }
   }
   return result
@@ -97,13 +96,13 @@ function baseRuns(input: { pressKey: RadiusPressKey; fromUtc: string; toUtc: str
     const value = usableJobIdentity(item.value, item.qualityState)
     return [{ atUtc: item.atUtc, field: item.field as JobAnalysisDimension, value }]
   })
-  const boundaries: Array<{ atUtc: string; lastChangeUtc: string | null; settledUtc: string | null; identities: Identities; previous: Identities | null; fields: JobAnalysisDimension[]; settlingSeconds: number }> = [{ atUtc: input.fromUtc, lastChangeUtc: null, settledUtc: null, identities: { ...values }, previous: null, fields: [], settlingSeconds: 0 }]
-  for (const cluster of clusters(changes)) {
-    const previous = { ...values }; const before = identityKey(values); const fields = new Set<JobAnalysisDimension>()
+  const boundaries: Array<{ origin: BoundaryOrigin; atUtc: string; lastChangeUtc: string | null; settledUtc: string | null; identities: Identities; previous: Identities | null; fields: JobAnalysisDimension[]; settlingSeconds: number }> = [{ origin: 'evidence_start', atUtc: input.fromUtc, lastChangeUtc: null, settledUtc: null, identities: { ...values }, previous: null, fields: [], settlingSeconds: 0 }]
+  for (const cluster of clusters(changes, input.context.fromUtc)) {
+    const previous = { ...values }; const before = jobIdentityKey(values); const fields = new Set<JobAnalysisDimension>()
     for (const change of cluster.changes) { if (change.value === null) delete values[change.field]; else values[change.field] = change.value; fields.add(change.field) }
-    if (identityKey(values) !== before) {
+    if (jobIdentityKey(values) !== before) {
       const settledAt = Date.parse(cluster.endUtc) + JOB_CONTEXT_SETTLING_MS
-      boundaries.push({ atUtc: cluster.startUtc, lastChangeUtc: cluster.endUtc, settledUtc: settledAt <= Date.parse(input.toUtc) ? new Date(settledAt).toISOString() : null, identities: { ...values }, previous, fields: [...fields], settlingSeconds: round((Date.parse(cluster.endUtc) - Date.parse(cluster.startUtc)) / 1_000) })
+      boundaries.push({ origin: cluster.startProven ? 'identity_transition' : 'unresolved_identity_transition', atUtc: cluster.startUtc, lastChangeUtc: cluster.endUtc, settledUtc: settledAt <= Date.parse(input.toUtc) ? new Date(settledAt).toISOString() : null, identities: { ...values }, previous: cluster.startProven ? previous : null, fields: [...fields], settlingSeconds: round((Date.parse(cluster.endUtc) - Date.parse(cluster.startUtc)) / 1_000) })
     }
   }
   const gaps = input.radiusSegments.filter((segment) => segment.kind === 'offline').map((segment) => ({ startUtc: segment.startUtc, endUtc: segment.endUtc }))
@@ -120,6 +119,11 @@ function baseRuns(input: { pressKey: RadiusPressKey; fromUtc: string; toUtc: str
       let priorProduction = false; let interruptions = 0
       for (const episode of episodes) { const production = episode.eventType === 'G' && episode.statusDescription === 'Run Production'; if (priorProduction && !production) interruptions += 1; priorProduction = production }
       const afterGap = part > 0 || gaps.some((gap) => gap.endUtc === startUtc)
+      const beforeGap = gaps.some((gap) => gap.startUtc === endUtc)
+      const naturalStart = part === 0 && boundary.origin === 'identity_transition' && !afterGap
+      const naturalEnd = part === cuts.length - 2 && Boolean(boundaries[index + 1]) && !beforeGap
+      const boundaryCompleteness: ProductionRun['boundaryCompleteness'] = naturalStart && naturalEnd ? 'natural' : afterGap || beforeGap ? 'gap_fragment' : naturalStart ? 'right_fragment' : naturalEnd ? 'left_fragment' : 'isolated_fragment'
+      const persistenceEligible = boundaryCompleteness === 'natural'
       const identityTransitionBoundary = part === 0 && boundary.fields.length > 0
       const stable = episodes.find((episode) => episode.eventType === 'G' && episode.statusDescription === 'Run Production' && episode.durationSeconds * 1_000 >= JOB_STABLE_PRODUCTION_MS)
       const priorStable = input.radiusSegments.filter((segment) => segment.kind === 'radius' && segment.eventType === 'G' && segment.statusDescription === 'Run Production' && segment.durationSeconds * 1_000 >= JOB_STABLE_PRODUCTION_MS && Date.parse(segment.endUtc) <= Date.parse(startUtc)).sort((a, b) => Date.parse(a.endUtc) - Date.parse(b.endUtc)).at(-1)
@@ -128,21 +132,25 @@ function baseRuns(input: { pressKey: RadiusPressKey; fromUtc: string; toUtc: str
       const firstToStable = identityTransitionBoundary && stableStart && Date.parse(stableStart) >= Date.parse(boundary.atUtc) ? round((Date.parse(stableStart) - Date.parse(boundary.atUtc)) / 1_000) : null
       const settledToStable = identityTransitionBoundary && stableStart && boundary.settledUtc && Date.parse(stableStart) >= Date.parse(boundary.settledUtc) ? round((Date.parse(stableStart) - Date.parse(boundary.settledUtc)) / 1_000) : null
       const durationSeconds = (Date.parse(endUtc) - Date.parse(startUtc)) / 1_000; const observed = totals.good + totals.makeReady + totals.bad + totals.other
-      result.push({ runId: `${input.pressKey}.job.${createHash('sha256').update(`${startUtc}\u0000${identityKey(boundary.identities)}`).digest('hex').slice(0, 16)}`, pressKey: input.pressKey, startUtc, endUtc, durationSeconds: round(durationSeconds), identities: { ...boundary.identities }, boundaryFields: part === 0 ? boundary.fields : [], contextSettlingSeconds: part === 0 ? boundary.settlingSeconds : 0, identityTransition: { identityChangeFirstSeenAtUtc: part === 0 && boundary.fields.length ? boundary.atUtc : null, identityLastChangeAtUtc: part === 0 ? boundary.lastChangeUtc : null, identitySettledAtUtc: part === 0 ? boundary.settledUtc : null, settleState: afterGap ? 'after_data_gap' : !boundary.fields.length ? 'range_start' : boundary.settledUtc ? 'confirmed' : 'pending_range_end', previousResolvedIdentity: part === 0 ? boundary.previous : null, finalResolvedIdentity: { ...boundary.identities }, inferredBoundary: Boolean(boundary.fields.length) }, dataInterrupted: afterGap || gaps.some((gap) => gap.startUtc === endUtc), coveragePercent: durationSeconds ? round(observed / durationSeconds * 100) : 0, identityConfidence: boundary.fields.length > 2 && boundary.settlingSeconds <= 300 && boundary.settledUtc ? 'high' : boundary.fields.length || index === 0 ? 'moderate' : 'limited', goodSeconds: round(totals.good), makeReadySeconds: round(totals.makeReady), badSeconds: round(totals.bad), otherRadiusSeconds: round(totals.other), productionInterruptionCount: interruptions, transitionToStableProductionSeconds: radiusProxy, transitionMetric: radiusProxy === null ? 'unavailable' : 'radius_stable_production_proxy', transitionTiming: { outgoingStableRadiusProductionEndUtc: outgoingEnd, incomingStableRadiusProductionStartUtc: stableStart, radiusStableProductionProxySeconds: radiusProxy, metadataFirstSeenToStableSeconds: firstToStable, metadataSettledToStableSeconds: settledToStable, telemetryPhysicalProductionAtUtc: null, timingUncertaintySeconds: identityTransitionBoundary && boundary.lastChangeUtc ? round((Date.parse(boundary.lastChangeUtc) + JOB_CONTEXT_SETTLING_MS - Date.parse(boundary.atUtc)) / 1_000) : null }, radiusEpisodes: episodes })
+      const runId = persistenceEligible ? naturalProductionRunId(input.pressKey, startUtc, boundary.identities) : fragmentProductionRunId(input.pressKey, boundaryCompleteness, startUtc, endUtc, boundary.identities)
+      result.push({ runId, pressKey: input.pressKey, startUtc, endUtc, durationSeconds: round(durationSeconds), boundaryCompleteness, persistenceEligible, identities: { ...boundary.identities }, boundaryFields: part === 0 ? boundary.fields : [], contextSettlingSeconds: part === 0 ? boundary.settlingSeconds : 0, identityTransition: { identityChangeFirstSeenAtUtc: part === 0 && boundary.fields.length ? boundary.atUtc : null, identityLastChangeAtUtc: part === 0 ? boundary.lastChangeUtc : null, identitySettledAtUtc: part === 0 ? boundary.settledUtc : null, settleState: afterGap ? 'after_data_gap' : !boundary.fields.length ? 'range_start' : boundary.settledUtc ? 'confirmed' : 'pending_range_end', previousResolvedIdentity: part === 0 ? boundary.previous : null, finalResolvedIdentity: { ...boundary.identities }, inferredBoundary: Boolean(boundary.fields.length) }, dataInterrupted: afterGap || beforeGap, coveragePercent: durationSeconds ? round(observed / durationSeconds * 100) : 0, identityConfidence: boundary.fields.length > 2 && boundary.settlingSeconds <= 300 && boundary.settledUtc ? 'high' : boundary.fields.length || index === 0 ? 'moderate' : 'limited', goodSeconds: round(totals.good), makeReadySeconds: round(totals.makeReady), badSeconds: round(totals.bad), otherRadiusSeconds: round(totals.other), productionInterruptionCount: interruptions, transitionToStableProductionSeconds: radiusProxy, transitionMetric: radiusProxy === null ? 'unavailable' : 'radius_stable_production_proxy', transitionTiming: { outgoingStableRadiusProductionEndUtc: outgoingEnd, incomingStableRadiusProductionStartUtc: stableStart, radiusStableProductionProxySeconds: radiusProxy, metadataFirstSeenToStableSeconds: firstToStable, metadataSettledToStableSeconds: settledToStable, telemetryPhysicalProductionAtUtc: null, timingUncertaintySeconds: identityTransitionBoundary && boundary.lastChangeUtc ? round((Date.parse(boundary.lastChangeUtc) + JOB_CONTEXT_SETTLING_MS - Date.parse(boundary.atUtc)) / 1_000) : null }, radiusEpisodes: episodes })
     }
   }
   return result
 }
 
-export function deriveProductionRuns(input: { pressKey: RadiusPressKey; fromUtc: string; toUtc: string; context: ProductionContextEvidence; radiusSegments: RadiusStatusSegment[]; deckActive?: DeckActiveEvidence[]; speed?: { sourceUnit: string | null; canonicalUnitStatus: string | null; samples: TelemetrySample[] } }): ProductionRun[] {
+export function deriveProductionRuns(input: { pressKey: RadiusPressKey; fromUtc: string; toUtc: string; requestedFromUtc?: string; requestedToUtc?: string; context: ProductionContextEvidence; radiusSegments: RadiusStatusSegment[]; deckActive?: DeckActiveEvidence[]; speed?: { sourceUnit: string | null; canonicalUnitStatus: string | null; samples: TelemetrySample[] } }): ProductionRun[] {
   const raw = baseRuns(input)
-  return raw.map((run, index) => {
+  const runs = raw.map((run, index) => {
     const previous = raw[index - 1]; const next = raw[index + 1]
     const currentDecks = activeDecksAt(run.startUtc, input.deckActive ?? []); const previousDecks = previous ? activeDecksAt(previous.startUtc, input.deckActive ?? []) : null
     const deckConfiguration = currentDecks === null || previousDecks === null ? null : { activeDecks: currentDecks, reusedDecks: currentDecks.filter((deck) => previousDecks.includes(deck)), addedDecks: currentDecks.filter((deck) => !previousDecks.includes(deck)), removedDecks: previousDecks.filter((deck) => !currentDecks.includes(deck)), changedDeckCount: currentDecks.filter((deck) => !previousDecks.includes(deck)).length + previousDecks.filter((deck) => !currentDecks.includes(deck)).length, evidenceCanonicalId: 'deck.active' as const }
     const stateSeconds = run.goodSeconds + run.makeReadySeconds + run.badSeconds; const unavailableSeconds = Math.max(0, run.durationSeconds - run.goodSeconds - run.makeReadySeconds - run.badSeconds - run.otherRadiusSeconds)
-    return { ...run, previousRunId: previous && !run.dataInterrupted ? previous.runId : null, nextRunId: next && !next.dataInterrupted ? next.runId : null, previousIdentities: previous && !run.dataInterrupted ? previous.identities : null, nextIdentities: next && !next.dataInterrupted ? next.identities : null, identityAvailability: Object.fromEntries(JOB_ANALYSIS_DIMENSIONS.map((field) => [field, input.context.fields[field].capabilityState === 'TEMPORARILY_UNAVAILABLE' ? 'temporarily_unavailable' : input.context.fields[field].capabilityState === 'SUPPORTED' && run.identities[field] ? 'available' : 'unavailable'])) as NonNullable<ProductionRun['identityAvailability']>, unavailableSeconds: round(unavailableSeconds), productionStateEfficiency: stateSeconds ? round(run.goodSeconds / stateSeconds * 100) : null, interruptionsPerProductionHour: run.goodSeconds ? round(run.productionInterruptionCount / (run.goodSeconds / 3600), 2) : null, deckConfiguration, runningPerformance: runningPerformance(run, input.speed) }
+    return { ...run, previousRunId: null, nextRunId: null, previousIdentities: previous && !run.dataInterrupted ? previous.identities : null, nextIdentities: next && !next.dataInterrupted ? next.identities : null, identityAvailability: Object.fromEntries(JOB_ANALYSIS_DIMENSIONS.map((field) => [field, input.context.fields[field].capabilityState === 'TEMPORARILY_UNAVAILABLE' ? 'temporarily_unavailable' : input.context.fields[field].capabilityState === 'SUPPORTED' && run.identities[field] ? 'available' : 'unavailable'])) as NonNullable<ProductionRun['identityAvailability']>, unavailableSeconds: round(unavailableSeconds), productionStateEfficiency: stateSeconds ? round(run.goodSeconds / stateSeconds * 100) : null, interruptionsPerProductionHour: run.goodSeconds ? round(run.productionInterruptionCount / (run.goodSeconds / 3600), 2) : null, deckConfiguration, runningPerformance: runningPerformance(run, input.speed) }
   })
+  const requestedFrom = Date.parse(input.requestedFromUtc ?? input.fromUtc)
+  const requestedTo = Date.parse(input.requestedToUtc ?? input.toUtc)
+  return runs.filter((run) => Date.parse(run.endUtc) > requestedFrom && Date.parse(run.startUtc) < requestedTo)
 }
 
 export function splitIdentitySegments(value: string, delimiter = '-'): string[] {

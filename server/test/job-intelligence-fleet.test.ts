@@ -7,6 +7,7 @@ import { InMemoryJobHistoryRepository, materializedRun } from '../src/job-intell
 import type { TelemetryClient } from '../src/telemetry/telemetry-api-client.js'
 import type { JobRefinement, ProductionRun } from '../src/job-intelligence/contracts.js'
 import type { RadiusPressKey } from '../src/radius/models.js'
+import { naturalProductionRunId } from '../src/job-intelligence/natural-run-contract.js'
 
 const start = Date.parse('2026-08-01T00:00:00.000Z')
 const at = (hours: number) => new Date(start + hours * 3_600_000).toISOString()
@@ -16,8 +17,8 @@ function run(id: string, pressKey: RadiusPressKey, hour: number, input: { recipe
   const identities = { order: `O-${id}`, recipe, customer: input.customer ?? 'POLITEX', material }
   const previousIdentities = input.previousRecipe || input.previousMaterial ? { recipe: input.previousRecipe ?? 'PREV', material: input.previousMaterial ?? material, customer: 'POLITEX' } : null
   return {
-    runId: id, pressKey, startUtc: at(hour), endUtc: at(hour + 1), durationSeconds: 3_600, identities, previousIdentities, nextIdentities: null, boundaryFields: previousIdentities ? ['recipe'] : [], contextSettlingSeconds: previousIdentities ? 300 : 0,
-    identityTransition: { identityChangeFirstSeenAtUtc: previousIdentities ? at(hour) : null, identityLastChangeAtUtc: previousIdentities ? new Date(Date.parse(at(hour)) + 60_000).toISOString() : null, identitySettledAtUtc: previousIdentities ? new Date(Date.parse(at(hour)) + 360_000).toISOString() : null, settleState: previousIdentities ? 'confirmed' : 'range_start', previousResolvedIdentity: previousIdentities, finalResolvedIdentity: identities, inferredBoundary: Boolean(previousIdentities) },
+    runId: naturalProductionRunId(pressKey, at(hour), identities), pressKey, startUtc: at(hour), endUtc: at(hour + 1), durationSeconds: 3_600, boundaryCompleteness: 'natural', persistenceEligible: true, identities, previousIdentities, nextIdentities: null, boundaryFields: previousIdentities ? ['recipe'] : [], contextSettlingSeconds: 300,
+    identityTransition: { identityChangeFirstSeenAtUtc: at(hour), identityLastChangeAtUtc: new Date(Date.parse(at(hour)) + 60_000).toISOString(), identitySettledAtUtc: new Date(Date.parse(at(hour)) + 360_000).toISOString(), settleState: 'confirmed', previousResolvedIdentity: previousIdentities, finalResolvedIdentity: identities, inferredBoundary: true },
     dataInterrupted: input.interrupted ?? false, coveragePercent: 100, identityConfidence: 'high', goodSeconds: good, makeReadySeconds: makeReady, badSeconds: bad, otherRadiusSeconds: 0, productionInterruptionCount: 1, transitionToStableProductionSeconds: transition, transitionMetric: transition === null ? 'unavailable' : 'radius_stable_production_proxy',
     transitionTiming: { outgoingStableRadiusProductionEndUtc: previousIdentities ? at(hour) : null, incomingStableRadiusProductionStartUtc: transition === null ? null : new Date(Date.parse(at(hour)) + transition * 1_000).toISOString(), radiusStableProductionProxySeconds: transition, metadataFirstSeenToStableSeconds: transition, metadataSettledToStableSeconds: transition === null ? null : transition - 360, telemetryPhysicalProductionAtUtc: null, timingUncertaintySeconds: previousIdentities ? 360 : null },
     radiusEpisodes: [{ eventType: 'M', statusCode: '20', statusDescription: 'Registration', startUtc: at(hour), endUtc: new Date(Date.parse(at(hour)) + makeReady * 1_000).toISOString(), durationSeconds: makeReady }, { eventType: 'G', statusCode: '10', statusDescription: 'Run Production', startUtc: new Date(Date.parse(at(hour)) + makeReady * 1_000).toISOString(), endUtc: at(hour + 1), durationSeconds: good + bad }],
@@ -39,9 +40,9 @@ describe('Job Intelligence fleet-first reporting', () => {
       const response = await fetch(`${base}/report?${range}&operator=contains&query=NPU01&focusPressKey=press5`); assert.equal(response.status, 200)
       const body = await response.json() as ReturnType<typeof report>; assert.deepEqual(body.selection.matchingPresses, ['press5', 'press8']); assert.equal(body.focusPressKey, 'press5')
       const values = await (await fetch(`${base}/values?${range}`)).json() as { values: Array<{ value: string }> }; assert.deepEqual(values.values.map((item) => item.value), ['A-NPU01-X'])
-      const inspector = await fetch(`${base}/runs/http-p5`); assert.equal(inspector.status, 200)
+      const inspector = await fetch(`${base}/runs/${runs[0]!.runId}`); assert.equal(inspector.status, 200)
       const inspectorBody = await inspector.json() as { version: string; run: { runId: string; identityTransition: unknown; transitionTiming: unknown; mainRadiusLosses: unknown[]; radiusEpisodes?: unknown; speedSamples?: unknown } }
-      assert.equal(inspectorBody.version, 'job-intelligence-run-v3'); assert.equal(inspectorBody.run.runId, 'http-p5')
+      assert.equal(inspectorBody.version, 'job-intelligence-run-v3'); assert.equal(inspectorBody.run.runId, runs[0]!.runId)
       assert.ok(inspectorBody.run.identityTransition); assert.ok(inspectorBody.run.transitionTiming); assert.equal(inspectorBody.run.mainRadiusLosses.length, 1)
       assert.equal(inspectorBody.run.radiusEpisodes, undefined); assert.equal(inspectorBody.run.speedSamples, undefined)
     } finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())) }
@@ -82,8 +83,8 @@ describe('Job Intelligence fleet-first reporting', () => {
 
   it('sorts bounded historical pages deterministically and exposes sample sizes', () => {
     const runs = [run('fast', 'press5', 1, { speed: 700, good: 3_200, makeReady: 300, bad: 100 }), run('slow', 'press8', 2, { speed: 500, good: 2_000, makeReady: 1_000, bad: 600 })]
-    assert.equal(report(runs, [], null, 'worst_good').historicalRuns.items[0]?.runId, 'slow')
-    assert.equal(report(runs, [], null, 'highest_speed').historicalRuns.items[0]?.runId, 'fast')
+    assert.equal(report(runs, [], null, 'worst_good').historicalRuns.items[0]?.runId, runs[1]!.runId)
+    assert.equal(report(runs, [], null, 'highest_speed').historicalRuns.items[0]?.runId, runs[0]!.runId)
     assert.equal(metricDistribution([1, 2, 3, 100]).n, 4)
   })
 })

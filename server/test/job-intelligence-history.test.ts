@@ -3,9 +3,11 @@ import { describe, it } from 'node:test'
 import { readFile } from 'node:fs/promises'
 import { mergeContinuousProductionRuns, mergeHistoricalAndLiveRuns, JobHistoryMaterializer } from '../src/job-intelligence/history-materializer.js'
 import { aggregateRunLosses, InMemoryJobHistoryRepository, JOB_INTELLIGENCE_ALGORITHM_VERSION, materializedRun, persistenceText, persistenceTimestamp, PostgresJobHistoryRepository } from '../src/job-intelligence/history-repository.js'
-import { assertRepresentativeParity } from '../src/job-intelligence/representative-parity.js'
-import { canonicalJobFingerprint, canonicalJobNumber, canonicalJobRun, canonicalMaterializedJobFacts } from '../src/job-intelligence/canonical-run.js'
+import { assertRepresentativeParity, representativeParityReport } from '../src/job-intelligence/representative-parity.js'
+import { canonicalJobFingerprint, canonicalJobInteger, canonicalJobNumber, canonicalJobRun, canonicalMaterializedJobFacts } from '../src/job-intelligence/canonical-run.js'
 import type { ProductionRun } from '../src/job-intelligence/contracts.js'
+import { naturalProductionRunId } from '../src/job-intelligence/natural-run-contract.js'
+import { loadDisposableJobValidationDatabaseConfig } from '../src/job-intelligence/validation-database.js'
 
 const day = 24 * 60 * 60_000
 const start = '2026-01-01T00:00:00.000Z'
@@ -13,27 +15,35 @@ const at = (milliseconds: number) => new Date(Date.parse(start) + milliseconds).
 
 function run(id: string, fromMs: number, toMs: number, options: { material?: string; interrupted?: boolean; settled?: boolean } = {}): ProductionRun {
   const durationSeconds = (toMs - fromMs) / 1_000
+  const identities = { order: 'O1', recipe: 'R1', customer: 'C1', ...(options.material === undefined ? {} : { material: options.material }) }
   return {
-    runId: id, pressKey: 'press5', startUtc: at(fromMs), endUtc: at(toMs), durationSeconds,
-    identities: { order: 'O1', recipe: 'R1', customer: 'C1', ...(options.material === undefined ? {} : { material: options.material }) }, previousIdentities: null, nextIdentities: null,
+    runId: naturalProductionRunId('press5', at(fromMs), identities), pressKey: 'press5', startUtc: at(fromMs), endUtc: at(toMs), durationSeconds, boundaryCompleteness: 'natural', persistenceEligible: true,
+    identities, previousIdentities: null, nextIdentities: null,
     boundaryFields: [], contextSettlingSeconds: 0,
-    identityTransition: { identityChangeFirstSeenAtUtc: null, identityLastChangeAtUtc: null, identitySettledAtUtc: options.settled === false ? null : at(fromMs + 300_000), settleState: options.settled === false ? 'pending_range_end' : 'confirmed', previousResolvedIdentity: null, finalResolvedIdentity: { order: 'O1', recipe: 'R1', customer: 'C1', ...(options.material === undefined ? {} : { material: options.material }) }, inferredBoundary: false },
+    identityTransition: { identityChangeFirstSeenAtUtc: at(fromMs), identityLastChangeAtUtc: at(fromMs), identitySettledAtUtc: at(fromMs + 300_000), settleState: 'confirmed', previousResolvedIdentity: null, finalResolvedIdentity: identities, inferredBoundary: true },
     dataInterrupted: options.interrupted ?? false, coveragePercent: 100, identityConfidence: 'high', goodSeconds: durationSeconds, makeReadySeconds: 0, badSeconds: 0, otherRadiusSeconds: 0, productionInterruptionCount: 0,
     transitionToStableProductionSeconds: null, transitionMetric: 'unavailable', transitionTiming: { outgoingStableRadiusProductionEndUtc: null, incomingStableRadiusProductionStartUtc: at(fromMs), radiusStableProductionProxySeconds: null, metadataFirstSeenToStableSeconds: null, metadataSettledToStableSeconds: null, telemetryPhysicalProductionAtUtc: null, timingUncertaintySeconds: null },
     radiusEpisodes: [{ eventType: 'G', statusCode: '10', statusDescription: 'Run Production', startUtc: at(fromMs), endUtc: at(toMs), durationSeconds }], deckConfiguration: null,
   }
 }
 
+function coveringRun(fromUtc: string, toUtc: string) {
+  return run('coverage', Date.parse(fromUtc) - Date.parse(start), Date.parse(toUtc) - Date.parse(start))
+}
+
 describe('Job Intelligence historical store', () => {
   it('defines exactly three minimal derived tables and never copies raw source histories', async () => {
     const migration = await readFile(new URL('../migrations/002_job_intelligence_minimal_derived.sql', import.meta.url), 'utf8')
     const safetyMigration = await readFile(new URL('../migrations/003_job_intelligence_checkpoint_safety.sql', import.meta.url), 'utf8')
+    const naturalMigration = await readFile(new URL('../migrations/004_job_intelligence_natural_run_contract.sql', import.meta.url), 'utf8')
     assert.equal(migration.match(/CREATE TABLE/gi)?.length, 3)
     for (const table of ['job_intelligence_runs', 'job_intelligence_run_losses', 'job_intelligence_materialization_state']) assert.match(migration, new RegExp(`CREATE TABLE public\\.${table}`))
     for (const field of ['identity_first_seen_at', 'identity_last_change_at', 'identity_settled_at', 'identity_uncertainty_seconds', 'previous_recipe', 'transition_make_ready_seconds', 'transition_bad_seconds', 'running_good_seconds', 'speed_median', 'speed_time_weighted_mean', 'speed_p90', 'deck_evidence_available', 'source_fingerprint']) assert.match(migration, new RegExp(`\\b${field}\\b`))
     assert.doesNotMatch(migration, /radius_episode|raw_telemetry|telemetry_sample|CREATE (DATABASE|SCHEMA|ROLE)|ALTER ROLE|press_radius_db|TelemetryQueryApi/i)
     assert.doesNotMatch(safetyMigration, /CREATE TABLE|radius_episode|raw_telemetry|telemetry_sample|press_radius_db|TelemetryQueryApi/i)
     for (const field of ['started_at_utc', 'finished_at_utc', 'last_success_at_utc', 'lease_run_id', 'lease_expires_at_utc', 'last_error_message']) assert.match(safetyMigration, new RegExp(`\\b${field}\\b`))
+    for (const field of ['transition_previous_order', 'transition_previous_recipe', 'transition_previous_customer', 'transition_previous_material', 'speed_variability']) assert.match(naturalMigration, new RegExp(`\\b${field}\\b`))
+    assert.doesNotMatch(naturalMigration, /press_radius_db|TelemetryQueryApi|CREATE TABLE|CREATE (DATABASE|SCHEMA|ROLE)|ALTER ROLE/i)
     assert.equal(migration.match(/CREATE INDEX/gi)?.length, 6)
     const source = await readFile(new URL('../src/job-intelligence/history-repository.ts', import.meta.url), 'utf8')
     assert.doesNotMatch(source, /press_radius_db|machine_status_|telemetry historian/i)
@@ -50,9 +60,32 @@ describe('Job Intelligence historical store', () => {
     const client = { query: async (sql: string, values: unknown[] = []) => { calls.push({ sql, values }); return { rowCount: sql.includes('INSERT INTO public.job_intelligence_runs') ? 1 : 0, rows: [] } }, release() {} }
     const repository = new PostgresJobHistoryRepository({ connect: async () => client } as never); const value = run('sql-run', 0, day); value.radiusEpisodes.unshift({ eventType: 'M', statusCode: '47', statusDescription: 'Setup Job', startUtc: at(0), endUtc: at(60_000), durationSeconds: 60 })
     await repository.upsertRuns([materializedRun(value, start, at(day), { isClosed: true })])
-    const insert = calls.find((call) => call.sql.includes('INSERT INTO public.job_intelligence_runs'))!; const placeholders = [...insert.sql.matchAll(/\$(\d+)/g)].map((match) => Number(match[1])); assert.equal(Math.max(...placeholders), insert.values.length); assert.equal(insert.values.length, 62)
+    const insert = calls.find((call) => call.sql.includes('INSERT INTO public.job_intelligence_runs'))!; const placeholders = [...insert.sql.matchAll(/\$(\d+)/g)].map((match) => Number(match[1])); assert.equal(Math.max(...placeholders), insert.values.length); assert.equal(insert.values.length, 66)
     const mutationSql = calls.map((call) => call.sql).filter((sql) => /\b(?:INSERT|UPDATE|DELETE|MERGE)\b/i.test(sql)).join('\n')
     assert.doesNotMatch(mutationSql, /press_radius|machine_status|telemetry|historian|classification_documents/i); assert.match(mutationSql, /job_intelligence_runs/); assert.match(mutationSql, /job_intelligence_run_losses/)
+    for (const column of ['previous_order','transition_previous_order','identity_last_change_at','good_seconds','speed_p75','speed_variability','changed_deck_count','source_fingerprint']) assert.match(insert.sql, new RegExp(`${column}=EXCLUDED\\.${column}`))
+    assert.match(insert.sql, /source_from_utc=LEAST/); assert.match(insert.sql, /source_to_utc=GREATEST/)
+  })
+
+  it('rejects boundary fragments, invalid duration, non-finite values, and non-integral SQL integers before persistence', () => {
+    const fragment = run('fragment', 0, day); fragment.boundaryCompleteness = 'left_fragment'; fragment.persistenceEligible = false
+    assert.throws(() => materializedRun(fragment, start, at(day)), /boundary_fragment_not_persistable/)
+    const invalidDuration = run('duration', 0, day); invalidDuration.durationSeconds += .1
+    assert.throws(() => materializedRun(invalidDuration, start, at(day)), /invalid_job_duration_boundary/)
+    for (const value of [NaN, Infinity, -Infinity]) assert.throws(() => canonicalJobNumber(value), /invalid_job_persistence_number/)
+    for (const value of [1.5, 2_147_483_648, -2_147_483_649]) assert.throws(() => canonicalJobInteger(value), /invalid_job_persistence_integer/)
+    const invalidDeck = run('deck', 0, day); invalidDeck.deckConfiguration = { activeDecks: [32_768], reusedDecks: [], addedDecks: [], removedDecks: [], changedDeckCount: 1, evidenceCanonicalId: 'deck.active' }
+    assert.throws(() => materializedRun(invalidDeck, start, at(day)), /invalid_job_persistence_integer/)
+  })
+
+  it('normalizes the database loss sentinel without allowing duplicate or category-colliding canonical keys', () => {
+    const value = run('loss-key', 0, day); value.radiusLossAggregates = [
+      { eventType: 'M', statusCode: null, statusDescription: 'Setup', category: 'make_ready', totalSeconds: 1, occurrenceCount: 1, medianEpisodeSeconds: 1 },
+      { eventType: 'M', statusCode: '', statusDescription: 'Setup', category: 'make_ready', totalSeconds: 2, occurrenceCount: 1, medianEpisodeSeconds: 2 },
+    ]
+    assert.throws(() => materializedRun(value, start, at(day)), /duplicate_job_loss_key/)
+    value.radiusLossAggregates = [{ eventType: 'M', statusCode: null, statusDescription: 'Setup', category: 'bad', totalSeconds: 1, occurrenceCount: 1, medianEpisodeSeconds: 1 }]
+    assert.throws(() => materializedRun(value, start, at(day)), /invalid_job_loss_category/)
   })
 
   it('keeps production materialization independent of classification persistence', async () => {
@@ -62,6 +95,15 @@ describe('Job Intelligence historical store', () => {
       assert.doesNotMatch(source, /createClassificationService|ClassifiedRadiusService|classification_documents|classifications\.initialize/)
       assert.match(source, /createMaterializationRadiusService/); assert.match(source, /acquireMaterializationPreflight/); assert.match(source, /radiusOwner\?\.close\(\)/)
     }
+    assert.match(representative, /createDisposableJobValidationRepository/); assert.match(representative, /mode: 'bounded'/); assert.doesNotMatch(representative, /createJobHistoryRepository\(config\.classificationDatabase\)/)
+    assert.match(backfill, /physicalRadiusConnectionCap: radiusOwner\.maximumConnections/)
+  })
+
+  it('fails closed unless validation PostgreSQL is explicitly disposable and on a different local endpoint', () => {
+    const environment = { JOB_VALIDATION_DB_DISPOSABLE: 'YES', JOB_VALIDATION_DB_HOST: '127.0.0.1', JOB_VALIDATION_DB_PORT: '55439', JOB_VALIDATION_DB_NAME: 'processintelligence_db', JOB_VALIDATION_DB_USER: 'processintelligence_app', JOB_VALIDATION_DB_PASSWORD: 'test-only' } as NodeJS.ProcessEnv
+    assert.equal(loadDisposableJobValidationDatabaseConfig(environment, { enabled: false }).port, 55_439)
+    assert.throws(() => loadDisposableJobValidationDatabaseConfig({ ...environment, JOB_VALIDATION_DB_DISPOSABLE: 'no' }, { enabled: false }), /explicit_disposable_marker/)
+    assert.throws(() => loadDisposableJobValidationDatabaseConfig(environment, { enabled: true, host: 'localhost', port: 55_439, database: 'processintelligence_db', user: 'processintelligence_app', password: 'production' }), /matches_production_endpoint/)
   })
 
   it('uses stable versioned IDs and remains duplicate-free across repeated upserts', async () => {
@@ -69,14 +111,30 @@ describe('Job Intelligence historical store', () => {
     assert.equal(value.sourceFingerprint, materializedRun(run('stable-run', 0, day), at(-day), at(2 * day)).sourceFingerprint)
     await repository.upsertRuns([value, value]); await repository.upsertRuns([structuredClone(value)])
     const stored = await repository.listRuns({})
-    assert.equal(stored.length, 1); assert.equal(stored[0]!.run.runId, 'stable-run'); assert.equal(stored[0]!.algorithmVersion, JOB_INTELLIGENCE_ALGORITHM_VERSION)
+    assert.equal(stored.length, 1); assert.equal(stored[0]!.run.runId, value.run.runId); assert.equal(stored[0]!.algorithmVersion, JOB_INTELLIGENCE_ALGORITHM_VERSION)
+  })
+
+  it('reports the complete expected/stored ID union including visible extra-run evidence', () => {
+    const expected = run('expected', 0, day); const extra = materializedRun(run('extra', day / 2, day + day / 2), start, at(2 * day), { isClosed: true })
+    const report = representativeParityReport([expected], [materializedRun(expected, start, at(2 * day), { isClosed: true }), extra], start, at(2 * day))
+    assert.equal(report.ok, false); assert.equal(report.expectedCount, 1); assert.equal(report.storedCount, 2); assert.equal(report.unionCount, 2)
+    assert.deepEqual(report.entries.map((item) => [item.runId, item.classifications]), [[expected.runId, ['expected_and_stored']], [extra.run.runId, ['extra_in_store']]].sort((left, right) => String(left[0]).localeCompare(String(right[0]))))
+    const extraEntry = report.entries.find((item) => item.classifications.includes('extra_in_store'))!
+    assert.deepEqual(Object.keys(extraEntry.storedInterval!), ['startUtc', 'endUtc', 'previousRunId', 'fingerprint', 'reason'])
+    assert.match(extraEntry.storedInterval!.reason, /intersects requested range/)
+  })
+
+  it('keeps missing, undefined, null, and empty identity text semantics explicit', () => {
+    const value = run('sparse', 0, day); value.identities = { order: 'O1', recipe: undefined, customer: null as never, material: '' }; value.identityTransition.finalResolvedIdentity = value.identities
+    const canonical = canonicalJobRun(value)
+    assert.equal('recipe' in canonical.identities, false); assert.equal('customer' in canonical.identities, false); assert.equal(canonical.identities.material, '')
   })
 
   it('accepts only sub-millisecond PostgreSQL timestamp normalization during representative parity', () => {
     const live = run('precision-run', 0, day)
     live.startUtc = '2026-01-01T00:00:00.000417Z'
     live.endUtc = '2026-01-02T00:00:00.000731Z'
-    live.identityTransition.identityChangeFirstSeenAtUtc = '2026-01-01T00:00:01.234917Z'
+    live.identityTransition.identityChangeFirstSeenAtUtc = '2026-01-01T00:00:00.000417Z'
     live.identityTransition.identityLastChangeAtUtc = '2026-01-01T00:00:02.345817Z'
     live.identityTransition.identitySettledAtUtc = '2026-01-01T00:05:02.345817Z'
     live.runningPerformance = { stableProductionStartUtc: '2026-01-01T00:10:03.456719Z', observedSeconds: 100, goodSeconds: 90, badSeconds: 10, interruptions: 1, interruptionsPerProductionHour: 40, medianUninterruptedGoodSeconds: 45, restartCount: 1, speed: null }
@@ -84,7 +142,7 @@ describe('Job Intelligence historical store', () => {
     const readBack = structuredClone(expected)
     readBack.run.startUtc = '2026-01-01T00:00:00.000Z'
     readBack.run.endUtc = '2026-01-02T00:00:00.000Z'
-    readBack.run.identityTransition.identityChangeFirstSeenAtUtc = '2026-01-01T00:00:01.234Z'
+    readBack.run.identityTransition.identityChangeFirstSeenAtUtc = '2026-01-01T00:00:00.000Z'
     readBack.run.identityTransition.identityLastChangeAtUtc = '2026-01-01T00:00:02.345Z'
     readBack.run.identityTransition.identitySettledAtUtc = '2026-01-01T00:05:02.345Z'
     readBack.run.runningPerformance!.stableProductionStartUtc = '2026-01-01T00:10:03.456Z'
@@ -99,19 +157,20 @@ describe('Job Intelligence historical store', () => {
     assert.equal(persistenceText(''), '')
     const live = run('press5.job.4901a4a8708260e5', 0, day)
     live.endUtc = '2026-01-02T00:00:00.280414Z'
+    live.durationSeconds = 86_400.3
     live.runningPerformance = { stableProductionStartUtc: start, observedSeconds: 100, goodSeconds: 90, badSeconds: 10, interruptions: 1, interruptionsPerProductionHour: 40, medianUninterruptedGoodSeconds: 45, restartCount: 0, speed: { canonicalId: 'machine.speed.actual', sourceUnit: '', canonicalUnitStatus: 'unverified', sampleCount: 27, median: 0, p25: 0, p75: .1, p90: 926.6, timeWeightedMean: 799.7 } }
     const expected = materializedRun(live, start, at(2 * day), { isClosed: true })
     const lossy = structuredClone(expected)
-    lossy.run.endUtc = '2026-01-02T00:00:00.000Z'
+    lossy.run.endUtc = '2026-01-02T00:00:00.000Z'; lossy.run.durationSeconds = 86_400
     lossy.run.runningPerformance!.speed!.sourceUnit = null
     lossy.sourceFingerprint = 'lossy-readback-fingerprint'
     assert.throws(
       () => assertRepresentativeParity([live], [lossy], start, at(2 * day)),
       (error: unknown) => error instanceof Error && error.message.includes('"fingerprint":false') && error.message.includes('"field":"endUtc","expected":"2026-01-02T00:00:00.280Z","actual":"2026-01-02T00:00:00.000Z"') && error.message.includes('"field":"speed.sourceUnit","expected":"","actual":null'),
     )
-    lossy.run.endUtc = '2026-01-02T00:00:00.280Z'; lossy.run.runningPerformance!.speed!.sourceUnit = ''; lossy.sourceFingerprint = expected.sourceFingerprint
+    lossy.run.endUtc = '2026-01-02T00:00:00.280Z'; lossy.run.durationSeconds = 86_400.3; lossy.run.runningPerformance!.speed!.sourceUnit = ''; lossy.sourceFingerprint = expected.sourceFingerprint
     assert.doesNotThrow(() => assertRepresentativeParity([live], [lossy], start, at(2 * day)))
-    lossy.run.endUtc = '2026-01-02T00:00:00.281Z'
+    lossy.run.endUtc = '2026-01-02T00:00:00.281Z'; lossy.run.durationSeconds = 86_400.3
     assert.throws(() => assertRepresentativeParity([live], [lossy], start, at(2 * day)), /job_history_parity_failed/)
   })
 
@@ -124,12 +183,12 @@ describe('Job Intelligence historical store', () => {
 
     assert.equal(Object.is(first.runningPerformance.speed!.p25, -0), true)
     assert.equal(canonicalJobNumber(first.runningPerformance.speed!.p25), 0)
-    assert.deepEqual(canonicalJobRun(second).identityTransition.previousResolvedIdentity, previous)
+    assert.equal(canonicalJobRun(second).identityTransition.previousResolvedIdentity, null)
 
     const firstReadBack = materializedRun(first, start, at(3 * day), { isClosed: true })
     firstReadBack.run.runningPerformance!.speed!.p25 = 0
     const secondReadBack = materializedRun(second, start, at(3 * day), { isClosed: true })
-    secondReadBack.run.identityTransition.previousResolvedIdentity = previous
+    secondReadBack.run.identityTransition.previousResolvedIdentity = null
     assert.doesNotThrow(() => assertRepresentativeParity([first, second], [firstReadBack, secondReadBack], start, at(3 * day)))
 
     const calls: Array<{ sql: string; values: unknown[] }> = []
@@ -138,13 +197,14 @@ describe('Job Intelligence historical store', () => {
     await postgres.upsertRuns([firstReadBack, secondReadBack])
     const inserts = calls.filter((call) => call.sql.includes('INSERT INTO public.job_intelligence_runs'))
     assert.equal(inserts.length, 2)
-    assert.equal(Object.is(inserts[0]!.values[47], -0), false); assert.equal(inserts[0]!.values[47], 0)
+    assert.equal(Object.is(inserts[0]!.values[51], -0), false); assert.equal(inserts[0]!.values[51], 0)
     assert.deepEqual(inserts[1]!.values.slice(11, 15), [previous.order, previous.recipe, previous.customer, previous.material])
+    assert.deepEqual(inserts[1]!.values.slice(15, 19), [null, null, null, null])
   })
 
   it('keeps canonical fingerprint and compact facts stable across materializer reruns', async () => {
     const repository = new InMemoryJobHistoryRepository()
-    const value = run('canonical-round-trip', 0, day)
+    const value = run('canonical-round-trip', 0, 2 * day)
     value.previousIdentities = { order: 'PREVIOUS' }; value.identityTransition.previousResolvedIdentity = {}
     value.runningPerformance = { stableProductionStartUtc: start, observedSeconds: 120, goodSeconds: 90, badSeconds: 10, interruptions: 1, interruptionsPerProductionHour: 40, medianUninterruptedGoodSeconds: 45, restartCount: 0, speed: { canonicalId: 'machine.speed.actual', sourceUnit: '', canonicalUnitStatus: 'unverified', sampleCount: 3, median: 0, p25: -0, p75: 1, p90: 2, timeWeightedMean: 0 } }
     value.radiusEpisodes.unshift({ eventType: 'M', statusCode: '47', statusDescription: 'Setup Job', startUtc: at(0), endUtc: at(60_000), durationSeconds: 60 })
@@ -188,32 +248,33 @@ describe('Job Intelligence historical store', () => {
   })
 
   it('refreshes a lossy closed row from live evidence but preserves an unchanged closed fingerprint', () => {
-    const live = run('closed-refresh', 0, day); live.endUtc = '2026-01-02T00:00:00.280414Z'
+    const live = run('closed-refresh', 0, day); live.endUtc = '2026-01-02T00:00:00.280414Z'; live.durationSeconds = 86_400.3
     const expected = materializedRun(live, start, at(2 * day), { isClosed: true })
-    const lossy = structuredClone(expected); lossy.run.endUtc = '2026-01-02T00:00:00.000Z'; lossy.sourceFingerprint = materializedRun(lossy.run, start, at(2 * day), { isClosed: true }).sourceFingerprint
+    const lossy = structuredClone(expected); lossy.run.endUtc = '2026-01-02T00:00:00.000Z'; lossy.run.durationSeconds = 86_400; lossy.sourceFingerprint = materializedRun(lossy.run, start, at(2 * day), { isClosed: true }).sourceFingerprint
     const refreshed = mergeHistoricalAndLiveRuns([lossy], [live], start, at(2 * day))
     assert.equal(refreshed[0]?.sourceFingerprint, expected.sourceFingerprint); assert.equal(refreshed[0]?.run.endUtc, expected.run.endUtc)
     const unchanged = mergeHistoricalAndLiveRuns([expected], [live], start, at(2 * day))
     assert.deepEqual(unchanged, [expected])
   })
 
-  it('updates an open run to closed without changing its identity', async () => {
+  it('rejects an open persistence object because a v4 natural run has a proven closing boundary', async () => {
     const repository = new InMemoryJobHistoryRepository(); const open = materializedRun(run('open-run', 0, day, { settled: false }), start, at(day), { isClosed: false })
-    await repository.upsertRuns([open]); await repository.upsertRuns([materializedRun(run('open-run', 0, 2 * day), start, at(3 * day), { isClosed: true })])
-    const stored = await repository.getRun('open-run')
+    await assert.rejects(() => repository.upsertRuns([open]), /invalid_job_history_natural_end/)
+    const closed = materializedRun(run('open-run', 0, 2 * day), start, at(3 * day), { isClosed: true }); await repository.upsertRuns([closed])
+    const stored = await repository.getRun(closed.run.runId)
     assert.equal(stored?.isClosed, true); assert.equal(stored?.run.endUtc, at(2 * day))
   })
 
   it('merges a recent live continuation but never bridges a source gap', () => {
     const historical = materializedRun(run('left', 0, day), start, at(day), { isClosed: false })
     const merged = mergeHistoricalAndLiveRuns([historical], [run('window-run', day, 2 * day)], at(day - 300_000), at(2 * day))
-    assert.equal(merged.length, 1); assert.equal(merged[0]!.run.runId, 'left'); assert.equal(merged[0]!.run.endUtc, at(2 * day))
+    assert.equal(merged.length, 1); assert.equal(merged[0]!.run.runId, historical.run.runId); assert.equal(merged[0]!.run.endUtc, at(2 * day))
     assert.equal(mergeContinuousProductionRuns(run('gap-left', 0, day, { interrupted: true }), run('gap-right', day, 2 * day)), null)
   })
 
   it('resumes from its checkpoint after an interrupted bounded backfill', async () => {
     const repository = new InMemoryJobHistoryRepository(); let fail = true; const requests: string[] = []
-    const materializer = new JobHistoryMaterializer(repository, async (_press, fromUtc, toUtc) => { requests.push(`${fromUtc}/${toUtc}`); if (fail && Date.parse(fromUtc) >= Date.parse(start) + 7 * day - 300_000) throw new Error('temporary'); return [] }, () => new Date('2026-02-01T00:00:00.000Z'))
+    const materializer = new JobHistoryMaterializer(repository, async (_press, fromUtc, toUtc) => { requests.push(`${fromUtc}/${toUtc}`); if (fail && Date.parse(fromUtc) >= Date.parse(start) + 7 * day - 300_000) throw new Error('temporary'); return [coveringRun(fromUtc, toUtc)] }, () => new Date('2026-02-01T00:00:00.000Z'))
     await assert.rejects(() => materializer.backfillPress({ pressKey: 'press5', fromUtc: start, toUtc: at(10 * day) }))
     const failed = await repository.getCheckpoint('press5'); assert.equal(failed?.state, 'failed'); assert.equal(failed?.watermarkUtc, at(7 * day))
     fail = false; const result = await materializer.backfillPress({ pressKey: 'press5', fromUtc: start, toUtc: at(10 * day) })
@@ -222,18 +283,18 @@ describe('Job Intelligence historical store', () => {
 
   it('extends an existing checkpoint backward once, then resumes the expanded range', async () => {
     const repository = new InMemoryJobHistoryRepository(); const representativeFrom = at(8 * day); const representativeTo = at(9 * day)
-    const materializer = new JobHistoryMaterializer(repository, async () => [], () => new Date('2026-02-01T00:00:00.000Z'))
+    const materializer = new JobHistoryMaterializer(repository, async (_press, fromUtc, toUtc) => [coveringRun(fromUtc, toUtc)], () => new Date('2026-02-01T00:00:00.000Z'))
     await materializer.backfillPress({ pressKey: 'press5', fromUtc: representativeFrom, toUtc: representativeTo })
 
     let acquisitions = 0; let fail = true
-    const broad = new JobHistoryMaterializer(repository, async () => { acquisitions += 1; if (fail && acquisitions === 2) throw new Error('interrupted broad history'); return [] }, () => new Date('2026-02-02T00:00:00.000Z'))
+    const broad = new JobHistoryMaterializer(repository, async (_press, fromUtc, toUtc) => { acquisitions += 1; if (fail && acquisitions === 2) throw new Error('interrupted broad history'); return [coveringRun(fromUtc, toUtc)] }, () => new Date('2026-02-02T00:00:00.000Z'))
     await assert.rejects(() => broad.backfillPress({ pressKey: 'press5', fromUtc: start, toUtc: at(10 * day) }))
     const failed = await repository.getCheckpoint('press5')
-    assert.equal(failed?.sourceFromUtc, start); assert.equal(failed?.watermarkUtc, at(7 * day))
+    assert.equal(failed?.sourceFromUtc, start); assert.equal(failed?.watermarkUtc, representativeTo)
 
     fail = false
     const resumed = await broad.backfillPress({ pressKey: 'press5', fromUtc: start, toUtc: at(10 * day) })
-    assert.equal(resumed.resumedFromUtc, at(7 * day)); assert.equal(acquisitions, 3)
+    assert.equal(resumed.resumedFromUtc, representativeTo); assert.equal(acquisitions, 3)
   })
 
   it('marks a pre-processing Radius connection failure failed without facts or watermark advancement', async () => {
@@ -248,11 +309,11 @@ describe('Job Intelligence historical store', () => {
 
   it('preserves an earlier committed safe chunk when the next source acquisition fails', async () => {
     const repository = new InMemoryJobHistoryRepository(); let acquisition = 0
-    const materializer = new JobHistoryMaterializer(repository, async () => { acquisition += 1; if (acquisition === 2) throw new Error('bounded source failed'); return [run('safe-run', 0, 6 * day)] }, () => new Date(start))
+    const materializer = new JobHistoryMaterializer(repository, async (_press, fromUtc, toUtc) => { acquisition += 1; if (acquisition === 2) throw new Error('bounded source failed'); return [coveringRun(fromUtc, toUtc)] }, () => new Date(start))
     await assert.rejects(() => materializer.backfillPress({ pressKey: 'press5', fromUtc: start, toUtc: at(10 * day) }))
     const checkpoint = await repository.getCheckpoint('press5'); const stored = await repository.listRuns({})
     assert.equal(checkpoint?.state, 'failed'); assert.equal(checkpoint?.watermarkUtc, at(7 * day)); assert.equal(checkpoint?.sourceToUtc, at(7 * day))
-    assert.deepEqual(stored.map((item) => item.run.runId), ['safe-run'])
+    assert.deepEqual(stored.map((item) => item.run.runId), [naturalProductionRunId('press5', start, { order: 'O1', recipe: 'R1', customer: 'C1' })])
   })
 
   it('moves cancellation out of running without advancing or creating facts', async () => {
@@ -268,7 +329,7 @@ describe('Job Intelligence historical store', () => {
     class FailingCommitRepository extends InMemoryJobHistoryRepository {
       override async commitChunk() { throw new Error('application persistence failed') }
     }
-    const repository = new FailingCommitRepository(); const materializer = new JobHistoryMaterializer(repository, async () => [run('must-not-appear', 0, day)], () => new Date(start))
+    const repository = new FailingCommitRepository(); const materializer = new JobHistoryMaterializer(repository, async (_press, fromUtc, toUtc) => [coveringRun(fromUtc, toUtc)], () => new Date(start))
     await assert.rejects(() => materializer.backfillPress({ pressKey: 'press5', fromUtc: start, toUtc: at(2 * day) }), /application persistence failed/)
     const checkpoint = await repository.getCheckpoint('press5')
     assert.equal(checkpoint?.state, 'failed'); assert.equal(checkpoint?.lastErrorCode, 'persistence'); assert.equal(checkpoint?.watermarkUtc, start); assert.equal((await repository.listRuns({})).length, 0)
@@ -280,14 +341,14 @@ describe('Job Intelligence historical store', () => {
     assert.equal(claimed?.state, 'running')
     let blockedBuilds = 0; const blocked = new JobHistoryMaterializer(repository, async () => { blockedBuilds += 1; return [] }, () => new Date(Date.parse(start) + 500), 1_000)
     await assert.rejects(() => blocked.backfillPress({ pressKey: 'press5', fromUtc: start, toUtc: at(2 * day) }), /already_running/); assert.equal(blockedBuilds, 0)
-    let nowMs = Date.parse(start) + 2_000; const materializer = new JobHistoryMaterializer(repository, async () => [run('existing', 0, day)], () => new Date(nowMs), 1_000)
+    let nowMs = Date.parse(start) + 2_000; const materializer = new JobHistoryMaterializer(repository, async () => [run('existing', 0, 2 * day)], () => new Date(nowMs), 1_000)
     const result = await materializer.backfillPress({ pressKey: 'press5', fromUtc: start, toUtc: at(2 * day) })
     assert.equal(result.resumedFromUtc, at(day)); assert.equal((await repository.listRuns({})).length, 1); assert.equal((await repository.getCheckpoint('press5'))?.state, 'complete')
     nowMs += 1_000
   })
 
   it('reruns successfully after failure without duplicate run or loss facts', async () => {
-    const repository = new InMemoryJobHistoryRepository(); let fail = true; const complete = run('retry-run', 0, day); complete.radiusEpisodes.unshift({ eventType: 'M', statusCode: '47', statusDescription: 'Setup Job', startUtc: at(0), endUtc: at(60_000), durationSeconds: 60 })
+    const repository = new InMemoryJobHistoryRepository(); let fail = true; const complete = run('retry-run', 0, 2 * day); complete.radiusEpisodes.unshift({ eventType: 'M', statusCode: '47', statusDescription: 'Setup Job', startUtc: at(0), endUtc: at(60_000), durationSeconds: 60 })
     const materializer = new JobHistoryMaterializer(repository, async () => { if (fail) throw new Error('first attempt failed'); return [complete] }, () => new Date(start))
     await assert.rejects(() => materializer.backfillPress({ pressKey: 'press5', fromUtc: start, toUtc: at(2 * day) }))
     fail = false; await materializer.backfillPress({ pressKey: 'press5', fromUtc: start, toUtc: at(2 * day) }); await materializer.backfillPress({ pressKey: 'press5', fromUtc: start, toUtc: at(2 * day), resume: false })
@@ -295,26 +356,30 @@ describe('Job Intelligence historical store', () => {
     assert.equal(stored.length, 1); assert.equal(stored[0]?.run.radiusLossAggregates?.length, 1); assert.equal(checkpoint?.state, 'complete'); assert.equal(checkpoint?.lastErrorCode, null); assert.ok(checkpoint?.lastSuccessAtUtc)
   })
 
-  it('defers a chunk-boundary run and rereads it whole without losing compact facts', async () => {
+  it('never persists a chunk-boundary fragment and later stores the natural run', async () => {
     const repository = new InMemoryJobHistoryRepository(); const requests: Array<{ fromUtc: string; toUtc: string }> = []
-    const closed = run('closed', 0, 6 * day); const partial = run('boundary', 6 * day, 7 * day); const complete = run('boundary', 6 * day, 8 * day); const tail = run('tail', 8 * day, 10 * day)
+    const closed = run('closed', 0, 6 * day); const partial = run('boundary-fragment', 6 * day, 7 * day); partial.boundaryCompleteness = 'right_fragment'; partial.persistenceEligible = false
+    const complete = run('boundary', 6 * day, 8 * day); const tail = run('tail-fragment', 8 * day, 10 * day); tail.boundaryCompleteness = 'right_fragment'; tail.persistenceEligible = false; const resolvedTail = run('resolved-tail', 8 * day, 10 * day)
     complete.runningPerformance = { stableProductionStartUtc: complete.startUtc, observedSeconds: 2 * day / 1_000, goodSeconds: 2 * day / 1_000, badSeconds: 0, interruptions: 0, interruptionsPerProductionHour: 0, medianUninterruptedGoodSeconds: 2 * day / 1_000, restartCount: 0, speed: { canonicalId: 'machine.speed.actual', sourceUnit: 'fpm', canonicalUnitStatus: 'canonical', sampleCount: 100, median: 500, p25: 480, p75: 520, p90: 540, timeWeightedMean: 502 } }
     const materializer = new JobHistoryMaterializer(repository, async (_press, fromUtc, toUtc) => {
       requests.push({ fromUtc, toUtc })
-      return Date.parse(toUtc) <= Date.parse(start) + 7 * day ? [closed, partial] : [complete, tail]
+      if (requests.length === 1) return [closed, partial]
+      if (requests.length === 2) return [complete, tail]
+      if (requests.length > 3) return [closed, complete, resolvedTail]
+      return [resolvedTail]
     }, () => new Date('2026-02-01T00:00:00.000Z'))
     const first = await materializer.backfillPress({ pressKey: 'press5', fromUtc: start, toUtc: at(10 * day), resume: false })
-    assert.equal(first.chunksCompleted, 2); assert.equal(requests[1]?.fromUtc, at(6 * day - 300_000))
-    const stored = await repository.listRuns({}); assert.deepEqual(stored.map((item) => item.run.runId), ['closed', 'boundary'])
-    const boundary = await repository.getRun('boundary'); assert.equal(boundary?.run.goodSeconds, 2 * day / 1_000); assert.equal(boundary?.run.runningPerformance?.speed?.median, 500); assert.equal(boundary?.isClosed, true)
-    assert.equal(first.watermarkUtc, at(8 * day)); assert.equal((await repository.getCheckpoint('press5'))?.sourceToUtc, at(8 * day))
+    assert.equal(first.chunksCompleted, 3); assert.equal(requests[1]?.fromUtc, at(6 * day)); assert.equal(requests[2]?.fromUtc, at(8 * day))
+    const stored = await repository.listRuns({}); assert.deepEqual(stored.map((item) => item.run.runId), [closed.runId, complete.runId, resolvedTail.runId])
+    const boundary = await repository.getRun(complete.runId); assert.equal(boundary?.run.goodSeconds, 2 * day / 1_000); assert.equal(boundary?.run.runningPerformance?.speed?.median, 500); assert.equal(boundary?.isClosed, true)
+    assert.equal(first.watermarkUtc, at(10 * day)); assert.equal((await repository.getCheckpoint('press5'))?.sourceToUtc, at(10 * day))
     await materializer.backfillPress({ pressKey: 'press5', fromUtc: start, toUtc: at(10 * day), resume: false })
-    assert.equal((await repository.listRuns({})).length, 2)
+    assert.equal((await repository.listRuns({})).length, 3)
   })
 
   it('preserves missing identity dimensions instead of synthesizing values', async () => {
     const repository = new InMemoryJobHistoryRepository(); await repository.upsertRuns([materializedRun(run('missing-material', 0, day), start, at(day))])
-    const stored = await repository.getRun('missing-material')
+    const stored = await repository.getRun(naturalProductionRunId('press5', start, { order: 'O1', recipe: 'R1', customer: 'C1' }))
     assert.equal(stored?.run.identities.material, undefined); assert.equal(stored?.run.identities.recipe, 'R1')
   })
 })

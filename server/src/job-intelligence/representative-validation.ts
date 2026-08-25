@@ -6,12 +6,12 @@ import { TelemetryApiClient } from '../telemetry/telemetry-api-client.js'
 import { TelemetryFoundationService } from '../telemetry/telemetry-foundation-service.js'
 import type { ProductionRun } from './contracts.js'
 import { JobHistoryMaterializer } from './history-materializer.js'
-import { createJobHistoryRepository } from './history-repository.js'
 import { canonicalMaterializedJobFacts } from './canonical-run.js'
 import { acquireMaterializationPreflight } from './materialization-preflight.js'
 import { createMaterializationRadiusService } from './materialization-runtime.js'
 import { assertRepresentativeParity } from './representative-parity.js'
 import { JobIntelligenceService } from './service.js'
+import { createDisposableJobValidationRepository, loadDisposableJobValidationDatabaseConfig } from './validation-database.js'
 
 const UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/
 const option = (name: string) => process.argv.slice(2).find((item) => item.startsWith(`--${name}=`))?.slice(name.length + 3)
@@ -24,12 +24,12 @@ const pressKey = press as RadiusPressKey
 
 const preflight = await acquireMaterializationPreflight({ maintenanceMode })
 let radiusOwner: Awaited<ReturnType<typeof createMaterializationRadiusService>> | undefined
-let history: ReturnType<typeof createJobHistoryRepository> | undefined
+let history: Awaited<ReturnType<typeof createDisposableJobValidationRepository>> | undefined
 try {
   const config = loadServerConfig()
   const materializerRadius = loadJobMaterializerRadiusConfig(config.radius)
-  if (!config.classificationDatabase.enabled) throw new Error('job_history_application_database_not_configured')
-  history = createJobHistoryRepository(config.classificationDatabase)
+  const validationDatabase = loadDisposableJobValidationDatabaseConfig(process.env, config.classificationDatabase)
+  history = await createDisposableJobValidationRepository(validationDatabase)
   await history.initialize()
   const initial = await history.listRuns({ fromUtc, toUtc, pressKeys: [pressKey] })
   let telemetryRequestCount = 0
@@ -38,7 +38,7 @@ try {
   const jobs = new JobIntelligenceService(radiusOwner.service, telemetry, history)
   let capturedLive: ProductionRun[] = []
   const materializer = new JobHistoryMaterializer(history, async (selectedPress, chunkFromUtc, chunkToUtc, requestId, signal) => {
-    const runs = (await jobs.buildPressRuns(selectedPress, chunkFromUtc, chunkToUtc, requestId, signal, true, true)).runs
+    const runs = (await jobs.buildPressRuns(selectedPress, chunkFromUtc, chunkToUtc, requestId, signal, true, true, undefined, undefined, true)).runs
     capturedLive.push(...runs)
     return runs
   })
@@ -49,7 +49,7 @@ try {
     const telemetryBefore = telemetryRequestCount
     const statementsBefore = history!.diagnostics().statementCount
     const began = Date.now()
-    const result = await materializer.backfillPress({ pressKey, fromUtc, toUtc, requestId: `job-history-validation-${randomUUID()}`, resume })
+    const result = await materializer.backfillPress({ pressKey, fromUtc, toUtc, requestId: `job-history-validation-${randomUUID()}`, resume, mode: 'bounded' })
     const elapsedMs = Date.now() - began
     const after = jobs.radiusAcquisitionDiagnostics().global
     return { result, elapsedMs, radiusAcquisitions: after.totalAcquisitions - before.totalAcquisitions, peakRadiusConcurrency: after.peakActive, telemetryRequestCount: telemetryRequestCount - telemetryBefore, sqlStatementCount: history!.diagnostics().statementCount - statementsBefore, liveRuns: capturedLive }
@@ -65,7 +65,7 @@ try {
   const secondParity = assertRepresentativeParity(second.liveRuns, secondStored, fromUtc, toUtc)
   const secondLossRows = secondStored.reduce((sum, item) => sum + (item.run.radiusLossAggregates?.length ?? 0), 0)
   const checkpoint = await history.getCheckpoint(pressKey)
-  const idempotent = firstStored.length === secondStored.length && firstLossRows === secondLossRows && isDeepStrictEqual(firstStored.map(canonicalMaterializedJobFacts), secondStored.map(canonicalMaterializedJobFacts)) && firstCheckpoint?.watermarkUtc === checkpoint?.watermarkUtc && checkpoint?.state === 'complete'
+  const idempotent = firstStored.length === secondStored.length && firstLossRows === secondLossRows && isDeepStrictEqual(firstStored.map(canonicalMaterializedJobFacts), secondStored.map(canonicalMaterializedJobFacts)) && firstCheckpoint === null && checkpoint === null
   if (!idempotent) throw new Error('job_history_idempotency_failed')
 
   console.log(JSON.stringify({
@@ -73,7 +73,7 @@ try {
     initialRunRows: initial.length,
     first: { elapsedMs: first.elapsedMs, radiusAcquisitions: first.radiusAcquisitions, peakRadiusConcurrency: first.peakRadiusConcurrency, telemetryRequestCount: first.telemetryRequestCount, sqlStatementCount: first.sqlStatementCount, result: first.result, runRows: firstStored.length, lossRows: firstLossRows, parity: firstParity },
     second: { elapsedMs: second.elapsedMs, radiusAcquisitions: second.radiusAcquisitions, peakRadiusConcurrency: second.peakRadiusConcurrency, telemetryRequestCount: second.telemetryRequestCount, sqlStatementCount: second.sqlStatementCount, result: second.result, runRows: secondStored.length, lossRows: secondLossRows, parity: secondParity },
-    idempotent,
+    idempotent, validationStorage: 'explicitly_marked_disposable_postgresql', checkpointIsolation: firstCheckpoint === null && checkpoint === null,
     checkpoint,
     globalRadiusDiagnostics: jobs.radiusAcquisitionDiagnostics().global,
     physicalRadiusConnectionCap: radiusOwner.maximumConnections,

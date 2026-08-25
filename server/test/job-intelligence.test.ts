@@ -5,6 +5,9 @@ import { createApp } from '../src/app.js'
 import { deriveProductionRuns, evidenceSupport, matchesJobGroup, summarizeIdentities, summarizeRadiusLosses, summarizeTransitions } from '../src/job-intelligence/engine.js'
 import { JobIntelligenceService, readJobProductionContext } from '../src/job-intelligence/service.js'
 import { JobIntelligenceRadiusAcquisitionLimiter } from '../src/job-intelligence/radius-acquisition-limiter.js'
+import { JobHistoryMaterializer } from '../src/job-intelligence/history-materializer.js'
+import { InMemoryJobHistoryRepository } from '../src/job-intelligence/history-repository.js'
+import { assertRepresentativeParity } from '../src/job-intelligence/representative-parity.js'
 import type { RadiusService } from '../src/radius/radius-service.js'
 import type { RadiusStatusSegment } from '../src/radius/models.js'
 import type { TelemetryClient } from '../src/telemetry/telemetry-api-client.js'
@@ -39,6 +42,41 @@ function gap(startMinute: number, endMinute: number): RadiusStatusSegment {
 }
 
 describe('Job Intelligence production-run derivation', () => {
+  it('keeps natural run IDs invariant across narrow, broad, overlapping, and resumed ranges', async () => {
+    const fixture = context(); fixture.fields.order = field('order', 'Z'); fixture.changes = [
+      { atUtc: at(10), field: 'order', canonicalId: 'production.order', previousValueKind: 'string', previousValue: 'Z', valueKind: 'string', value: 'A', qualityState: 'good' },
+      { atUtc: at(100), field: 'order', canonicalId: 'production.order', previousValueKind: 'string', previousValue: 'A', valueKind: 'string', value: 'B', qualityState: 'good' },
+      { atUtc: at(200), field: 'order', canonicalId: 'production.order', previousValueKind: 'string', previousValue: 'B', valueKind: 'string', value: 'C', qualityState: 'good' },
+      { atUtc: at(240), field: 'order', canonicalId: 'production.order', previousValueKind: 'string', previousValue: 'C', valueKind: 'string', value: 'D', qualityState: 'good' },
+    ]
+    const radiusSegments = [segment(0, 240, 'G', 'Run Production', '10')]
+    const derive = (requestedFromUtc: string, requestedToUtc: string) => deriveProductionRuns({ pressKey: 'press5', fromUtc: start, toUtc: at(240), requestedFromUtc, requestedToUtc, context: fixture, radiusSegments })
+    const expectedIds = ['press5.job.2e9fe3f59ed47fec', 'press5.job.3eae5a6340e814e9'] // Independent contract oracle: SHA-256 of natural start + ordered resolved identity.
+    const broadExpectedIds = [...expectedIds, 'press5.job.355bec083582870d']
+    const narrow = derive(at(50), at(150)); const broad = derive(start, at(240)); const overlap = derive(at(90), at(210)); const resumed = derive(at(100), at(240))
+    assert.deepEqual(narrow.map((run) => run.runId), expectedIds)
+    assert.deepEqual(broad.filter((run) => run.persistenceEligible).map((run) => run.runId), broadExpectedIds)
+    assert.deepEqual(overlap.filter((run) => run.persistenceEligible).map((run) => run.runId), broadExpectedIds)
+    assert.deepEqual(resumed.filter((run) => run.persistenceEligible).map((run) => run.runId), broadExpectedIds.slice(1))
+    assert.deepEqual(broad.filter((run) => !run.persistenceEligible).map((run) => run.boundaryCompleteness), ['left_fragment'])
+
+    const repository = new InMemoryJobHistoryRepository(); let clock = Date.parse('2026-09-01T00:00:00.000Z')
+    const materializer = new JobHistoryMaterializer(repository, async (_press, fromUtc, toUtc) => derive(fromUtc, toUtc), () => new Date(clock += 1_000))
+    await materializer.backfillPress({ pressKey: 'press5', fromUtc: at(50), toUtc: at(150), mode: 'bounded' })
+    assert.equal(await repository.getCheckpoint('press5'), null)
+    assert.deepEqual((await repository.listRuns({})).map((item) => item.run.runId), expectedIds)
+    await materializer.backfillPress({ pressKey: 'press5', fromUtc: at(10), toUtc: at(240), resume: false })
+    const broadCheckpoint = await repository.getCheckpoint('press5'); assert.equal(broadCheckpoint?.watermarkUtc, at(240))
+    const narrowStored = await repository.listRuns({ fromUtc: at(50), toUtc: at(150), pressKeys: ['press5'] }); assert.equal(narrowStored.length, 2); assert.doesNotThrow(() => assertRepresentativeParity(narrow, narrowStored, at(50), at(150)))
+    await materializer.backfillPress({ pressKey: 'press5', fromUtc: at(50), toUtc: at(150), mode: 'bounded' })
+    assert.equal((await repository.getCheckpoint('press5'))?.watermarkUtc, at(240))
+    await materializer.backfillPress({ pressKey: 'press5', fromUtc: at(10), toUtc: at(180), mode: 'bounded' })
+    assert.equal((await repository.getCheckpoint('press5'))?.watermarkUtc, at(240))
+    await materializer.backfillPress({ pressKey: 'press5', fromUtc: at(10), toUtc: at(240), resume: false })
+    assert.deepEqual((await repository.listRuns({})).map((item) => item.run.runId), broadExpectedIds)
+    assert.equal((await repository.getCheckpoint('press5'))?.watermarkUtc, at(240))
+  })
+
   it('coalesces asynchronous identity changes while preserving first, final, and settled timing', () => {
     const runs = deriveProductionRuns({ pressKey: 'press5', fromUtc: start, toUtc: at(240), context: context(), radiusSegments: [segment(0, 30, 'G', 'Run Production', '10'), segment(30, 70, 'M', 'Plate / Register', '20'), segment(70, 180, 'G', 'Run Production', '10'), segment(180, 240, 'B', 'Web Break', '30')] })
     assert.equal(runs.length, 2)

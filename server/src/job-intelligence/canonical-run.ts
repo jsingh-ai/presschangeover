@@ -13,6 +13,12 @@ export function canonicalJobNumber(value: number): number {
   return Object.is(value, -0) ? 0 : value
 }
 
+export function canonicalJobInteger(value: number, minimum = -2_147_483_648, maximum = 2_147_483_647): number {
+  const number = canonicalJobNumber(value)
+  if (!Number.isSafeInteger(number) || number < minimum || number > maximum) throw new Error('invalid_job_persistence_integer')
+  return number
+}
+
 function nullableNumber(value: number | null | undefined): number | null {
   return value === null || value === undefined ? null : canonicalJobNumber(value)
 }
@@ -27,23 +33,33 @@ function nullableIdentities(value: Identities | null | undefined): Identities | 
 }
 
 function numericSet(values: number[]): number[] {
-  return [...new Set(values.map(canonicalJobNumber))].sort((left, right) => left - right)
+  return [...new Set(values.map((value) => canonicalJobInteger(value, -32_768, 32_767)))].sort((left, right) => left - right)
 }
 
 function lossKey(value: JobRunLossAggregate): string {
-  return [value.eventType, value.statusCode ?? '', value.statusDescription, value.category].join('\u0000')
+  return JSON.stringify([value.eventType, value.statusCode ?? '', value.statusDescription])
 }
 
 function losses(values: JobRunLossAggregate[] | undefined): JobRunLossAggregate[] {
-  return (values ?? []).map((value) => ({
-    eventType: value.eventType,
-    statusCode: value.statusCode === '' || value.statusCode === undefined ? null : value.statusCode,
-    statusDescription: value.statusDescription,
-    category: value.category,
-    totalSeconds: canonicalJobNumber(value.totalSeconds),
-    occurrenceCount: canonicalJobNumber(value.occurrenceCount),
-    medianEpisodeSeconds: canonicalJobNumber(value.medianEpisodeSeconds),
-  })).sort((left, right) => lossKey(left) < lossKey(right) ? -1 : lossKey(left) > lossKey(right) ? 1 : 0)
+  const seen = new Set<string>()
+  const result = (values ?? []).map((value) => {
+    const category = value.eventType === 'M' ? 'make_ready' : value.eventType === 'B' ? 'bad' : 'other'
+    if (value.category !== category) throw new Error('invalid_job_loss_category')
+    const normalized = {
+      eventType: value.eventType,
+      statusCode: value.statusCode === '' || value.statusCode === undefined ? null : value.statusCode,
+      statusDescription: value.statusDescription,
+      category,
+      totalSeconds: canonicalJobNumber(value.totalSeconds),
+      occurrenceCount: canonicalJobInteger(value.occurrenceCount, 1),
+      medianEpisodeSeconds: canonicalJobNumber(value.medianEpisodeSeconds),
+    } satisfies JobRunLossAggregate
+    const key = lossKey(normalized)
+    if (seen.has(key)) throw new Error('duplicate_job_loss_key')
+    seen.add(key)
+    return normalized
+  })
+  return result.sort((left, right) => lossKey(left) < lossKey(right) ? -1 : lossKey(left) > lossKey(right) ? 1 : 0)
 }
 
 /**
@@ -54,7 +70,13 @@ function losses(values: JobRunLossAggregate[] | undefined): JobRunLossAggregate[
  */
 export function canonicalJobRun(run: ProductionRun): ProductionRun {
   const current = identities(run.identities)
-  const previous = nullableIdentities(run.identityTransition.previousResolvedIdentity) ?? nullableIdentities(run.previousIdentities)
+  const previous = nullableIdentities(run.previousIdentities)
+  const transitionPrevious = nullableIdentities(run.identityTransition.previousResolvedIdentity)
+  const startUtc = canonicalJobTimestamp(run.startUtc)!
+  const endUtc = canonicalJobTimestamp(run.endUtc)!
+  const durationSeconds = canonicalJobNumber(run.durationSeconds)
+  const expectedDurationSeconds = Math.round((Date.parse(endUtc) - Date.parse(startUtc)) / 100) / 10
+  if (durationSeconds !== expectedDurationSeconds) throw new Error('invalid_job_duration_boundary')
   const firstSeen = canonicalJobTimestamp(run.identityTransition.identityChangeFirstSeenAtUtc)
   const lastChange = canonicalJobTimestamp(run.identityTransition.identityLastChangeAtUtc)
   const settled = canonicalJobTimestamp(run.identityTransition.identitySettledAtUtc)
@@ -71,23 +93,28 @@ export function canonicalJobRun(run: ProductionRun): ProductionRun {
 
   return {
     runId: run.runId,
-    previousRunId: run.previousRunId ?? null,
+    // Adjacency IDs depend on what neighbouring evidence is loaded. Persist
+    // the independently observed previous identity and reconstruct IDs at read
+    // time instead of fingerprinting a range-dependent relationship.
+    previousRunId: null,
     nextRunId: null,
     pressKey: run.pressKey,
-    startUtc: canonicalJobTimestamp(run.startUtc)!,
-    endUtc: canonicalJobTimestamp(run.endUtc)!,
-    durationSeconds: canonicalJobNumber(run.durationSeconds),
+    startUtc,
+    endUtc,
+    durationSeconds,
+    boundaryCompleteness: run.boundaryCompleteness,
+    persistenceEligible: run.persistenceEligible,
     identities: current,
     previousIdentities: previous,
     nextIdentities: null,
-    boundaryFields: JOB_ANALYSIS_DIMENSIONS.filter((field) => previous?.[field] !== undefined && previous[field] !== current[field]),
+    boundaryFields: JOB_ANALYSIS_DIMENSIONS.filter((field) => transitionPrevious?.[field] !== undefined && transitionPrevious[field] !== current[field]),
     contextSettlingSeconds: firstSeen && settled ? canonicalJobNumber(Math.max(0, (Date.parse(settled) - Date.parse(firstSeen)) / 1_000)) : 0,
     identityTransition: {
       identityChangeFirstSeenAtUtc: firstSeen,
       identityLastChangeAtUtc: lastChange,
       identitySettledAtUtc: settled,
       settleState: run.identityTransition.settleState,
-      previousResolvedIdentity: previous,
+      previousResolvedIdentity: transitionPrevious,
       finalResolvedIdentity: current,
       inferredBoundary: run.identityTransition.inferredBoundary,
     },
@@ -101,7 +128,7 @@ export function canonicalJobRun(run: ProductionRun): ProductionRun {
     otherRadiusSeconds: canonicalJobNumber(run.otherRadiusSeconds),
     unavailableSeconds,
     productionStateEfficiency: nullableNumber(run.productionStateEfficiency),
-    productionInterruptionCount: interruptions,
+    productionInterruptionCount: canonicalJobInteger(interruptions, 0),
     interruptionsPerProductionHour: interruptionsPerHour,
     transitionToStableProductionSeconds: transitionSeconds,
     transitionMakeReadySeconds: nullableNumber(run.transitionMakeReadySeconds),
@@ -124,7 +151,7 @@ export function canonicalJobRun(run: ProductionRun): ProductionRun {
       reusedDecks: numericSet(deck.reusedDecks),
       addedDecks: numericSet(deck.addedDecks),
       removedDecks: numericSet(deck.removedDecks),
-      changedDeckCount: canonicalJobNumber(deck.changedDeckCount),
+      changedDeckCount: canonicalJobInteger(deck.changedDeckCount, 0, 32_767),
       evidenceCanonicalId: 'deck.active',
     } : null,
     runningPerformance: {
@@ -132,15 +159,15 @@ export function canonicalJobRun(run: ProductionRun): ProductionRun {
       observedSeconds: canonicalJobNumber(runningGood + runningBad),
       goodSeconds: runningGood,
       badSeconds: runningBad,
-      interruptions,
+      interruptions: canonicalJobInteger(interruptions, 0),
       interruptionsPerProductionHour: interruptionsPerHour,
       medianUninterruptedGoodSeconds: nullableNumber(run.runningPerformance?.medianUninterruptedGoodSeconds),
-      restartCount: canonicalJobNumber(run.runningPerformance?.restartCount ?? 0),
+      restartCount: canonicalJobInteger(run.runningPerformance?.restartCount ?? 0, 0),
       speed: speed ? {
         canonicalId: 'machine.speed.actual',
         sourceUnit: speed.sourceUnit ?? null,
         canonicalUnitStatus: speed.canonicalUnitStatus ?? null,
-        sampleCount: canonicalJobNumber(speed.sampleCount),
+        sampleCount: canonicalJobInteger(speed.sampleCount, 0),
         median: canonicalJobNumber(speed.median),
         p25: canonicalJobNumber(speed.p25),
         p75: canonicalJobNumber(speed.p75),

@@ -38,7 +38,37 @@ export function mergeHistoricalAndLiveRuns(historical: MaterializedProductionRun
   return [...merged.values()].sort((a, b) => Date.parse(a.run.startUtc) - Date.parse(b.run.startUtc) || a.run.runId.localeCompare(b.run.runId))
 }
 
-export interface JobHistoryBackfillResult { pressKey: RadiusPressKey; fromUtc: string; toUtc: string; chunksCompleted: number; runsWritten: number; resumedFromUtc: string; watermarkUtc: string }
+export interface JobHistoryBackfillResult { pressKey: RadiusPressKey; fromUtc: string; toUtc: string; mode: 'forward' | 'bounded'; chunksCompleted: number; runsWritten: number; resumedFromUtc: string; watermarkUtc: string }
+
+export interface JobChunkCheckpointSafety {
+  safeThroughUtc: string
+  complete: boolean
+  blockingState: ProductionRun['boundaryCompleteness'] | 'unproven_coverage' | null
+  persistableRunIds: string[]
+}
+
+/**
+ * Computes the contiguous, proven prefix of a forward materialization chunk.
+ * Only a natural, persistence-eligible interval is positive evidence. Every
+ * other current or future classification fails closed at its first intersecting
+ * timestamp, and any uncovered hole fails closed as unproven coverage.
+ */
+export function assessJobChunkCheckpointSafety(runs: ProductionRun[], chunkFromUtc: string, chunkToUtc: string): JobChunkCheckpointSafety {
+  const from = Date.parse(chunkFromUtc); const to = Date.parse(chunkToUtc)
+  if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) throw new Error('invalid_job_history_chunk_range')
+  const intersecting = runs.filter((run) => Date.parse(run.endUtc) > from && Date.parse(run.startUtc) < to).sort((left, right) => Date.parse(left.startUtc) - Date.parse(right.startUtc) || Date.parse(left.endUtc) - Date.parse(right.endUtc) || left.runId.localeCompare(right.runId))
+  let cursor = from; const persistableRunIds: string[] = []
+  for (const run of intersecting) {
+    const start = Date.parse(run.startUtc); const end = Date.parse(run.endUtc)
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) throw new Error('invalid_job_history_run_interval')
+    if (start > cursor) return { safeThroughUtc: new Date(cursor).toISOString(), complete: false, blockingState: 'unproven_coverage', persistableRunIds }
+    if (run.boundaryCompleteness !== 'natural' || !run.persistenceEligible) return { safeThroughUtc: new Date(cursor).toISOString(), complete: false, blockingState: run.boundaryCompleteness, persistableRunIds }
+    if (!persistableRunIds.includes(run.runId)) persistableRunIds.push(run.runId)
+    cursor = Math.max(cursor, Math.min(end, to))
+    if (cursor >= to) return { safeThroughUtc: new Date(to).toISOString(), complete: true, blockingState: null, persistableRunIds }
+  }
+  return { safeThroughUtc: new Date(cursor).toISOString(), complete: cursor >= to, blockingState: cursor >= to ? null : 'unproven_coverage', persistableRunIds }
+}
 
 type FailureStage = 'claim' | 'source_acquisition' | 'history_read' | 'derivation' | 'persistence'
 function cancelledError() { const error = new Error('job_history_cancelled'); error.name = 'AbortError'; return error }
@@ -55,10 +85,25 @@ function boundedErrorMessage(error: unknown) { const raw = error instanceof Erro
 export class JobHistoryMaterializer {
   constructor(private readonly repository: JobHistoryRepository, private readonly buildRuns: (pressKey: RadiusPressKey, fromUtc: string, toUtc: string, requestId?: string, signal?: AbortSignal) => Promise<ProductionRun[]>, private readonly now: () => Date = () => new Date(), private readonly leaseMs = JOB_HISTORY_LEASE_MS) { if (!Number.isSafeInteger(leaseMs) || leaseMs < 1_000) throw new Error('invalid_job_history_lease') }
 
-  async backfillPress(input: { pressKey: RadiusPressKey; fromUtc: string; toUtc: string; requestId?: string; signal?: AbortSignal; resume?: boolean }): Promise<JobHistoryBackfillResult> {
+  async backfillPress(input: { pressKey: RadiusPressKey; fromUtc: string; toUtc: string; requestId?: string; signal?: AbortSignal; resume?: boolean; mode?: 'forward' | 'bounded' }): Promise<JobHistoryBackfillResult> {
     const fromMs = Date.parse(input.fromUtc); const toMs = Date.parse(input.toUtc)
     if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) throw new Error('invalid_job_history_range')
     if (input.signal?.aborted) throw cancelledError()
+    const mode = input.mode ?? 'forward'
+    if (mode === 'bounded') {
+      let cursor = fromMs; let chunksCompleted = 0; let runsWritten = 0
+      while (cursor < toMs) {
+        if (input.signal?.aborted) throw cancelledError()
+        const chunkEnd = Math.min(toMs, cursor + MAX_BACKFILL_CHUNK_MS); const sourceFromUtc = new Date(cursor).toISOString(); const sourceToUtc = new Date(chunkEnd).toISOString(); const calculatedAtUtc = this.now().toISOString()
+        const live = await this.buildRuns(input.pressKey, sourceFromUtc, sourceToUtc, input.requestId, input.signal)
+        if (input.signal?.aborted) throw cancelledError()
+        const natural = [...new Map(live.filter((run) => run.persistenceEligible && run.boundaryCompleteness === 'natural').map((run) => [run.runId, run])).values()]
+        const values = natural.map((run) => materializedRun(run, new Date(Math.min(cursor, Date.parse(run.startUtc))).toISOString(), new Date(Math.max(chunkEnd, Date.parse(run.endUtc))).toISOString(), { calculatedAtUtc, isClosed: true }))
+        await this.repository.upsertRuns(values)
+        chunksCompleted += 1; runsWritten += values.length; cursor = chunkEnd
+      }
+      return { pressKey: input.pressKey, fromUtc: input.fromUtc, toUtc: input.toUtc, mode, chunksCompleted, runsWritten, resumedFromUtc: input.fromUtc, watermarkUtc: input.toUtc }
+    }
     const leaseId = randomUUID(); const startedAtUtc = this.now().toISOString(); const leaseExpiresAtUtc = new Date(Date.parse(startedAtUtc) + this.leaseMs).toISOString()
     let stage: FailureStage = 'claim'
     let claimed: JobHistoryCheckpoint | null
@@ -72,26 +117,34 @@ export class JobHistoryMaterializer {
     let checkpoint: JobHistoryCheckpoint = claimed
     const checkpointCoversRequestedStart = Date.parse(checkpoint.sourceFromUtc) <= fromMs
     let cursor = input.resume !== false && checkpointCoversRequestedStart && Date.parse(checkpoint.watermarkUtc) > fromMs && Date.parse(checkpoint.watermarkUtc) < toMs ? Date.parse(checkpoint.watermarkUtc) : fromMs
+    if (input.resume !== false && checkpointCoversRequestedStart && Date.parse(checkpoint.watermarkUtc) >= toMs) cursor = toMs
     const resumedFromUtc = new Date(cursor).toISOString(); let chunksCompleted = 0; let runsWritten = 0
     try {
+      if (cursor >= toMs) {
+        const finishedAtUtc = this.now().toISOString()
+        const completed: JobHistoryCheckpoint = { ...checkpoint, state: 'complete', updatedAtUtc: finishedAtUtc, finishedAtUtc, lastSuccessAtUtc: checkpoint.lastSuccessAtUtc ?? finishedAtUtc, leaseId: null, leaseExpiresAtUtc: null, lastErrorCode: null, lastErrorMessage: null }
+        stage = 'persistence'; await this.repository.commitChunk([], completed, leaseId); checkpoint = completed
+      }
       while (cursor < toMs) {
         if (input.signal?.aborted) throw cancelledError()
-        const chunkEnd = Math.min(toMs, cursor + MAX_BACKFILL_CHUNK_MS); const sourceStart = Math.max(fromMs, cursor - SETTLING_OVERLAP_MS); const sourceFromUtc = new Date(sourceStart).toISOString(); const sourceToUtc = new Date(chunkEnd).toISOString(); const calculatedAtUtc = this.now().toISOString()
+        const chunkEnd = Math.min(toMs, cursor + MAX_BACKFILL_CHUNK_MS); const sourceFromUtc = new Date(cursor).toISOString(); const sourceToUtc = new Date(chunkEnd).toISOString(); const calculatedAtUtc = this.now().toISOString()
         stage = 'source_acquisition'
         const live = await this.buildRuns(input.pressKey, sourceFromUtc, sourceToUtc, input.requestId, input.signal)
         if (input.signal?.aborted) throw cancelledError()
         stage = 'history_read'
-        const prior = await this.repository.listRuns({ fromUtc: new Date(Math.max(fromMs, sourceStart - SETTLING_OVERLAP_MS)).toISOString(), toUtc: sourceToUtc, pressKeys: [input.pressKey] })
+        const prior = await this.repository.listRuns({ fromUtc: sourceFromUtc, toUtc: sourceToUtc, pressKeys: [input.pressKey] })
         stage = 'derivation'
-        const reconciled = mergeHistoricalAndLiveRuns(prior, live, sourceFromUtc, sourceToUtc).filter((item) => { const existing = prior.find((candidate) => candidate.run.runId === item.run.runId); return !existing || !existing.isClosed || existing.sourceFingerprint !== item.sourceFingerprint })
-        const finalChunk = chunkEnd >= toMs
-        const boundaryRuns = reconciled.filter((item) => Date.parse(item.run.endUtc) >= chunkEnd)
-        const nextCursor = boundaryRuns.length ? Math.min(...boundaryRuns.map((item) => Date.parse(item.run.startUtc))) : chunkEnd
-        if (!finalChunk && nextCursor <= cursor) throw new Error('job_history_run_exceeds_bounded_chunk')
-        const persistable = reconciled.filter((item) => Date.parse(item.run.endUtc) < chunkEnd)
-        const values = persistable.map((item) => materializedRun(item.run, item.sourceFromUtc, sourceToUtc, { calculatedAtUtc, isClosed: Date.parse(item.run.endUtc) < chunkEnd }))
+        const safety = assessJobChunkCheckpointSafety(live, sourceFromUtc, sourceToUtc)
+        const safeRunIds = new Set(safety.persistableRunIds)
+        const natural = [...new Map(live.filter((run) => safeRunIds.has(run.runId) && run.persistenceEligible && run.boundaryCompleteness === 'natural').map((run) => [run.runId, run])).values()]
+        const reconciled = natural.map((run) => materializedRun(run, new Date(Math.min(cursor, Date.parse(run.startUtc))).toISOString(), new Date(Math.max(chunkEnd, Date.parse(run.endUtc))).toISOString(), { calculatedAtUtc, isClosed: true })).filter((item) => { const existing = prior.find((candidate) => candidate.run.runId === item.run.runId); return !existing || !existing.isClosed || existing.sourceFingerprint !== item.sourceFingerprint || Date.parse(existing.sourceFromUtc) > Date.parse(item.sourceFromUtc) || Date.parse(existing.sourceToUtc) < Date.parse(item.sourceToUtc) })
+        const nextCursor = Date.parse(safety.safeThroughUtc)
+        if (nextCursor <= cursor) throw new Error('job_history_natural_boundary_not_found_within_context')
+        const finalChunk = nextCursor >= toMs
+        const values = reconciled
         const committedAtUtc = this.now().toISOString(); const state = finalChunk ? 'complete' as const : 'running' as const
-        const nextCheckpoint: JobHistoryCheckpoint = { ...checkpoint, watermarkUtc: new Date(nextCursor).toISOString(), sourceFromUtc: new Date(Math.min(Date.parse(checkpoint.sourceFromUtc), fromMs)).toISOString(), sourceToUtc: new Date(nextCursor).toISOString(), state, updatedAtUtc: committedAtUtc, finishedAtUtc: finalChunk ? committedAtUtc : null, lastSuccessAtUtc: committedAtUtc, leaseId: finalChunk ? null : leaseId, leaseExpiresAtUtc: finalChunk ? null : new Date(Date.parse(committedAtUtc) + this.leaseMs).toISOString(), lastErrorCode: null, lastErrorMessage: null }
+        const monotonicWatermark = Math.max(Date.parse(checkpoint.watermarkUtc), nextCursor); const monotonicSourceEnd = Math.max(Date.parse(checkpoint.sourceToUtc), nextCursor)
+        const nextCheckpoint: JobHistoryCheckpoint = { ...checkpoint, watermarkUtc: new Date(monotonicWatermark).toISOString(), sourceFromUtc: new Date(Math.min(Date.parse(checkpoint.sourceFromUtc), fromMs)).toISOString(), sourceToUtc: new Date(monotonicSourceEnd).toISOString(), state, updatedAtUtc: committedAtUtc, finishedAtUtc: finalChunk ? committedAtUtc : null, lastSuccessAtUtc: committedAtUtc, leaseId: finalChunk ? null : leaseId, leaseExpiresAtUtc: finalChunk ? null : new Date(Date.parse(committedAtUtc) + this.leaseMs).toISOString(), lastErrorCode: null, lastErrorMessage: null }
         stage = 'persistence'; await this.repository.commitChunk(values, nextCheckpoint, leaseId)
         checkpoint = nextCheckpoint; runsWritten += values.length; chunksCompleted += 1; cursor = nextCursor
         if (finalChunk) break
@@ -101,6 +154,6 @@ export class JobHistoryMaterializer {
       try { await this.repository.failCheckpoint(leaseId, failedCheckpoint) } catch (cleanupError) { if (error instanceof Error) Object.defineProperty(error, 'checkpointCleanupError', { value: cleanupError, enumerable: false }) }
       throw error
     }
-    return { pressKey: input.pressKey, fromUtc: input.fromUtc, toUtc: input.toUtc, chunksCompleted, runsWritten, resumedFromUtc, watermarkUtc: new Date(cursor).toISOString() }
+    return { pressKey: input.pressKey, fromUtc: input.fromUtc, toUtc: input.toUtc, mode, chunksCompleted, runsWritten, resumedFromUtc, watermarkUtc: checkpoint.watermarkUtc }
   }
 }

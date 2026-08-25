@@ -47,7 +47,7 @@ try {
   let telemetryRequestCount = 0
   const telemetry = new TelemetryFoundationService(new TelemetryApiClient(config.telemetryApi, (...args) => { telemetryRequestCount += 1; return fetch(...args) }))
   const jobs = new JobIntelligenceService(radiusOwner.service, telemetry, history)
-  const materializer = new JobHistoryMaterializer(history, async (pressKey, chunkFromUtc, chunkToUtc, requestId, signal) => (await jobs.buildPressRuns(pressKey, chunkFromUtc, chunkToUtc, requestId, signal, true, true)).runs)
+  const materializer = new JobHistoryMaterializer(history, async (pressKey, chunkFromUtc, chunkToUtc, requestId, signal) => (await jobs.buildPressRuns(pressKey, chunkFromUtc, chunkToUtc, requestId, signal, true, true, undefined, undefined, true)).runs)
 
   const began = Date.now(); const initialStatements = history.diagnostics().statementCount; const results = []
   for (const pressKey of pressKeys) {
@@ -56,7 +56,7 @@ try {
     results.push(result)
     console.log(JSON.stringify({ event: 'job_history_press_complete', ...result }))
   }
-  console.log(JSON.stringify({ event: 'job_history_backfill_complete', fromUtc, toUtc, pressCount: results.length, elapsedMs: Date.now() - began, chunksCompleted: results.reduce((sum, item) => sum + item.chunksCompleted, 0), runsWritten: results.reduce((sum, item) => sum + item.runsWritten, 0), telemetryRequestCount, sqlStatementCount: history.diagnostics().statementCount - initialStatements, sourceSafety: radiusOwner.sourceSafety }))
+  console.log(JSON.stringify({ event: 'job_history_backfill_complete', fromUtc, toUtc, pressCount: results.length, elapsedMs: Date.now() - began, chunksCompleted: results.reduce((sum, item) => sum + item.chunksCompleted, 0), runsWritten: results.reduce((sum, item) => sum + item.runsWritten, 0), telemetryRequestCount, sqlStatementCount: history.diagnostics().statementCount - initialStatements, sourceSafety: radiusOwner.sourceSafety, physicalRadiusConnectionCap: radiusOwner.maximumConnections }))
   console.log(JSON.stringify({ event: 'job_history_radius_acquisition_diagnostics', ...jobs.radiusAcquisitionDiagnostics().global, physicalRadiusConnectionCap: radiusOwner.maximumConnections }))
 } finally {
   await radiusOwner?.close()

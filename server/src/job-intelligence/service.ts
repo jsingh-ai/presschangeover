@@ -5,16 +5,27 @@ import { PRODUCTION_CONTEXT_CANONICAL_IDS, PRODUCTION_CONTEXT_FIELDS, type Press
 import { JOB_ANALYSIS_DIMENSIONS, type FleetJobIntelligenceReport, type HistoricalRunSort, type JobAnalysisDimension, type JobDecisionCard, type JobGroupDefinition, type JobIntelligenceFinding, type JobIntelligenceReport, type JobRefinement, type JobRunInspector, type ProductionRun } from './contracts.js'
 import { buildPressAffinity, deriveProductionRuns, evidenceSupport, matchesJobGroup, productionContextCoverage, summarizeIdentities, summarizeRadiusLosses, summarizeTransitions, type DeckActiveEvidence } from './engine.js'
 import { buildFleetReport } from './fleet-engine.js'
-import { mergeHistoricalAndLiveRuns } from './history-materializer.js'
 import { aggregateRunLosses, InMemoryJobHistoryRepository, JOB_HISTORY_ANALYTICS_LIMIT, JOB_INTELLIGENCE_ALGORITHM_VERSION, type JobHistoryRepository } from './history-repository.js'
 import { jobIntelligenceRadiusAcquisitionLimiter, type JobIntelligenceRadiusAcquisitionDiagnostics, type JobIntelligenceRadiusAcquisitionLimiter, type JobIntelligenceRadiusAcquisitionScope } from './radius-acquisition-limiter.js'
 
 export const JOB_INTELLIGENCE_MAX_RANGE_MS = 7 * 24 * 60 * 60_000
+export const JOB_NATURAL_BOUNDARY_CONTEXT_MS = 48 * 60 * 60_000
 const FLEET_READ_CONCURRENCY = 2
 
 interface PressRunResult { pressKey: RadiusPressKey; displayName: string; runs: ProductionRun[]; coverage: JobIntelligenceReport['coverage']; deckSupported: boolean }
 interface LiveFleetEvidence { live: ProductionRun[]; coverage: FleetJobIntelligenceReport['coverage']; limitations: string[] }
 interface RadiusAcquisitionDiagnostics { global: JobIntelligenceRadiusAcquisitionDiagnostics; lastFleet: JobIntelligenceRadiusAcquisitionDiagnostics | null }
+
+function sameIdentity(left: ProductionRun, right: ProductionRun) { return JOB_ANALYSIS_DIMENSIONS.every((field) => left.identities[field] === right.identities[field]) }
+function mergeHistoricalAndLiveForAnalysis(historical: ProductionRun[], live: ProductionRun[]) {
+  const merged = new Map(historical.map((run) => [run.runId, run]))
+  for (const run of live) {
+    if (merged.has(run.runId)) { merged.set(run.runId, run); continue }
+    const represented = run.boundaryCompleteness !== 'natural' && historical.some((stored) => stored.pressKey === run.pressKey && sameIdentity(stored, run) && Date.parse(stored.endUtc) > Date.parse(run.startUtc) && Date.parse(stored.startUtc) < Date.parse(run.endUtc))
+    if (!represented) merged.set(run.runId, run)
+  }
+  return [...merged.values()].sort((left, right) => Date.parse(left.startUtc) - Date.parse(right.startUtc) || left.runId.localeCompare(right.runId))
+}
 
 function reportUrl(input: { pressKey: RadiusPressKey; fromUtc: string; toUtc: string; analyzeBy: JobAnalysisDimension; group?: JobGroupDefinition }): string {
   const query = new URLSearchParams({ press: input.pressKey, fromUtc: input.fromUtc, toUtc: input.toUtc, preset: 'custom', analyzeBy: input.analyzeBy })
@@ -106,10 +117,12 @@ export class JobIntelligenceService {
     try { const history = await this.telemetry.semanticHistory(pressKey, { fromUtc, toUtc, includeSeed: false, signals: [{ canonicalId: 'machine.speed.actual', representation: 'samples' }] }, requestId, signal); const speed = history.signals.find((item) => item.canonicalId === 'machine.speed.actual'); return speed ? { sourceUnit: speed.sourceUnit, canonicalUnitStatus: speed.canonicalUnitStatus, samples: speed.samples } : undefined } catch (error) { if (signal?.aborted) throw error; return undefined }
   }
 
-  async buildPressRuns(pressKey: RadiusPressKey, fromUtc: string, toUtc: string, requestId?: string, signal?: AbortSignal, includeDecks = false, includeSpeed = false, knownCapabilities?: PressEvidenceCapabilities, acquisitionScope?: JobIntelligenceRadiusAcquisitionScope): Promise<PressRunResult> {
+  async buildPressRuns(pressKey: RadiusPressKey, fromUtc: string, toUtc: string, requestId?: string, signal?: AbortSignal, includeDecks = false, includeSpeed = false, knownCapabilities?: PressEvidenceCapabilities, acquisitionScope?: JobIntelligenceRadiusAcquisitionScope, naturalBoundaryContext = false): Promise<PressRunResult> {
     if (!this.radius.getRawTimeline) throw new RadiusUnavailableError()
+    const evidenceFromUtc = naturalBoundaryContext ? new Date(Date.parse(fromUtc) - JOB_NATURAL_BOUNDARY_CONTEXT_MS).toISOString() : fromUtc
+    const evidenceToUtc = naturalBoundaryContext ? new Date(Math.min(Date.parse(toUtc) + JOB_NATURAL_BOUNDARY_CONTEXT_MS, this.now())).toISOString() : toUtc
     const capabilities = knownCapabilities ?? await this.telemetry.capabilities.get(pressKey, requestId, signal)
-    const timelinePromise = this.radiusAcquisitionLimiter.run(() => this.radius.getRawTimeline!(pressKey, fromUtc, toUtc), { ...(signal ? { signal } : {}), ...(acquisitionScope ? { scope: acquisitionScope } : {}) })
+    const timelinePromise = this.radiusAcquisitionLimiter.run(() => this.radius.getRawTimeline!(pressKey, evidenceFromUtc, evidenceToUtc), { ...(signal ? { signal } : {}), ...(acquisitionScope ? { scope: acquisitionScope } : {}) })
     try {
     const deckCapability = capabilities.capabilities.find((item) => item.canonicalId === 'deck.active')
     const speedCapability = includeSpeed ? capabilities.capabilities.find((item) => item.canonicalId === 'machine.speed.actual') : undefined
@@ -119,25 +132,25 @@ export class JobIntelligenceService {
     let speed: { sourceUnit: string | null; canonicalUnitStatus: string | null; samples: TelemetrySample[] } | undefined
     if (deckNumbers.length || speedCapability?.state === 'SUPPORTED') {
       try {
-        const history = await this.telemetry.semanticHistory(pressKey, { fromUtc, toUtc, includeSeed: true, signals: [...PRODUCTION_CONTEXT_FIELDS.map((field) => ({ canonicalId: PRODUCTION_CONTEXT_CANONICAL_IDS[field], representation: 'changes' as const })), ...deckNumbers.map((deckNumber) => ({ canonicalId: 'deck.active', deckNumber, representation: 'changes' as const })), ...(speedCapability?.state === 'SUPPORTED' ? [{ canonicalId: 'machine.speed.actual', representation: 'samples' as const }] : [])] }, requestId, signal)
+        const history = await this.telemetry.semanticHistory(pressKey, { fromUtc: evidenceFromUtc, toUtc: evidenceToUtc, includeSeed: true, signals: [...PRODUCTION_CONTEXT_FIELDS.map((field) => ({ canonicalId: PRODUCTION_CONTEXT_CANONICAL_IDS[field], representation: 'changes' as const })), ...deckNumbers.map((deckNumber) => ({ canonicalId: 'deck.active', deckNumber, representation: 'changes' as const })), ...(speedCapability?.state === 'SUPPORTED' ? [{ canonicalId: 'machine.speed.actual', representation: 'samples' as const }] : [])] }, requestId, signal)
         context = productionContextFromHistory(history)
         deckActive = history.signals.filter((item) => item.canonicalId === 'deck.active' && item.deckNumber !== null).map((item) => ({ deckNumber: item.deckNumber!, seed: item.seed, changes: item.changes }))
         const actual = history.signals.find((item) => item.canonicalId === 'machine.speed.actual'); if (actual) speed = { sourceUnit: actual.sourceUnit, canonicalUnitStatus: actual.canonicalUnitStatus, samples: actual.samples }
       } catch (error) {
         if (signal?.aborted) throw error
         const [fallbackContext, deckHistory, fallbackSpeed] = await Promise.all([
-          readJobProductionContext(this.telemetry, pressKey, fromUtc, toUtc, capabilities, requestId, signal),
-          deckNumbers.length ? this.telemetry.semanticHistory(pressKey, { fromUtc, toUtc, includeSeed: true, signals: deckNumbers.map((deckNumber) => ({ canonicalId: 'deck.active', deckNumber, representation: 'changes' })) }, requestId, signal) : Promise.resolve(null),
-          speedCapability?.state === 'SUPPORTED' ? this.readCanonicalSpeed(pressKey, fromUtc, toUtc, requestId, signal) : Promise.resolve(undefined),
+          readJobProductionContext(this.telemetry, pressKey, evidenceFromUtc, evidenceToUtc, capabilities, requestId, signal),
+          deckNumbers.length ? this.telemetry.semanticHistory(pressKey, { fromUtc: evidenceFromUtc, toUtc: evidenceToUtc, includeSeed: true, signals: deckNumbers.map((deckNumber) => ({ canonicalId: 'deck.active', deckNumber, representation: 'changes' })) }, requestId, signal) : Promise.resolve(null),
+          speedCapability?.state === 'SUPPORTED' ? this.readCanonicalSpeed(pressKey, evidenceFromUtc, evidenceToUtc, requestId, signal) : Promise.resolve(undefined),
         ])
         context = fallbackContext
         deckActive = deckHistory?.signals.map((item) => ({ deckNumber: item.deckNumber!, seed: item.seed, changes: item.changes })) ?? []; speed = fallbackSpeed
       }
     } else {
-      context = await readJobProductionContext(this.telemetry, pressKey, fromUtc, toUtc, capabilities, requestId, signal)
+      context = await readJobProductionContext(this.telemetry, pressKey, evidenceFromUtc, evidenceToUtc, capabilities, requestId, signal)
     }
     const timeline = await timelinePromise
-    const runs = deriveProductionRuns({ pressKey, fromUtc, toUtc, context, radiusSegments: timeline.segments, deckActive, ...(speed ? { speed } : {}) })
+    const runs = deriveProductionRuns({ pressKey, fromUtc: evidenceFromUtc, toUtc: evidenceToUtc, requestedFromUtc: fromUtc, requestedToUtc: toUtc, context, radiusSegments: timeline.segments, deckActive, ...(speed ? { speed } : {}) })
     return { pressKey, displayName: timeline.displayName, runs, coverage: productionContextCoverage(context, runs), deckSupported: deckCapability?.state === 'SUPPORTED' }
     } catch (error) {
       // An active pg query is bounded by statement_timeout but is not directly
@@ -189,7 +202,7 @@ export class JobIntelligenceService {
     if (needsLiveTail) {
       const evidence = await this.loadLiveFleetEvidence(new Date(tailFrom).toISOString(), new Date(requestedEnd).toISOString(), input.dimension, requestId, signal); live = evidence.live; coverage = [...evidence.coverage]; limitations.push(...evidence.limitations)
     }
-    const merged = mergeHistoricalAndLiveRuns(historical, live, new Date(tailFrom).toISOString(), new Date(requestedEnd).toISOString()).map((item) => item.run)
+    const merged = mergeHistoricalAndLiveForAnalysis(historical.map((item) => item.run), live)
     this.cacheRuns(live)
     if (Date.parse(input.fromUtc) < tailFrom && !materializedCoverageEstablished) limitations.push('Materialized history does not yet cover the requested period; results contain only the bounded recent live tail.')
     for (const pressKey of RADIUS_PRESS_KEYS) if (!coverage.some((item) => item.pressKey === pressKey) && historical.some((item) => item.run.pressKey === pressKey)) {
