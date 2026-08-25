@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { describeIndustrialNumeric, IndustrialAnalyticsService, INDUSTRIAL_ANALYTICS_RULES } from '../src/industrial-analytics/industrial-analytics-service.js'
-import { largestWindowDelta } from '../src/ai-investigator/read-only-tools.js'
+import { strongestBoundedDelta } from '../src/industrial-analytics/bounded-delta.js'
 
 const analytics = new IndustrialAnalyticsService()
 const at = (minute: number) => new Date(Date.parse('2026-08-17T00:00:00.000Z') + minute * 60_000).toISOString()
@@ -38,7 +38,7 @@ describe('V1 Industrial Analytics deterministic mathematics', () => {
 
   it('calculates the exact strongest bounded window delta with a linear scan', () => {
     const samples = numeric([1, 3, 8, 2, 20, 4])
-    assert.equal(largestWindowDelta(samples, { start: at(0), end: at(5) }, 2), 12)
+    assert.equal(strongestBoundedDelta({ points: samples, windowMinutes: 2, referenceMode: 'LATEST_AT_OR_BEFORE_WINDOW' })?.delta, 12)
   })
 
   it('rejects constant signals instead of emitting misleading correlation', () => {

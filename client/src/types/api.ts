@@ -63,68 +63,6 @@ export type RadiusPressKey =
   | 'press14'
   | 'press15'
 
-export interface AiInvestigatorServerStatus {
-  configured: boolean
-  enabled: boolean
-  model: string
-  maximumAnalysisMs: number
-  maximumToolMs: number
-  maximumToolCalls: number
-  maximumToolRounds: number
-  maximumParallelTools: number
-  presses: Array<{ pressKey: RadiusPressKey; displayName: string }>
-  allowedTools: string[]
-}
-
-export interface AiInvestigatorFinding {
-  rank: number
-  press: string
-  title: string
-  importance: 'high' | 'medium' | 'low'
-  confidence: 'high' | 'medium' | 'low'
-  whyItMatters: string
-  facts: Array<{ label: string; value: string; comparison: string }>
-  timestamps: Array<{ label: string; start: string; end: string | null }>
-  radiusEvidence: string[]
-  telemetryEvidence: string[]
-  productionContext: Partial<Record<'job' | 'order' | 'recipe' | 'material' | 'customer', string>>
-  baselines: string[]
-  recommendedInvestigation: string
-  links: Array<{ label: string; href: string }>
-  traceEvidence: AiTemporalEvidenceProgram[]
-}
-
-export interface AiTemporalEvidenceProgram {
-  traceId: string
-  canonicalId: string
-  datatype: 'numeric' | 'categorical' | 'radius' | 'production_context'
-  unit: string | null
-  coveragePercent: number
-  gapState: 'COMPLETE' | 'GAPS_PRESENT' | 'INSUFFICIENT'
-  selectedBecause: string[]
-  event: { start: string; end: string }
-  segments?: Array<{ startRelativeMinutes: number; endRelativeMinutes: number; trend: 'STABLE' | 'RISING' | 'FALLING' | 'OSCILLATING'; startValue: number; endValue: number }>
-  landmarks?: Array<{ relativeMinutes: number; value: number; kinds: string[] }>
-  intervals?: Array<{ startRelativeMinutes: number; endRelativeMinutes: number; value: string | number | boolean }>
-  transitions?: Array<{ relativeMinutes: number; from: string | number | boolean; to: string | number | boolean }>
-  explorer: { label: string; href: string }
-}
-
-export interface AiInvestigatorResult {
-  analysisId: string
-  status: 'complete' | 'partial' | 'timeout' | 'error'
-  scope: { pressKey: RadiusPressKey | null; startUtc: string; endUtc: string; analysis: 'discover_unusual_behavior' }
-  startedAt: string
-  completedAt: string
-  elapsedMs: number
-  toolCallsUsed: number
-  grounding: { acceptedUnchanged: number; corrected: number; omitted: number; correctionAttempted: boolean }
-  summary: string
-  findings: AiInvestigatorFinding[]
-  tables: Array<{ title: string; columns: string[]; rows: string[][] }>
-  limitations: string[]
-}
-
 export interface RadiusHealth {
   status: 'healthy' | 'unavailable'
   configured: boolean

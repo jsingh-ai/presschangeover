@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { loadServerConfig } from '../src/config.js'
 import { localProcessIntelligenceBaseUrl, ProcessIntelligenceExplorerHttpClient, validateRawRadiusOverHttp, validateTelemetryEventsOverHttp } from './explorer-http-validation.js'
@@ -8,27 +7,7 @@ const argument = (name: string) => { const index = process.argv.indexOf(name); r
 const endUtc = argument('--end') ?? new Date().toISOString()
 const startUtc = argument('--start') ?? new Date(Date.parse(endUtc) - 24 * 60 * 60_000).toISOString()
 const artifactPath = resolve(argument('--artifact') ?? 'staging/processintelligence-explorer-validation.json')
-const acceptedPath = resolve(argument('--accepted') ?? 'staging/processintelligence-morning-validation.json')
 let activePhase = 'startup'
-
-const accepted = JSON.parse(await readFile(acceptedPath, 'utf8')) as {
-  aiInvestigatorPress14?: { status?: unknown; runtimeMs?: unknown; estimatedModelInputTokens?: unknown; maximumToolResultBytes?: unknown }
-  aiInvestigatorAllPresses?: { status?: unknown; runtimeMs?: unknown; estimatedModelInputTokens?: unknown; maximumToolResultBytes?: unknown }
-  localRegression?: { status?: unknown; server?: { passed?: unknown }; client?: { passed?: unknown } }
-}
-const acceptedGates = {
-  press14: accepted.aiInvestigatorPress14?.status === 'PASS'
-    && accepted.aiInvestigatorPress14.runtimeMs === 17_225
-    && accepted.aiInvestigatorPress14.estimatedModelInputTokens === 2_877
-    && accepted.aiInvestigatorPress14.maximumToolResultBytes === 57_038,
-  allPresses: accepted.aiInvestigatorAllPresses?.status === 'PASS'
-    && accepted.aiInvestigatorAllPresses.runtimeMs === 2_546
-    && accepted.aiInvestigatorAllPresses.estimatedModelInputTokens === 4_330
-    && accepted.aiInvestigatorAllPresses.maximumToolResultBytes === 52_050,
-  localRegression: accepted.localRegression?.status === 'PASS'
-    && accepted.localRegression.server?.passed === 409
-    && accepted.localRegression.client?.passed === 185,
-}
 
 const artifact: {
   validation: string
@@ -37,7 +16,6 @@ const artifact: {
   updatedAtUtc: string
   range: { startUtc: string; endUtc: string }
   completedPhases: string[]
-  acceptedCheckpoints: unknown
   safety: Record<string, unknown>
   radiusConnectivity: unknown
   rawRadius: unknown
@@ -51,15 +29,7 @@ const artifact: {
   updatedAtUtc: new Date().toISOString(),
   range: { startUtc, endUtc },
   completedPhases: [],
-  acceptedCheckpoints: {
-    gates: acceptedGates,
-    press14: accepted.aiInvestigatorPress14,
-    allPresses: accepted.aiInvestigatorAllPresses,
-    localRegression: accepted.localRegression,
-    rerun: false,
-  },
   safety: {
-    openAiApiRequests: 0,
     databaseWrites: 0,
     schemaChanges: 0,
     rawUnmappedAutomaticScans: 0,
@@ -107,14 +77,12 @@ async function httpCompatibility(api: ProcessIntelligenceExplorerHttpClient) {
 
 async function run() {
   await checkpoint()
-  if (!Object.values(acceptedGates).every(Boolean)) throw new Error('accepted_checkpoint_mismatch')
   if (Date.parse(endUtc) - Date.parse(startUtc) <= 0 || Date.parse(endUtc) - Date.parse(startUtc) > 24 * 60 * 60_000) throw new Error('validation_range_must_be_at_most_24_hours')
 
   const config = loadServerConfig()
   if (!config.radius.enabled || config.radius.user !== 'processintelligence_readonly') throw new Error('readonly_radius_configuration_required')
-  if (config.aiInvestigator.enabled || config.aiInvestigator.apiKey) throw new Error('openai_must_be_disabled_for_validation')
   const api = new ProcessIntelligenceExplorerHttpClient(localProcessIntelligenceBaseUrl(config.host, config.port))
-  artifact.safety = { ...artifact.safety, radiusRole: config.radius.user, aiInvestigatorEnabled: false, openAiKeyPresent: false, processIntelligenceBaseUrl: localProcessIntelligenceBaseUrl(config.host, config.port).origin }
+  artifact.safety = { ...artifact.safety, radiusRole: config.radius.user, processIntelligenceBaseUrl: localProcessIntelligenceBaseUrl(config.host, config.port).origin }
 
   activePhase = 'processintelligence_http_connectivity'
   const attempts = [await httpCompatibility(api)]
@@ -158,7 +126,6 @@ async function run() {
 
   activePhase = 'final_readiness'
   const gates = {
-    acceptedCheckpointsUnchanged: Object.values(acceptedGates).every(Boolean),
     radiusConnectivityPassed: radiusHealth.status === 'healthy',
     validationUsesHttpOnly: rawRadius.diagnostics.directPostgresConnections === 0 && telemetryEvent.diagnostics.directPostgresConnections === 0,
     rawRadiusPassed: rawRadius.status === 'PASS',
@@ -171,7 +138,6 @@ async function run() {
     noQueryExplosion: rawRadius.gates.boundedHttpRequests && telemetryEvent.gates.boundedHttpRequests,
     noRawUnmappedAutomaticScans: rawRadius.diagnostics.rawUnmappedCalls.total === 0 && telemetryEvent.diagnostics.rawUnmappedCalls.total === 0,
     noWritesOrSchemaChanges: artifact.safety.databaseWrites === 0 && artifact.safety.schemaChanges === 0,
-    openAiRequestsZero: artifact.safety.openAiApiRequests === 0,
   }
   artifact.safety = { ...artifact.safety, rawUnmappedAutomaticScans: telemetryEvent.diagnostics.rawUnmappedCalls.total }
   artifact.readiness = { gates }
@@ -183,7 +149,6 @@ async function run() {
   console.log(`Radius connectivity through ProcessIntelligence HTTP: ${radiusHealth.status} in ${radiusDurationMs} ms; HTTP retry used: ${attempts.length - 1}`)
   console.log(`Raw Radius: ${rawRadius.status}, ${rawRadius.runtimeMs} ms, ${rawRadius.representatives.length} representatives`)
   console.log(`Telemetry Event: ${telemetryEvent.status}, ${telemetryEvent.runtimeMs} ms, Delta: ${Boolean(telemetryEvent.delta)}, Value Change: ${Boolean(telemetryEvent.valueChange)}`)
-  console.log('OpenAI API requests: 0')
   if (artifact.status !== 'READY_TO_DEPLOY') throw new Error('explorer_release_gate_failed')
 }
 
@@ -192,6 +157,5 @@ await run().catch(async (error: unknown) => {
   if (!artifact.failure) artifact.failure = { phase: activePhase, code: classifyFailure(error) }
   try { await checkpoint() } catch { /* Preserve the original validation failure. */ }
   console.error(`Explorer validation stopped in ${activePhase}: ${classifyFailure(error)}`)
-  console.error('OpenAI API requests: 0')
   process.exitCode = 1
 })

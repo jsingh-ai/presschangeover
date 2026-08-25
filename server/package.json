@@ -13,7 +13,6 @@
   "dependencies": {
     "express": "latest",
     "luxon": "^3.7.2",
-    "openai": "^7.5.0",
     "pg": "^8.23.0",
     "zod": "^4.0.0"
   },

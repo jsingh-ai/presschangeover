@@ -13,17 +13,6 @@ test('configuration normalizes the telemetry base URL and defaults timeout', () 
   assert.equal(config.plantTimeZone, 'America/Chicago')
   assert.deepEqual(config.radius, { enabled: false, staleSeconds: 180 })
   assert.deepEqual(config.classificationDatabase, { enabled: false })
-  assert.deepEqual(config.aiInvestigator, { enabled: false, model: 'gpt-5.4-mini', totalTimeoutMs: 45_000, toolTimeoutMs: 8_000, openAiTimeoutMs: 25_000, maxToolCalls: 8, maxToolRounds: 4, maxParallelTools: 3 })
-})
-
-test('AI Investigator is optional, keeps its key server-side, and validates every hard limit', () => {
-  const config = loadServerConfig({ TELEMETRY_API_BASE_URL: 'http://telemetry.internal', AI_INVESTIGATOR_ENABLED: 'true', OPENAI_API_KEY: 'test-only-key', AI_INVESTIGATOR_MODEL: 'gpt-5.4-mini', AI_INVESTIGATOR_TOTAL_TIMEOUT_MS: '40000', AI_INVESTIGATOR_TOOL_TIMEOUT_MS: '7000', AI_INVESTIGATOR_OPENAI_TIMEOUT_MS: '20000', AI_INVESTIGATOR_MAX_TOOL_CALLS: '6', AI_INVESTIGATOR_MAX_TOOL_ROUNDS: '3', AI_INVESTIGATOR_MAX_PARALLEL_TOOLS: '2' })
-  assert.deepEqual(config.aiInvestigator, { enabled: true, apiKey: 'test-only-key', model: 'gpt-5.4-mini', totalTimeoutMs: 40_000, toolTimeoutMs: 7_000, openAiTimeoutMs: 20_000, maxToolCalls: 6, maxToolRounds: 3, maxParallelTools: 2 })
-  const withoutKey = loadServerConfig({ TELEMETRY_API_BASE_URL: 'http://telemetry.internal', AI_INVESTIGATOR_ENABLED: 'true' })
-  assert.equal(withoutKey.aiInvestigator.enabled, true); assert.equal(withoutKey.aiInvestigator.apiKey, undefined)
-  assert.throws(() => loadServerConfig({ TELEMETRY_API_BASE_URL: 'http://telemetry.internal', AI_INVESTIGATOR_ENABLED: 'yes' }), /must be true or false/)
-  assert.throws(() => loadServerConfig({ TELEMETRY_API_BASE_URL: 'http://telemetry.internal', AI_INVESTIGATOR_MAX_PARALLEL_TOOLS: '4' }), /between 1 and 3/)
-  assert.throws(() => loadServerConfig({ TELEMETRY_API_BASE_URL: 'http://telemetry.internal', AI_INVESTIGATOR_TOTAL_TIMEOUT_MS: '200000' }), /AI_INVESTIGATOR_TOTAL_TIMEOUT_MS/)
 })
 
 test('configuration validates explicit plant timezone and complete Radius settings', () => {

@@ -39,5 +39,5 @@ for (const variable of numericVariables) {
 }
 if (!telemetryResult) throw new Error('offline_event_learning_telemetry_unavailable')
 
-const result = { status: 'PASS', mode: 'existing_resident_http_plus_offline_shared_engine', range: { fromUtc, toUtc }, raw: rawResult, telemetry: telemetryResult, directValidationPostgresConnections: 0, openAiRequests: 0, http: api.metricsSince(0) }
+const result = { status: 'PASS', mode: 'existing_resident_http_plus_offline_shared_engine', range: { fromUtc, toUtc }, raw: rawResult, telemetry: telemetryResult, directValidationPostgresConnections: 0, http: api.metricsSince(0) }
 console.log(JSON.stringify(result, null, 2))

@@ -1,6 +1,6 @@
 import type { RadiusPressKey } from './types/api'
 
-export type AnalyticsArea = 'overview' | 'operational-analysis' | 'raw-radius-explorer' | 'telemetry-event-explorer' | 'patterns-episodes' | 'intelligent-search' | 'ai-investigator' | 'state-classification'
+export type AnalyticsArea = 'overview' | 'operational-analysis' | 'raw-radius-explorer' | 'telemetry-event-explorer' | 'patterns-episodes' | 'intelligent-search' | 'state-classification'
 export type OperationalSection = 'state' | 'drivers' | 'recovery'
 
 const pressKeys = new Set<RadiusPressKey>([
@@ -14,7 +14,6 @@ export function areaFromPathname(pathname: string): AnalyticsArea {
   if (/^\/telemetry-event-explorer\/?$/.test(pathname)) return 'telemetry-event-explorer'
   if (/^\/patterns-episodes\/?$/.test(pathname)) return 'patterns-episodes'
   if (/^\/intelligent-search\/?$/.test(pathname)) return 'intelligent-search'
-  if (/^\/ai-investigator\/?$/.test(pathname)) return 'ai-investigator'
   if (/^\/administration\/state-classification\/?$/.test(pathname)) return 'state-classification'
   return 'overview'
 }
@@ -25,7 +24,6 @@ export function areaPath(area: AnalyticsArea): string {
   if (area === 'telemetry-event-explorer') return '/telemetry-event-explorer'
   if (area === 'patterns-episodes') return '/patterns-episodes'
   if (area === 'intelligent-search') return '/intelligent-search'
-  if (area === 'ai-investigator') return '/ai-investigator'
   if (area === 'state-classification') return '/administration/state-classification'
   return '/overview'
 }
