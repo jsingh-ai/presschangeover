@@ -2,8 +2,6 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { IndustrialAnalyticsService } from '../src/industrial-analytics/industrial-analytics-service.js'
 import { buildCategoricalTemporalEvidenceProgram, buildNumericTemporalEvidenceProgram, TEMPORAL_PROGRAM_NUMERIC_LANDMARK_LIMIT, TEMPORAL_PROGRAM_SEGMENT_LIMIT } from '../src/industrial-analytics/temporal-evidence.js'
-import { validateDiscoveryReferences, type DiscoveryCandidate } from '../src/ai-investigator/discovery.js'
-import type { AiGroundingFact, AiInvestigatorDiscoveryDraftContent } from '../src/ai-investigator/contracts.js'
 
 const origin = Date.parse('2026-08-17T00:00:00.000Z')
 const at = (minute: number) => new Date(origin + minute * 60_000).toISOString()
@@ -47,19 +45,5 @@ describe('relationship and ordering hardening', () => {
     assert.equal(ambiguous.metrics.ordering, 'INDETERMINATE_WITHIN_CADENCE')
     const tied = analytics.firstDivergence({ pressKey: 'press14', event: { id: 'event', start: at(5.2), end: at(7) }, observations: [transition], cadenceMinutes: 1 })!
     assert.equal(tied.metrics.ordering, 'SAME_RECORDED_TIME')
-  })
-})
-
-describe('temporal trace grounding', () => {
-  const fact: AiGroundingFact = { factId: 'press14.test.metric.current', pressKey: 'press14', press: 'Press 14', source: 'telemetry', metric: 'test', value: 1, unit: null, role: 'current', usable: true, label: 'Test' }
-  const trace = buildCategoricalTemporalEvidenceProgram({ candidateId: 'press14', pressKey: 'press14', eventId: 'episode', canonicalId: 'mode', range: { start: at(0), end: at(10) }, event: { start: at(4), end: at(6) }, samples: [{ atUtc: at(0), value: 'A' }, { atUtc: at(5), value: 'B' }] })!
-  const candidate: DiscoveryCandidate = { pressKey: 'press14', press: 'Press 14', signalCount: 1, productionDelta: null, interruptionDelta: 0, longestDelta: null, observations: [], facts: [fact], traces: [trace] }
-  const draft = (traceIds: string[]): AiInvestigatorDiscoveryDraftContent => ({ summary: 'Review.', findings: [{ candidateId: 'press14', title: 'Trace review', importance: 'medium', confidence: 'medium', factIds: [fact.factId], traceIds, interpretation: 'The supplied trace has a reviewable pattern.', whyWorthInvestigating: 'The trace is grounded.', recommendedInvestigation: 'Inspect the trace.' }], limitations: [] })
-
-  it('accepts an owned usable trace and rejects invented, cross-press, and unusable trace references', () => {
-    assert.equal(validateDiscoveryReferences(draft([trace.traceId]), [candidate], [fact]).issues.length, 0)
-    assert.equal(validateDiscoveryReferences(draft(['press14.trace.0000000000000000']), [candidate], [fact]).issues[0]?.code, 'unknown_trace_id')
-    const crossPress = { ...trace, pressKey: 'press10' as const }; assert.equal(validateDiscoveryReferences(draft([trace.traceId]), [{ ...candidate, traces: [crossPress] }], [fact]).issues[0]?.code, 'cross_press_trace')
-    const unusable = { ...trace, usable: false }; assert.equal(validateDiscoveryReferences(draft([trace.traceId]), [{ ...candidate, traces: [unusable] }], [fact]).issues[0]?.code, 'unusable_trace')
   })
 })

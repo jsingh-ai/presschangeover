@@ -1,6 +1,6 @@
 # Industrial Analytics V1
 
-The AI Investigator uses `IndustrialAnalyticsService` as a deterministic, LLM-independent calculation boundary. The service accepts already-resolved Radius, production-context, or trusted canonical telemetry evidence and performs no I/O. Raw historian samples stay in process memory and are never serialized into the OpenAI request. The model receives only retained observation IDs, deterministic scalar metrics, grounding fact IDs, and narrative instructions.
+`IndustrialAnalyticsService` is a deterministic, calculation-only boundary shared by ProcessIntelligence analytics. The service accepts already-resolved Radius, production-context, or trusted canonical telemetry evidence and performs no I/O. Raw historian samples stay in process memory, while analytical results retain deterministic metrics, observation identity, support, and limitations.
 
 ## Support and materiality rules
 
@@ -16,8 +16,8 @@ The AI Investigator uses `IndustrialAnalyticsService` as a deterministic, LLM-in
 
 All numeric output is finite, rounded deterministically, and includes sample counts, coverage where available, magnitude inputs, limitations, source, and an approved local explorer link. Unsupported, inadequate, constant, sparse, and below-threshold observations are counted but excluded before candidate grouping.
 
-## Ranking and bounds
+## Selection and bounds
 
-Press selection is deterministic: adequate coverage first, then material baseline signal count, absolute production change, interruption change, longest-interruption change, and press number. Related observations are grouped by press (and retain their event IDs), de-duplicated by stable observation ID, and ranked by fixed family priority, magnitude, support, then ID. The model package contains at most five all-press candidates, at most three selected-press candidates, and at most three observations per candidate.
+Press and observation selection is deterministic: adequate coverage first, followed by materiality, magnitude, support, and stable identity. Related observations remain grouped by press, retain their event IDs, and are de-duplicated by stable observation ID.
 
-The discovery preflight performs two fleet Radius queries, then one Radius episode/context package and at most one bounded trusted-speed query for each selected candidate. No broad tag scan, database write, retry, fallback model request, statistical ML, clustering, anomaly model, causal model, forecasting, PCA, change-point model, or learned threshold is part of V1.
+The analytics boundary performs no broad tag scan, database write, statistical machine learning, clustering, causal modeling, forecasting, PCA, change-point modeling, or learned-threshold inference.

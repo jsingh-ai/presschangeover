@@ -10,12 +10,12 @@ const shellSource = readFileSync(new URL('../src/components/ApplicationShell.tsx
 const stylesSource = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
 
 describe('application shell', () => {
-  it('renders analytics, explorers, AI Investigator, search, and administration destinations', () => {
+  it('renders analytics, explorers, search, and administration destinations', () => {
     const html = renderToStaticMarkup(createElement(ApplicationShell, {
       area: 'operational-analysis', theme: 'light', onNavigate() {}, onToggleTheme() {},
       context: createElement('span', null, 'Context'), children: createElement('h1', null, 'Operational Analysis'), footer: createElement('span', null, 'Health'),
     }))
-    assert.equal((html.match(/class="primary-nav-link/g) ?? []).length, 10)
+    assert.equal((html.match(/class="primary-nav-link/g) ?? []).length, 9)
     assert.match(html, /Overview/)
     assert.match(html, /Operational Analysis/)
     assert.match(html, /Job Intelligence/)
@@ -24,7 +24,6 @@ describe('application shell', () => {
     assert.match(html, /Telemetry Event Explorer/)
     assert.match(html, /Patterns &amp; Episodes/)
     assert.match(html, /Intelligent Search/)
-    assert.match(html, /AI Investigator/)
     assert.match(html, /State Classification/)
     assert.match(html, /aria-current="page"/)
     assert.match(html, /Switch to dark mode/)

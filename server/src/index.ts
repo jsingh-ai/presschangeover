@@ -13,7 +13,7 @@ await classificationService.initialize()
 const rawTelemetryReviewService = createRawTelemetryReviewService(config.classificationDatabase)
 await rawTelemetryReviewService.initialize()
 const radiusService = new ClassifiedRadiusService(createRadiusService(config.radius, config.plantTimeZone), classificationService)
-const app = createApp({ telemetryClient, radiusService, classificationService, classificationAuthorizer: createClassificationAuthorizer(config.classificationDatabase.enabled), rawTelemetryReviewService, aiInvestigatorConfig: config.aiInvestigator })
+const app = createApp({ telemetryClient, radiusService, classificationService, classificationAuthorizer: createClassificationAuthorizer(config.classificationDatabase.enabled), rawTelemetryReviewService })
 
 app.listen(config.port, config.host, () => {
   console.log(

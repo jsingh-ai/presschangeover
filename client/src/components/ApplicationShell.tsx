@@ -21,7 +21,6 @@ const navigation: Array<{ area: AnalyticsArea; label: string; description: strin
   { area: 'telemetry-event-explorer', label: 'Telemetry Event Explorer', description: 'Thresholds and changes', icon: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17h3l2-9 3 12 3-15 2 12h5M4 4v16h16" /></svg> },
   { area: 'patterns-episodes', label: 'Patterns & Episodes', description: 'Behavior and evidence', icon: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h5l2 3h9M4 17h5l2-3h9M17 7l3 3-3 3" /></svg> },
   { area: 'intelligent-search', label: 'Intelligent Search', description: 'Find work, codes, and patterns', icon: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15.5 15.5 4 4M10.5 17a6.5 6.5 0 1 1 0-13 6.5 6.5 0 0 1 0 13Zm-3-6.5h6M10.5 7.5v6" /></svg> },
-  { area: 'ai-investigator', label: 'AI Investigator', description: 'Bounded evidence review', icon: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v3M5.6 5.6l2.1 2.1M3 12h3m-.4 6.4 2.1-2.1M12 18v3m6.4-2.6-2.1-2.1M18 12h3m-2.6-6.4-2.1 2.1M9 12a3 3 0 1 0 6 0 3 3 0 0 0-6 0Z" /></svg> },
   { area: 'state-classification', label: 'State Classification', description: 'Administration', icon: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h10M4 12h16M4 19h12M17 3v4M8 10v4M18 17v4" /></svg> },
 ]
 

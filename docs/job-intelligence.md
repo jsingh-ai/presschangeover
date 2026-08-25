@@ -1,6 +1,6 @@
 # Job Intelligence V1
 
-Job Intelligence is a deterministic, read-only decision-support layer over the existing Radius and TelemetryQueryApi boundaries. It does not write source data, change production configuration, or call OpenAI.
+Job Intelligence is a deterministic, read-only decision-support layer over the existing Radius and TelemetryQueryApi boundaries. It does not write source data or change production configuration.
 
 ## Production Run boundary
 

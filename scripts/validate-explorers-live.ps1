@@ -17,8 +17,6 @@ foreach ($line in Get-Content -LiteralPath $environmentPath) {
     [System.Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], [System.EnvironmentVariableTarget]::Process)
 }
 if ($env:RADIUS_DB_USER -ne 'processintelligence_readonly') { throw 'Validation requires processintelligence_readonly.' }
-[System.Environment]::SetEnvironmentVariable('OPENAI_API_KEY', '', [System.EnvironmentVariableTarget]::Process)
-[System.Environment]::SetEnvironmentVariable('AI_INVESTIGATOR_ENABLED', 'false', [System.EnvironmentVariableTarget]::Process)
 $arguments = @('server\scripts\validate-explorers-live.ts')
 if ($StartUtc) { $arguments += @('--start', $StartUtc) }
 if ($EndUtc) { $arguments += @('--end', $EndUtc) }

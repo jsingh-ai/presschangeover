@@ -8,13 +8,6 @@ const DEFAULT_TELEMETRY_API_TIMEOUT_MS = 5_000
 const MIN_TELEMETRY_API_TIMEOUT_MS = 100
 const MAX_TELEMETRY_API_TIMEOUT_MS = 60_000
 const DEFAULT_PLANT_TIME_ZONE = 'America/Chicago'
-const DEFAULT_AI_INVESTIGATOR_MODEL = 'gpt-5.4-mini'
-const DEFAULT_AI_INVESTIGATOR_TOTAL_TIMEOUT_MS = 45_000
-const DEFAULT_AI_INVESTIGATOR_TOOL_TIMEOUT_MS = 8_000
-const DEFAULT_AI_INVESTIGATOR_OPENAI_TIMEOUT_MS = 25_000
-const DEFAULT_AI_INVESTIGATOR_MAX_TOOL_CALLS = 8
-const DEFAULT_AI_INVESTIGATOR_MAX_TOOL_ROUNDS = 4
-const DEFAULT_AI_INVESTIGATOR_MAX_PARALLEL_TOOLS = 3
 export const DEFAULT_RADIUS_STALE_SECONDS = 180
 export const RADIUS_EFFECTIVE_CUTOVER_UTC = '2026-08-10T14:29:00.415Z'
 export const RADIUS_EXPECTED_MACHINE_COUNT = 12
@@ -33,19 +26,6 @@ export interface ServerConfig {
   telemetryApi: TelemetryApiConfig
   radius: RadiusConfig
   classificationDatabase: AppDatabaseConfig
-  aiInvestigator: AiInvestigatorConfig
-}
-
-export interface AiInvestigatorConfig {
-  enabled: boolean
-  apiKey?: string
-  model: string
-  totalTimeoutMs: number
-  toolTimeoutMs: number
-  openAiTimeoutMs: number
-  maxToolCalls: number
-  maxToolRounds: number
-  maxParallelTools: number
 }
 
 export type AppDatabaseConfig =
@@ -136,39 +116,6 @@ function parsePort(value: string | undefined): number {
   }
 
   return port
-}
-
-function parseBoolean(value: string | undefined, defaultValue = false): boolean {
-  if (value === undefined || value.trim() === '') return defaultValue
-  if (value.trim().toLowerCase() === 'true') return true
-  if (value.trim().toLowerCase() === 'false') return false
-  throw new Error('AI_INVESTIGATOR_ENABLED must be true or false')
-}
-
-function parseBoundedInteger(value: string | undefined, fallback: number, minimum: number, maximum: number, name: string): number {
-  if (value === undefined || value.trim() === '') return fallback
-  const parsed = Number(value)
-  if (!Number.isInteger(parsed) || parsed < minimum || parsed > maximum) {
-    throw new Error(`${name} must be an integer between ${minimum} and ${maximum}`)
-  }
-  return parsed
-}
-
-function parseAiInvestigatorConfig(environment: NodeJS.ProcessEnv): AiInvestigatorConfig {
-  const model = environment.AI_INVESTIGATOR_MODEL?.trim() || DEFAULT_AI_INVESTIGATOR_MODEL
-  if (!/^[A-Za-z0-9._-]{1,100}$/.test(model)) throw new Error('AI_INVESTIGATOR_MODEL must be a valid model identifier')
-  const apiKey = environment.OPENAI_API_KEY?.trim()
-  return {
-    enabled: parseBoolean(environment.AI_INVESTIGATOR_ENABLED),
-    ...(apiKey ? { apiKey } : {}),
-    model,
-    totalTimeoutMs: parseBoundedInteger(environment.AI_INVESTIGATOR_TOTAL_TIMEOUT_MS, DEFAULT_AI_INVESTIGATOR_TOTAL_TIMEOUT_MS, 5_000, 120_000, 'AI_INVESTIGATOR_TOTAL_TIMEOUT_MS'),
-    toolTimeoutMs: parseBoundedInteger(environment.AI_INVESTIGATOR_TOOL_TIMEOUT_MS, DEFAULT_AI_INVESTIGATOR_TOOL_TIMEOUT_MS, 500, 30_000, 'AI_INVESTIGATOR_TOOL_TIMEOUT_MS'),
-    openAiTimeoutMs: parseBoundedInteger(environment.AI_INVESTIGATOR_OPENAI_TIMEOUT_MS, DEFAULT_AI_INVESTIGATOR_OPENAI_TIMEOUT_MS, 1_000, 60_000, 'AI_INVESTIGATOR_OPENAI_TIMEOUT_MS'),
-    maxToolCalls: parseBoundedInteger(environment.AI_INVESTIGATOR_MAX_TOOL_CALLS, DEFAULT_AI_INVESTIGATOR_MAX_TOOL_CALLS, 1, 16, 'AI_INVESTIGATOR_MAX_TOOL_CALLS'),
-    maxToolRounds: parseBoundedInteger(environment.AI_INVESTIGATOR_MAX_TOOL_ROUNDS, DEFAULT_AI_INVESTIGATOR_MAX_TOOL_ROUNDS, 1, 8, 'AI_INVESTIGATOR_MAX_TOOL_ROUNDS'),
-    maxParallelTools: parseBoundedInteger(environment.AI_INVESTIGATOR_MAX_PARALLEL_TOOLS, DEFAULT_AI_INVESTIGATOR_MAX_PARALLEL_TOOLS, 1, 3, 'AI_INVESTIGATOR_MAX_PARALLEL_TOOLS'),
-  }
 }
 
 function parseHost(value: string | undefined): string {
@@ -391,6 +338,5 @@ export function loadServerConfig(
     },
     radius: parseRadiusConfig(environment),
     classificationDatabase: parseClassificationDatabase(environment),
-    aiInvestigator: parseAiInvestigatorConfig(environment),
   }
 }

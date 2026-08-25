@@ -28,12 +28,6 @@ import { StopRestartAnalysisService, type FleetSpeedContextInput, type RadiusTim
 import { RAW_EXPLORER_MAX_WINDOW_MINUTES, RawRadiusExplorerService, type RawExplorerOccurrence, type RawExplorerSetup, type RawExplorerSignalIdentity } from './raw-radius-explorer/raw-radius-explorer-service.js'
 import { RAW_TELEMETRY_REVIEW_STATUSES, type RawTelemetryReviewService, type RawTelemetryReviewStatus } from './raw-radius-explorer/raw-telemetry-review-service.js'
 import { TELEMETRY_EVENT_MAX_CONTEXT_MINUTES, TELEMETRY_EVENT_MAX_RANGE_MS, TelemetryEventExplorerService, type TelemetryEventOccurrence, type TelemetryEventSearchInput } from './telemetry-event-explorer/telemetry-event-explorer-service.js'
-import type { AiInvestigatorConfig } from './config.js'
-import { parseAiInvestigatorRequest } from './ai-investigator/contracts.js'
-import { buildDiscoveryPreflight, DISCOVERY_CANDIDATE_LIMIT } from './ai-investigator/discovery.js'
-import { buildDeterministicDiscovery } from './ai-investigator/discovery-presentation.js'
-import { AI_INVESTIGATOR_TOOL_NAMES, AiInvestigatorReadOnlyToolRegistry } from './ai-investigator/read-only-tools.js'
-import { AiInvestigatorOrchestrator, createAiInvestigatorOrchestrator, investigatorDisplayName, type AiInvestigatorModelClient } from './ai-investigator/orchestrator.js'
 import { EXPLORER_HTTP_VALIDATION_CAPABILITIES } from './explorer-validation-capabilities.js'
 import { JOB_ANALYSIS_DIMENSIONS, JOB_GROUP_OPERATORS, type JobGroupDefinition } from './job-intelligence/contracts.js'
 import { JOB_INTELLIGENCE_MAX_RANGE_MS, JobIntelligenceService } from './job-intelligence/service.js'
@@ -94,8 +88,6 @@ export interface CreateAppOptions {
   classificationService?: ClassificationService
   classificationAuthorizer?: ClassificationAuthorizer
   rawTelemetryReviewService?: RawTelemetryReviewService
-  aiInvestigatorConfig?: AiInvestigatorConfig
-  aiInvestigatorModelClient?: AiInvestigatorModelClient
 }
 
 class RequestValidationError extends Error {
@@ -503,8 +495,6 @@ export function createApp({
   classificationService,
   classificationAuthorizer = () => ({ id: 'anonymous', canEdit: false }),
   rawTelemetryReviewService,
-  aiInvestigatorConfig,
-  aiInvestigatorModelClient,
 }: CreateAppOptions) {
   const app = express()
   const telemetry = new TelemetryFoundationService(telemetryClient)
@@ -514,10 +504,6 @@ export function createApp({
   const telemetryEventExplorer = new TelemetryEventExplorerService(telemetry, radiusService, rawRadiusExplorer)
   const jobIntelligence = new JobIntelligenceService(radiusService, telemetry)
   const changeoverIntelligence = new ChangeoverIntelligenceService(radiusService, telemetry)
-  const aiToolRegistry = new AiInvestigatorReadOnlyToolRegistry(radiusService, telemetry)
-  const aiInvestigator = aiInvestigatorConfig?.enabled && aiInvestigatorModelClient
-    ? new AiInvestigatorOrchestrator(aiInvestigatorConfig, aiToolRegistry, aiInvestigatorModelClient, logger)
-    : aiInvestigatorConfig ? createAiInvestigatorOrchestrator(aiInvestigatorConfig, aiToolRegistry, logger) : undefined
   const observedIdentityCache = new ObservedIdentityCache(
     () => radiusService.getObservedIdentities?.() ?? Promise.resolve([]),
     { onRefreshError: () => { if (logger) logger.error('classification_observed_identity_refresh_unavailable') } },
@@ -546,45 +532,6 @@ export function createApp({
       explorerHttpValidation: EXPLORER_HTTP_VALIDATION_CAPABILITIES,
     })
   })
-
-  app.get('/api/ai-investigator/status', (_request, response) => {
-    const config = aiInvestigatorConfig
-    response.status(200).json({
-      configured: Boolean(aiInvestigator),
-      enabled: config?.enabled ?? false,
-      model: config?.model ?? 'not-configured',
-      maximumAnalysisMs: config?.totalTimeoutMs ?? 45_000,
-      maximumToolMs: config?.toolTimeoutMs ?? 8_000,
-      maximumToolCalls: config?.maxToolCalls ?? 8,
-      maximumToolRounds: config?.maxToolRounds ?? 4,
-      maximumParallelTools: config?.maxParallelTools ?? 3,
-      presses: RADIUS_PRESS_KEYS.map((pressKey) => ({ pressKey, displayName: investigatorDisplayName(pressKey) })),
-      allowedTools: AI_INVESTIGATOR_TOOL_NAMES,
-    })
-  })
-
-  app.post('/api/ai-investigator/analyze', asyncRoute(async (request, response) => {
-    if (!aiInvestigator) {
-      response.status(503).json({ status: 'not_configured', message: 'AI Investigator is not configured on this server.' })
-      return
-    }
-    let input
-    try { input = parseAiInvestigatorRequest(request.body) }
-    catch (error) { throw new RequestValidationError(error instanceof Error ? error.message : 'invalid_ai_investigator_request') }
-    response.status(200).json(await aiInvestigator.analyzeDiscovery(input, cancellationSignal(request, response)))
-  }))
-
-  app.post('/api/ai-investigator/discover', asyncRoute(async (request, response) => {
-    let input
-    try { input = parseAiInvestigatorRequest(request.body) }
-    catch (error) { throw new RequestValidationError(error instanceof Error ? error.message : 'invalid_ai_investigator_request') }
-    const requestSignal = cancellationSignal(request, response)
-    const timeoutSignal = AbortSignal.timeout(aiInvestigatorConfig?.totalTimeoutMs ?? 45_000)
-    const configuredToolTimeout = aiInvestigatorConfig?.toolTimeoutMs ?? 8_000; const totalTimeout = aiInvestigatorConfig?.totalTimeoutMs ?? 45_000
-    const discoveryToolTimeout = input.scope.pressKey ? Math.max(configuredToolTimeout, Math.min(30_000, totalTimeout - 3_000)) : configuredToolTimeout
-    const preflight = await buildDiscoveryPreflight(aiToolRegistry, input, AbortSignal.any([requestSignal, timeoutSignal]), { requestId: String(response.locals.requestId), candidateLimit: input.scope.pressKey ? 1 : DISCOVERY_CANDIDATE_LIMIT, maxParallelTools: aiInvestigatorConfig?.maxParallelTools ?? 3, toolTimeoutMs: discoveryToolTimeout, includeDiagnostics: true })
-    response.status(200).json(buildDeterministicDiscovery(preflight, input))
-  }))
 
   app.get(
     '/api/telemetry/health',
