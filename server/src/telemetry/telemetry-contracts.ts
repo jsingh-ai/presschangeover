@@ -63,6 +63,7 @@ export interface RawTelemetryChangesResponse {
   framesRead: number
   historianReadCount: number
   signals: RawTelemetryChangedSignal[]
+  rawHistoryAvailability?: RawHistoryAvailability
 }
 
 export interface RawTelemetryHistoryQuery {
@@ -75,7 +76,7 @@ export interface RawTelemetryHistoryQuery {
 export interface RawTelemetryObservation {
   timestampUtc: string
   receivedAtUtc: string
-  sourceTimestampUtc: string
+  sourceTimestampUtc: string | null
   qualityState: string
   dataType: string
   rawValue: RawTelemetryValue
@@ -96,6 +97,7 @@ export interface RawTelemetryHistoryResponse {
   alternateRepresentationCount: number
   alternateRawIdentities: string[]
   observations: RawTelemetryObservation[]
+  rawHistoryAvailability?: RawHistoryAvailability
 }
 
 export interface TelemetrySample {
@@ -268,6 +270,31 @@ export interface TelemetryEvidenceGap {
   durationMs: number
 }
 
+export const DETAILED_HISTORY_STATES = ['DETAILED_AVAILABLE', 'SOURCE_TELEMETRY_UNAVAILABLE', 'SHARED_COLLECTION_OUTAGE', 'INSUFFICIENT_DETAILED_TELEMETRY', 'UNKNOWN'] as const
+export type DetailedHistoryState = typeof DETAILED_HISTORY_STATES[number]
+export const RAW_HISTORY_STATES = ['RAW_AVAILABLE', 'RAW_HISTORY_EXPIRED', 'UNKNOWN'] as const
+export type RawHistoryState = typeof RAW_HISTORY_STATES[number]
+
+export interface HistoricalTelemetryAvailabilityInterval {
+  fromUtc: string
+  toUtc: string
+  state: 'SOURCE_TELEMETRY_UNAVAILABLE' | 'SHARED_COLLECTION_OUTAGE'
+  witnessCount: number
+}
+
+export interface HistoricalTelemetryAvailability {
+  state: DetailedHistoryState
+  detailedTelemetryAvailable: boolean
+  intervals: HistoricalTelemetryAvailabilityInterval[]
+  reason: string
+}
+
+export interface RawHistoryAvailability {
+  state: RawHistoryState
+  detailedTelemetryMayRemainAvailable: boolean
+  reason: string
+}
+
 export interface TelemetrySourceEvidenceGap {
   startUtc: string
   endUtc: string
@@ -290,8 +317,9 @@ export interface BoundedTelemetryReadDiagnostics {
   pointsRetained: number
   boundaryDuplicatesRemoved: number
   gaps: TelemetryEvidenceGap[]
-  /** Corroborated inactivity shared by at least two regularly observed signals. */
+  /** Source-specific silence corroborated by at least two regularly observed signals from this source. */
   sourceGaps?: TelemetrySourceEvidenceGap[]
+  historicalAvailability?: HistoricalTelemetryAvailability
   requests?: Array<{
     pressKey: string
     selectorCount: number
@@ -365,6 +393,7 @@ export interface PressSpeedEvidence {
 
 export interface PressMotionEvidence extends Omit<PhysicalStateResponse, 'sourceId'> {
   pressKey: RadiusPressKey
+  historicalAvailability?: HistoricalTelemetryAvailability
 }
 
 export const PHYSICAL_EVIDENCE_CATEGORIES = ['context', 'deck_states', 'register', 'impression', 'wash', 'pump', 'viscosity', 'ink_temperature'] as const

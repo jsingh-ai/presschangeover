@@ -181,7 +181,15 @@ export function mergeTelemetryEvidenceChunks(chunks: ChunkEvidence[], fromUtc: s
     const segments = mergeMotionSegments(motions)
     const durationsMs = { RUNNING: 0, STOPPED: 0, TRANSITION: 0, UNKNOWN: 0 }
     segments.forEach(({ state, durationMs }) => { durationsMs[state] += durationMs })
-    result.motion = { ...first, fromUtc, toUtc, segments, summary: { durationsMs, durationsSeconds: Object.fromEntries(Object.entries(durationsMs).map(([state, duration]) => [state, duration / 1_000])) as PressMotionEvidence['summary']['durationsSeconds'], segmentCount: segments.length } }
+    const availability = motions.flatMap(({ historicalAvailability }) => historicalAvailability ? [historicalAvailability] : [])
+    const availabilityState = (['SHARED_COLLECTION_OUTAGE', 'SOURCE_TELEMETRY_UNAVAILABLE', 'INSUFFICIENT_DETAILED_TELEMETRY', 'UNKNOWN', 'DETAILED_AVAILABLE'] as const).find((state) => availability.some((item) => item.state === state))
+    const historicalAvailability = availabilityState ? {
+      state: availabilityState,
+      detailedTelemetryAvailable: availability.every(({ detailedTelemetryAvailable }) => detailedTelemetryAvailable),
+      intervals: availability.flatMap(({ intervals }) => intervals),
+      reason: availability.find(({ state }) => state === availabilityState)!.reason,
+    } : undefined
+    result.motion = { ...first, fromUtc, toUtc, segments, historicalAvailability, summary: { durationsMs, durationsSeconds: Object.fromEntries(Object.entries(durationsMs).map(([state, duration]) => [state, duration / 1_000])) as PressMotionEvidence['summary']['durationsSeconds'], segmentCount: segments.length } }
   }
 
   if (physicalEvidence.length) {

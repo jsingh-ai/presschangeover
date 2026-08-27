@@ -109,6 +109,10 @@ export function formatPlantDateTime(value: string): string {
     .toFormat('MMM d, h:mm:ss a')
 }
 
+export function formatPlantDateTimeCt(value: string): string {
+  return `${formatPlantDateTime(value)} CT`
+}
+
 export function formatSelectedRange(range: SelectedRange): string {
   return `${formatPlantDateTime(range.fromUtc)} – ${formatPlantDateTime(range.toUtc)} CT`
 }

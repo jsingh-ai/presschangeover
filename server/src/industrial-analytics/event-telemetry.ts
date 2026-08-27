@@ -1,6 +1,7 @@
 import type { RadiusPressKey } from '../radius/models.js'
 import { ENGINEERING_CLUE_CATALOG, type EngineeringClueCatalogItem } from '../telemetry/engineering-clue-analysis.js'
 import type { CapabilityAssessment, TelemetrySample, TelemetrySemanticSelector } from '../telemetry/telemetry-contracts.js'
+import { isGoodTelemetryQuality } from '../telemetry/historical-telemetry-policy.js'
 import type { IndustrialAnalyticalObservation, IndustrialNumericSample } from './contracts.js'
 
 export const AI_EVENT_TELEMETRY_SERIES_LIMIT = 12
@@ -43,7 +44,7 @@ export function eventTelemetrySelectors(values: SelectedEventTelemetrySeries[]):
 }
 
 function numeric(samples: TelemetrySample[]): IndustrialNumericSample[] {
-  return samples.flatMap((sample) => typeof sample.value === 'number' && Number.isFinite(sample.value) && !/BAD|INVALID|UNAVAILABLE|NO_DATA|NODATA/i.test(sample.qualityState) ? [{ atUtc: sample.observedAtUtc, value: sample.value, qualityState: sample.qualityState }] : [])
+  return samples.flatMap((sample) => typeof sample.value === 'number' && Number.isFinite(sample.value) && isGoodTelemetryQuality(sample.qualityState) ? [{ atUtc: sample.observedAtUtc, value: sample.value, qualityState: sample.qualityState }] : [])
 }
 
 function round(value: number, digits = 1): number { const factor = 10 ** digits; return Math.round(value * factor) / factor }

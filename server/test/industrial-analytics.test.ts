@@ -14,6 +14,11 @@ describe('V1 Industrial Analytics deterministic mathematics', () => {
     assert.equal(stats.standardDeviation, 4.5); assert.equal(stats.slopePerMinute, 2.314)
   })
 
+  it('preserves production row-distribution statistics while excluding BAD historian quality', () => {
+    const stats = describeIndustrialNumeric([{ atUtc: at(0), value: 0, qualityState: 'good' }, { atUtc: at(1), value: 0, qualityState: 'true' }, { atUtc: at(2), value: 0, qualityState: 'GOOD' }, { atUtc: at(9), value: 10 }, { atUtc: at(10), value: 10 }, { atUtc: at(11), value: 10 }, { atUtc: at(12), value: 100, qualityState: 'bad' }])!
+    assert.deepEqual({ count: stats.count, mean: stats.mean, median: stats.median, mad: stats.mad, standardDeviation: stats.standardDeviation, slopePerMinute: stats.slopePerMinute }, { count: 6, mean: 5, median: 5, mad: 5, standardDeviation: 5, slopePerMinute: 1.076 })
+  })
+
   it('finds perfect Pearson and high Spearman relationships', () => {
     const positive = analytics.numericRelationship({ pressKey: 'press14', leftVariableId: 'a', rightVariableId: 'b', range: { start: at(0), end: at(4) }, left: numeric([1, 2, 3, 4, 5]), right: numeric([2, 4, 6, 8, 10]), minimumPairs: 5, alignmentToleranceMs: 1_000, maximumLagMinutes: 0 })!
     assert.equal(positive.pearson, 1); assert.equal(positive.spearman, 1)

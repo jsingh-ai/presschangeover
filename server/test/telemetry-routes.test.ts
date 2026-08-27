@@ -46,7 +46,7 @@ test('ProcessIntelligence capabilities route uses press identity and omits raw s
 })
 
 test('ProcessIntelligence speed and motion routes expose clean evidence contracts', async () => {
-  const app = createApp({ telemetryClient: client(), logger: false })
+  const app = createApp({ telemetryClient: client(), logger: false, now: () => Date.parse(motionFixture.toUtc) })
   const query = '?fromUtc=2026-08-12T03%3A30%3A00.000Z&toUtc=2026-08-12T03%3A35%3A00.000Z'
   const speed = await request(app, `/api/telemetry/presses/press5/speed${query}`)
   assert.equal(speed.status, 200)

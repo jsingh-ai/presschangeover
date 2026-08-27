@@ -27,6 +27,7 @@ import {
   type TelemetryValueKind,
 } from './telemetry-contracts.js'
 import { TelemetryApiError } from './telemetry-error.js'
+import { assessDetailedHistory, assessRawHistory, reconstructHistoricalPhysicalState, sourceTelemetryUnavailableGaps } from './historical-telemetry-policy.js'
 import { TelemetrySourceRegistry } from './telemetry-source-registry.js'
 
 const MAX_SEMANTIC_SELECTORS_PER_REQUEST = 50
@@ -103,41 +104,13 @@ function evidenceGaps(signals: PressSemanticSignalWithIdentity[], range: { start
 }
 
 /**
- * Transition-first signals can be legitimately quiet. A collection outage is
+ * Transition-first signals can be legitimately quiet. Source telemetry silence is
  * therefore reported only when at least two independently observed signals,
  * each with enough history to establish a cadence, share a long inactive
  * interval. The fifteen-minute floor is three missed five-minute heartbeats.
  */
 export function sourceWideEvidenceGaps(signals: PressSemanticSignalWithIdentity[], range: { start: string; end: string }) {
-  const witnesses = signals.flatMap((signal) => {
-    // Only sample histories can demonstrate heartbeat continuity. Sparse
-    // transition/change rows are evidence of behavior, not collection health.
-    const points = [...signal.samples].sort((left, right) => pointTime(left) - pointTime(right))
-    const cadences = points.slice(1).map((point, index) => pointTime(point) - pointTime(points[index]!)).filter((value) => value > 0)
-    if (cadences.length < 3) return []
-    const threshold = Math.max(15 * 60_000, median(cadences) * 3)
-    const gaps = points.slice(1).flatMap((point, index) => {
-      const prior = points[index]!; const start = pointTime(prior); const end = pointTime(point)
-      return end - start > threshold && start >= Date.parse(range.start) && end <= Date.parse(range.end) ? [{ start, end }] : []
-    })
-    return [{ gaps }]
-  })
-  if (witnesses.length < 2) return []
-  let intersections = witnesses[0]!.gaps
-  for (const witness of witnesses.slice(1)) {
-    intersections = intersections.flatMap((left) => witness.gaps.flatMap((right) => {
-      const start = Math.max(left.start, right.start); const end = Math.min(left.end, right.end)
-      return end > start ? [{ start, end }] : []
-    }))
-  }
-  const ordered = intersections.sort((left, right) => left.start - right.start)
-  const merged: Array<{ start: number; end: number }> = []
-  for (const gap of ordered) {
-    const prior = merged.at(-1)
-    if (prior && gap.start <= prior.end) prior.end = Math.max(prior.end, gap.end)
-    else merged.push({ ...gap })
-  }
-  return merged.map(({ start, end }) => ({ startUtc: new Date(start).toISOString(), endUtc: new Date(end).toISOString(), durationMs: end - start, witnessCount: witnesses.length }))
+  return sourceTelemetryUnavailableGaps(signals, range)
 }
 
 function asSeed(point: TelemetrySample): TelemetrySample {
@@ -164,8 +137,10 @@ export class TelemetryFoundationService {
   readonly sources: TelemetrySourceRegistry
   readonly capabilities: TelemetryCapabilityRegistry
   private readonly boundedReadCache = new Map<string, BoundedReadCacheEntry>()
+  private readonly now: () => number
 
   constructor(private readonly client: TelemetryClient, options: { metadataTtlMs?: number; now?: () => number } = {}) {
+    this.now = options.now ?? (() => Date.now())
     this.sources = new TelemetrySourceRegistry(client, options.metadataTtlMs, options.now)
     this.capabilities = new TelemetryCapabilityRegistry(client, this.sources, options.metadataTtlMs, options.now)
   }
@@ -180,12 +155,13 @@ export class TelemetryFoundationService {
       const source = await cached.operation; const type = cacheHitType(cached, query)
       const signals = query.signals.flatMap((selector) => { const signal = source.signals.find((item) => selectorKey({ canonicalId: item.canonicalId, ...(item.deckNumber === null ? {} : { deckNumber: item.deckNumber }), representation: item.representation }) === selectorKey(selector)); return signal ? [sliceCachedSignal(signal, query)] : [] })
       const pointsRetained = signals.reduce((sum, item) => sum + item.samples.length + item.changes.length, 0)
+      const sourceGaps = sourceWideEvidenceGaps(signals, { start: query.fromUtc, end: query.toUtc })
       const readDiagnostics: BoundedTelemetryReadDiagnostics = {
         requestedRange: { start: query.fromUtc, end: query.toUtc }, chunkCount: 0, telemetryRequests: 0, cacheHits: 1,
         exactCacheHits: type === 'EXACT' ? 1 : 0, selectorSubsetCacheHits: type === 'SELECTOR_SUBSET' ? 1 : 0,
         containedRangeCacheHits: type === 'CONTAINED_RANGE' ? 1 : 0, containedRangeSelectorSubsetCacheHits: type === 'CONTAINED_RANGE_SELECTOR_SUBSET' ? 1 : 0,
         cacheHitType: type, cacheSourceRange: { start: new Date(cached.fromMs).toISOString(), end: new Date(cached.toMs).toISOString() },
-        pointsReturned: 0, pointsRetained, boundaryDuplicatesRemoved: 0, gaps: evidenceGaps(signals, { start: query.fromUtc, end: query.toUtc }), sourceGaps: sourceWideEvidenceGaps(signals, { start: query.fromUtc, end: query.toUtc }), requests: [],
+        pointsReturned: 0, pointsRetained, boundaryDuplicatesRemoved: 0, gaps: evidenceGaps(signals, { start: query.fromUtc, end: query.toUtc }), sourceGaps, historicalAvailability: assessDetailedHistory(signals, sourceGaps), requests: [],
       }
       return { ...source, fromUtc: query.fromUtc, toUtc: query.toUtc, includeSeed: query.includeSeed, signals, readDiagnostics }
     }
@@ -226,7 +202,8 @@ export class TelemetryFoundationService {
         const value = merged.get(signalKey(selector)); return value ? [value] : []
       })
       const gaps = evidenceGaps(signals, { start: query.fromUtc, end: query.toUtc })
-      const readDiagnostics: BoundedTelemetryReadDiagnostics = { requestedRange: { start: query.fromUtc, end: query.toUtc }, chunkCount: chunks.length, telemetryRequests: requests.length, cacheHits: 0, exactCacheHits: 0, selectorSubsetCacheHits: 0, containedRangeCacheHits: 0, containedRangeSelectorSubsetCacheHits: 0, cacheHitType: null, cacheSourceRange: null, pointsReturned, pointsRetained: signals.reduce((sum, item) => sum + item.samples.length + item.changes.length, 0), boundaryDuplicatesRemoved: duplicates, gaps, sourceGaps: sourceWideEvidenceGaps(signals, { start: query.fromUtc, end: query.toUtc }), requests: responseEntries.map(({ diagnostic }) => diagnostic) }
+      const sourceGaps = sourceWideEvidenceGaps(signals, { start: query.fromUtc, end: query.toUtc })
+      const readDiagnostics: BoundedTelemetryReadDiagnostics = { requestedRange: { start: query.fromUtc, end: query.toUtc }, chunkCount: chunks.length, telemetryRequests: requests.length, cacheHits: 0, exactCacheHits: 0, selectorSubsetCacheHits: 0, containedRangeCacheHits: 0, containedRangeSelectorSubsetCacheHits: 0, cacheHitType: null, cacheSourceRange: null, pointsReturned, pointsRetained: signals.reduce((sum, item) => sum + item.samples.length + item.changes.length, 0), boundaryDuplicatesRemoved: duplicates, gaps, sourceGaps, historicalAvailability: assessDetailedHistory(signals, sourceGaps), requests: responseEntries.map(({ diagnostic }) => diagnostic) }
       const first = responses[0]!
       return { pressKey, sourceKey: first.sourceKey, displayName: first.displayName, fromUtc: query.fromUtc, toUtc: query.toUtc, includeSeed: query.includeSeed, signals, readDiagnostics }
     })()
@@ -252,7 +229,7 @@ export class TelemetryFoundationService {
     if (!this.client.getRawTelemetryChanges) throw new TelemetryApiError('unavailable')
     const response = await this.client.getRawTelemetryChanges({ press: pressKey, fromUtc, toUtc }, requestId, signal)
     if (response.press.toLowerCase() !== pressKey) throw new TelemetryApiError('invalid_response')
-    return response
+    return { ...response, rawHistoryAvailability: assessRawHistory(response) }
   }
 
   async rawCatalog(pressKey: RadiusPressKey, requestId?: string, signal?: AbortSignal): Promise<TelemetrySourceSignal[]> {
@@ -267,7 +244,7 @@ export class TelemetryFoundationService {
     if (!this.client.getRawTelemetryHistory) throw new TelemetryApiError('unavailable')
     const response = await this.client.getRawTelemetryHistory({ press: pressKey, rawIdentity, fromUtc, toUtc }, requestId, signal)
     if (response.press.toLowerCase() !== pressKey || response.rawIdentity !== rawIdentity) throw new TelemetryApiError('invalid_response')
-    return response
+    return { ...response, rawHistoryAvailability: assessRawHistory(response) }
   }
 
   async context(pressKey: RadiusPressKey, fromUtc: string, toUtc: string, requestId?: string, signal?: AbortSignal): Promise<ProductionContextEvidence> {
@@ -317,10 +294,21 @@ export class TelemetryFoundationService {
 
   async motion(pressKey: RadiusPressKey, fromUtc: string, toUtc: string, requestId?: string, signal?: AbortSignal): Promise<PressMotionEvidence> {
     const resolved = await this.sources.resolve(pressKey, requestId, signal)
-    const upstream = await this.client.getPhysicalState(resolved.source.id, fromUtc, toUtc, requestId, signal)
-    if (upstream.sourceId !== resolved.source.id || upstream.sourceKey.toLowerCase() !== pressKey) throw new TelemetryApiError('invalid_response')
-    const { sourceId: _sourceId, ...evidence } = upstream
-    return { pressKey, ...evidence }
+    const rangeMs = Date.parse(toUtc) - Date.parse(fromUtc)
+    const isCurrentShortWindow = rangeMs <= 30 * 60_000 && Date.parse(toUtc) >= this.now() - 5 * 60_000
+    if (isCurrentShortWindow) {
+      const upstream = await this.client.getPhysicalState(resolved.source.id, fromUtc, toUtc, requestId, signal)
+      if (upstream.sourceId !== resolved.source.id || upstream.sourceKey.toLowerCase() !== pressKey) throw new TelemetryApiError('invalid_response')
+      const { sourceId: _sourceId, ...evidence } = upstream
+      return { pressKey, ...evidence }
+    }
+    const history = await this.semanticHistory(pressKey, { fromUtc, toUtc, includeSeed: true, signals: [{ canonicalId: 'machine.speed.actual', representation: 'samples' }, { canonicalId: 'machine.speed.setpoint', representation: 'samples' }] }, requestId, signal)
+    const actual = history.signals.find((item) => item.canonicalId === 'machine.speed.actual' && item.deckNumber === null)
+    if (!actual || actual.capabilityState !== 'SUPPORTED') throw new TelemetryApiError('invalid_response')
+    const historicalAvailability = history.readDiagnostics?.historicalAvailability ?? assessDetailedHistory(history.signals, history.readDiagnostics?.sourceGaps)
+    const reconstructed = reconstructHistoricalPhysicalState({ sourceId: resolved.source.id, sourceKey: resolved.source.sourceKey, displayName: resolved.source.displayName, fromUtc, toUtc, samples: [...(actual.seed ? [actual.seed] : []), ...actual.samples], unavailable: historicalAvailability.intervals })
+    const { sourceId: _sourceId, ...evidence } = reconstructed
+    return { pressKey, ...evidence, historicalAvailability }
   }
 
   async evidence(pressKey: RadiusPressKey, request: CuratedPhysicalEvidenceRequest, requestId?: string, signal?: AbortSignal): Promise<CuratedPhysicalEvidence> {

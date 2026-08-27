@@ -131,7 +131,8 @@ describe('primary telemetry visual integration', () => {
     assert.match(overviewSource, /radiusRawTrack=\{radiusRawTrack\}/)
     assert.doesNotMatch(overviewSource, /Open exact evidence/)
     assert.match(appSource, /!\(area === 'overview' && investigation\.mode === 'segment'\)/)
-    assert.match(appSource, /window\.setInterval\(refreshLiveRange, 60_000\)/)
+    assert.doesNotMatch(appSource, /window\.setInterval\(refreshLiveRange, 60_000\)/)
+    assert.doesNotMatch(appSource, /visibilitychange/)
   })
 
   it('composes exact two-hour historian slices across the selected range', () => {
@@ -207,7 +208,7 @@ describe('primary telemetry visual integration', () => {
     assert.match(html, /Process Family/)
   })
 
-  it('keeps mounted dashboard evidence stable during live-range background refreshes', () => {
+  it('keeps mounted dashboard evidence stable during explicit range refreshes', () => {
     const telemetrySource = readFileSync(new URL('../src/components/TelemetryEvidenceTimeline.tsx', import.meta.url), 'utf8')
     const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
     const operationalSource = readFileSync(new URL('../src/components/OperationalActivityExplorer.tsx', import.meta.url), 'utf8')

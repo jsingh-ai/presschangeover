@@ -4,6 +4,7 @@ import { RadiusUnavailableError, type RadiusService } from '../radius/radius-ser
 import { ENGINEERING_CLUE_CATALOG, type EngineeringCategory, type EngineeringClueCatalogItem, type EngineeringSignalType } from '../telemetry/engineering-clue-analysis.js'
 import type { PressSemanticSignalEvidence, TelemetryChange, TelemetrySample, TelemetryScalarValue, TelemetrySemanticSelector } from '../telemetry/telemetry-contracts.js'
 import { TelemetryFoundationService } from '../telemetry/telemetry-foundation-service.js'
+import { isGoodTelemetryQuality } from '../telemetry/historical-telemetry-policy.js'
 import type { RawTelemetryChangedSignal, RawTelemetryHistoryResponse } from '../telemetry/telemetry-contracts.js'
 import { InMemoryRawTelemetryReviewRepository, RawTelemetryReviewService, type RawTelemetryReviewStatus } from './raw-telemetry-review-service.js'
 import { buildRadiusPhysicalAlignment, evidenceQuality, rankRelatedSignals, type BasicHistoricalSummary, type EvidencePhaseSummary } from '../industrial-analytics/explorer-evidence.js'
@@ -184,8 +185,7 @@ const MAX_CONTINUOUS_CHANGE_GAP_MS = 330_000
 const MINIMUM_DISCOVERY_SAMPLE_GAP_MS = 900_000
 
 function usableAnalysisQuality(qualityState: string | undefined) {
-  const quality = qualityState?.toUpperCase() ?? ''
-  return !['BAD', 'INVALID', 'UNAVAILABLE', 'NO_DATA', 'NODATA'].some((token) => quality.includes(token))
+  return qualityState === undefined || isGoodTelemetryQuality(qualityState)
 }
 
 function latestContinuousNumericRun(values: Array<{ atUtc: string; value: number; usable: boolean }>) {
@@ -410,10 +410,11 @@ export class RawRadiusExplorerService {
       changedSignals,
       rawTelemetry: rawDiscovery ? {
         status: 'available' as const,
+        availability: rawDiscovery.rawHistoryAvailability,
         signals: analysisSafeRawSignals.map((item): RawExplorerRawChangedSignal => ({ ...item, reviewStatus: reviewByIdentity.get(item.rawIdentity) ?? 'UNREVIEWED' })),
         counts: { rawCatalogIdentityCount: rawDiscovery.rawCatalogIdentityCount, canonicallyRepresentedIdentityCount: rawDiscovery.canonicallyRepresentedIdentityCount, unmappedIdentityCount: rawDiscovery.unmappedIdentityCount, usableIdentityCount: rawDiscovery.usableIdentityCount, changedIdentityCount: analysisSafeRawSignals.length },
         historianReadCount: rawDiscovery.historianReadCount,
-      } : { status: 'unavailable' as const, signals: [], counts: null, historianReadCount: 0 },
+      } : { status: 'unavailable' as const, availability: undefined, signals: [], counts: null, historianReadCount: 0 },
       evidence: {
         physicalAlignment,
         productionContext: contextEvidence,

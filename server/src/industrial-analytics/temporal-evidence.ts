@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { RadiusPressKey } from '../radius/models.js'
 import type { TelemetryEvidenceGap } from '../telemetry/telemetry-contracts.js'
+import { isGoodTelemetryQuality } from '../telemetry/historical-telemetry-policy.js'
 import type { IndustrialAnalyticalObservation, IndustrialNumericSample, IndustrialStateSample } from './contracts.js'
 import { strongestBoundedDelta } from './bounded-delta.js'
 
@@ -57,7 +58,7 @@ export interface CategoricalTemporalEvidenceProgram extends TemporalEvidenceComm
 
 export type TemporalEvidenceProgram = NumericTemporalEvidenceProgram | CategoricalTemporalEvidenceProgram
 
-const badQuality = (quality?: string) => quality ? /BAD|INVALID|UNAVAILABLE|NO_DATA|NODATA/i.test(quality) : false
+const badQuality = (quality?: string) => quality !== undefined && !isGoodTelemetryQuality(quality)
 const round = (value: number, digits = 2) => { const factor = 10 ** digits; return Math.round(value * factor) / factor }
 const median = (values: number[]) => { const ordered = [...values].sort((a, b) => a - b); const middle = Math.floor(ordered.length / 2); return ordered.length % 2 ? ordered[middle]! : (ordered[middle - 1]! + ordered[middle]!) / 2 }
 const relative = (atUtc: string, eventStart: string) => round((Date.parse(atUtc) - Date.parse(eventStart)) / 60_000)

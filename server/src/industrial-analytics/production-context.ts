@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { OperationalEpisode, RadiusPressKey, RadiusStatusSegment } from '../radius/models.js'
 import { PRODUCTION_CONTEXT_CANONICAL_IDS, type CapabilityState, type TelemetryScalarValue, type TelemetryValueKind } from '../telemetry/telemetry-contracts.js'
+import { isGoodTelemetryQuality } from '../telemetry/historical-telemetry-policy.js'
 
 interface ContextCapabilitySignal {
   canonicalId: string
@@ -106,7 +107,7 @@ export interface ContextualBaselineAssessment {
 }
 
 const SENTINEL = /^(?:null|undefined|n\/a|na|none|unknown|unavailable|not available|not set|unset|-+)$/i
-const badQuality = (qualityState?: string) => qualityState ? /BAD|INVALID|UNAVAILABLE|NO_DATA|NODATA/i.test(qualityState) : false
+const badQuality = (qualityState?: string) => qualityState !== undefined && !isGoodTelemetryQuality(qualityState)
 
 export function usableProductionContextValue(value: unknown, qualityState?: string): ProductionContextValue | null {
   if (badQuality(qualityState) || value === null || value === undefined) return null

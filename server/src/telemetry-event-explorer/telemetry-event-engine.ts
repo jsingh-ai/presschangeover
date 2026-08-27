@@ -1,3 +1,5 @@
+import { isGoodTelemetryQuality } from '../telemetry/historical-telemetry-policy.js'
+
 export type ThresholdOperator = '>' | '>=' | '<' | '<='
 export type DeltaDirection = 'increase' | 'decrease' | 'either'
 export type EventScalarValue = number | boolean | string
@@ -82,8 +84,7 @@ const MINIMUM_SIGNIFICANT_GAP_MS = 330_000
 
 function usable(observation: NumericEventObservation): boolean {
   if (!Number.isFinite(Date.parse(observation.atUtc)) || !Number.isFinite(observation.value)) return false
-  const quality = observation.qualityState?.toUpperCase() ?? ''
-  return !['BAD', 'INVALID', 'UNAVAILABLE', 'NO_DATA', 'NODATA'].some((token) => quality.includes(token))
+  return observation.qualityState === undefined || isGoodTelemetryQuality(observation.qualityState)
 }
 
 function observations(values: NumericEventObservation[]): NumericEventObservation[] {
@@ -206,8 +207,7 @@ export function detectDeltaEvents(input: {
 
 function usableScalar(observation: ValueEventObservation): boolean {
   if (!Number.isFinite(Date.parse(observation.atUtc)) || !['number', 'boolean', 'string'].includes(typeof observation.value) || typeof observation.value === 'number' && !Number.isFinite(observation.value)) return false
-  const quality = observation.qualityState?.toUpperCase() ?? ''
-  return !['BAD', 'INVALID', 'UNAVAILABLE', 'NO_DATA', 'NODATA'].some((token) => quality.includes(token))
+  return observation.qualityState === undefined || isGoodTelemetryQuality(observation.qualityState)
 }
 
 function scalarObservations(values: ValueEventObservation[]): ValueEventObservation[] {

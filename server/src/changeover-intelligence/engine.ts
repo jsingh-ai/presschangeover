@@ -4,6 +4,7 @@ import type { RadiusPressKey, RadiusStatusSegment } from '../radius/models.js'
 import type { ProductionContextEvidence, TelemetrySample } from '../telemetry/telemetry-contracts.js'
 import { significantGapMs } from '../telemetry-event-explorer/telemetry-event-engine.js'
 import { usableJobIdentity } from '../job-intelligence/engine.js'
+import { isGoodTelemetryQuality } from '../telemetry/historical-telemetry-policy.js'
 import {
   CHANGEOVER_ALGORITHM_VERSION,
   type AdjustedRadiusContribution,
@@ -31,10 +32,9 @@ export const ORDER_SETTLING_MS = 5 * 60_000
 const iso = (value: number) => new Date(value).toISOString()
 const seconds = (value: number) => Math.round(value / 100) / 10
 const validTime = (value: string) => Number.isFinite(Date.parse(value))
-const badQuality = (value: string) => /bad|invalid|unavailable|no_data|nodata/i.test(value)
 
 function numericSamples(samples: TelemetrySample[]): Array<{ at: number; value: number; sample: TelemetrySample }> {
-  return samples.flatMap((sample) => typeof sample.value === 'number' && Number.isFinite(sample.value) && validTime(sample.observedAtUtc) && !badQuality(sample.qualityState) ? [{ at: Date.parse(sample.observedAtUtc), value: sample.value, sample }] : []).sort((left, right) => left.at - right.at)
+  return samples.flatMap((sample) => typeof sample.value === 'number' && Number.isFinite(sample.value) && validTime(sample.observedAtUtc) && isGoodTelemetryQuality(sample.qualityState) ? [{ at: Date.parse(sample.observedAtUtc), value: sample.value, sample }] : []).sort((left, right) => left.at - right.at)
 }
 /** Detects the physical envelope. Radius and metadata are intentionally absent. */
 export function detectPhysicalStops(samples: TelemetrySample[], definition: ChangeoverDefinition): PhysicalStop[] {

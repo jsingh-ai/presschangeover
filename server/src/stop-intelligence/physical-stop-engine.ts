@@ -11,6 +11,7 @@ import {
   type StopCensorReason,
   type TelemetryAvailabilityInterval,
 } from './contracts.js'
+import { normalizeTelemetryQuality } from '../telemetry/historical-telemetry-policy.js'
 
 const millisecondsPerSecond = 1_000
 
@@ -59,8 +60,7 @@ function seconds(value: number) { return value / millisecondsPerSecond }
 function parsedTime(value: string) { const result = Date.parse(value); return Number.isFinite(result) ? result : undefined }
 
 export function normalizeSpeedQuality(value: string): NormalizedSpeedQuality {
-  const normalized = value.trim().toLowerCase()
-  return normalized === 'good' || normalized === 'true' ? 'GOOD' : 'BAD'
+  return normalizeTelemetryQuality(value)
 }
 
 function validObservation(observation: CanonicalSpeedObservation): observation is CanonicalSpeedObservation & { speed: number } {

@@ -1,3 +1,5 @@
+import { isGoodTelemetryQuality } from '../telemetry/historical-telemetry-policy.js'
+
 export interface BoundedDeltaPoint {
   atUtc: string
   value: number
@@ -24,7 +26,7 @@ export interface BoundedDeltaStep<T extends BoundedDeltaPoint = BoundedDeltaPoin
 
 const unusable = (point: BoundedDeltaPoint) => {
   if (!Number.isFinite(Date.parse(point.atUtc)) || !Number.isFinite(point.value)) return true
-  return /BAD|INVALID|UNAVAILABLE|NO_DATA|NODATA/i.test(point.qualityState ?? '')
+  return point.qualityState !== undefined && !isGoodTelemetryQuality(point.qualityState)
 }
 
 export function boundedDeltaPoints<T extends BoundedDeltaPoint>(points: T[]): T[] {

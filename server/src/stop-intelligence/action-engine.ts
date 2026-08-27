@@ -1,5 +1,5 @@
 import type { PressSemanticSignalWithIdentity } from '../telemetry/telemetry-foundation-service.js'
-import type { TelemetrySample, TelemetryScalarValue } from '../telemetry/telemetry-contracts.js'
+import type { RawTelemetryHistoryResponse, TelemetrySample, TelemetryScalarValue } from '../telemetry/telemetry-contracts.js'
 import {
   STOP_INTELLIGENCE_ACTION_VERSION,
   type ChangeoverAction,
@@ -11,10 +11,12 @@ import {
   type StopSetupFamily,
 } from './contracts.js'
 import { normalizeSpeedQuality } from './physical-stop-engine.js'
+import { contextualPumpFrequencyActivity, isDirectAniloxActivitySignal } from './evidence-model.js'
 
 const ACTION_CONTEXT_MS = 15 * 60_000
 const BURST_GAP_MS = 2 * 60_000
 const MAX_EVIDENCE_PER_ACTION = 80
+const COMPLEMENTARY_TRANSITION_TOLERANCE_MS = 2_000
 
 interface ActionPoint { at: number; evidence: ChangeoverActionEvidence }
 interface ActionDefinition { actionCode: ChangeoverActionCode; displayName: string; operatorConcept: string | null; explanation: string; family: StopSetupFamily | null }
@@ -22,11 +24,13 @@ interface ActionDefinition { actionCode: ChangeoverActionCode; displayName: stri
 const ACTION_DEFINITIONS: Record<'deck' | 'wash' | 'pump' | 'impression' | 'registration' | 'anilox', ActionDefinition> = {
   deck: { actionCode: 'DECK_MOVEMENT', displayName: 'Deck Movement', operatorConcept: 'Likely Deck Out / Deck In; direction is not established', explanation: 'Coordinated deck telemetry changed. Numeric direction/state semantics remain unvalidated.', family: 'DECK' },
   wash: { actionCode: 'WASH_ACTIVITY', displayName: 'Wash Activity', operatorConcept: 'Possible Washing of Ink / Plate Wash stage', explanation: 'The configured wash-state telemetry changed; it does not prove the narrower Plate Wash name.', family: 'WASH_PUMP_INK' },
-  pump: { actionCode: 'INK_PUMP_ACTIVITY', displayName: 'Pump / Ink Activity', operatorConcept: 'Likely Ink Up / Supply activity', explanation: 'The configured pump-state telemetry changed; exact inking direction is not established.', family: 'WASH_PUMP_INK' },
+  pump: { actionCode: 'INK_PUMP_ACTIVITY', displayName: 'Pump / Ink Activity', operatorConcept: 'Likely Ink Up / Supply activity', explanation: 'A direct pump status/sequence, pump-frequency on/off boundary, or ink-system mode/status changed; exact inking direction is not established.', family: 'WASH_PUMP_INK' },
   impression: { actionCode: 'IMPRESSION_ADJUSTMENT', displayName: 'Impression Adjustment', operatorConcept: null, explanation: 'Configured Impression telemetry changed.', family: 'IMPRESSION' },
   registration: { actionCode: 'REGISTRATION_ADJUSTMENT', displayName: 'Registration Adjustment', operatorConcept: null, explanation: 'Configured Register telemetry changed. Changes are grouped into bounded bursts.', family: 'REGISTRATION' },
   anilox: { actionCode: 'ANILOX_ACTIVITY', displayName: 'Anilox Activity', operatorConcept: null, explanation: 'Configured Anilox-family telemetry changed.', family: 'ANILOX' },
 }
+const ROLL_DEFINITION: ActionDefinition = { actionCode: 'ROLL_TRANSITION', displayName: 'Roll Change', operatorConcept: 'Roll identity transition', explanation: 'The canonical Roll identity changed in the bounded stop context. Roll supports investigation but does not move the physical stop boundary.', family: null }
+const RAW_DEFINITION: ActionDefinition = { actionCode: 'UNCANONICALIZED_RAW_ACTIVITY', displayName: 'Raw / Unmapped Changes', operatorConcept: null, explanation: 'Direct transitions were observed in raw telemetry that is not represented by a canonical action category. The operational meaning is intentionally left unclassified.', family: null }
 
 const validTime = (value: string) => Number.isFinite(Date.parse(value))
 const scalarKey = (value: TelemetryScalarValue | null) => value === null ? 'null' : `${typeof value}:${String(value)}`
@@ -46,15 +50,92 @@ function signalPoints(signal: PressSemanticSignalWithIdentity, from: number, to:
   })
 }
 
+type BehaviorPhase = 'BEFORE' | 'DURING' | 'AFTER'
+const behaviorPhase = (at: number, stopStart: number, stopEnd: number): BehaviorPhase => at < stopStart ? 'BEFORE' : at < stopEnd ? 'DURING' : 'AFTER'
+function behaviorFingerprint(point: ActionPoint): string {
+  const { oldValue, newValue } = point.evidence
+  if (typeof oldValue === 'number' && typeof newValue === 'number') return `numeric:${newValue > oldValue ? 'UP' : newValue < oldValue ? 'DOWN' : 'SAME'}`
+  if (typeof oldValue === 'boolean' && typeof newValue === 'boolean') return `boolean:${oldValue ? 'ON' : 'OFF'}>${newValue ? 'ON' : 'OFF'}`
+  return `state:${scalarKey(oldValue)}>${scalarKey(newValue)}`
+}
+
+/**
+ * A transition is action evidence only when its behavior is not repeated in
+ * all three stop phases. This removes ordinary cycling/drift that looks the
+ * same before, during, and after while retaining phase-specific setup work.
+ */
+function contextualBehaviorPoints(points: ActionPoint[], stopStart: number, stopEnd: number): ActionPoint[] {
+  const fingerprints: Record<BehaviorPhase, Set<string>> = { BEFORE: new Set(), DURING: new Set(), AFTER: new Set() }
+  for (const point of points) fingerprints[behaviorPhase(point.at, stopStart, stopEnd)].add(behaviorFingerprint(point))
+  const numericValues: Record<BehaviorPhase, number[]> = { BEFORE: [], DURING: [], AFTER: [] }
+  for (const point of points) if (typeof point.evidence.newValue === 'number') numericValues[behaviorPhase(point.at, stopStart, stopEnd)].push(point.evidence.newValue)
+  const median = (values: number[]) => { const ordered = [...values].sort((left, right) => left - right); const middle = Math.floor(ordered.length / 2); return ordered.length % 2 ? ordered[middle]! : (ordered[middle - 1]! + ordered[middle]!) / 2 }
+  const phases: BehaviorPhase[] = ['BEFORE', 'DURING', 'AFTER']
+  const allNumeric = phases.flatMap((phase) => numericValues[phase])
+  const numericSpan = allNumeric.length ? Math.max(...allNumeric) - Math.min(...allNumeric) : 0
+  const levelTolerance = Math.max(1e-6, numericSpan * .15)
+  const levelDistinct = new Set<BehaviorPhase>()
+  for (const phase of phases) {
+    const others = phases.filter((candidate) => candidate !== phase)
+    if (numericValues[phase].length < 3 || numericValues[others[0]!].length < 3 || numericValues[others[1]!].length < 3) continue
+    const targetMedian = median(numericValues[phase]); const firstMedian = median(numericValues[others[0]!]); const secondMedian = median(numericValues[others[1]!])
+    if (Math.abs(firstMedian - secondMedian) <= levelTolerance && Math.abs(targetMedian - (firstMedian + secondMedian) / 2) > levelTolerance * 2) levelDistinct.add(phase)
+  }
+  return points.flatMap((point) => {
+    const fingerprint = behaviorFingerprint(point)
+    const repeatedEverywhere = fingerprints.BEFORE.has(fingerprint) && fingerprints.DURING.has(fingerprint) && fingerprints.AFTER.has(fingerprint)
+    const phase = behaviorPhase(point.at, stopStart, stopEnd)
+    if (repeatedEverywhere && !levelDistinct.has(phase)) return []
+    const contextReason = levelDistinct.has(phase) ? 'Its numeric level was materially different while the other two phase medians were similar.' : 'The same transition behavior was not repeated across before-stop, during-stop, and after-stop context.'
+    return [{ ...point, evidence: { ...point.evidence, explanation: `${point.evidence.explanation} ${contextReason}` } }]
+  })
+}
+
+function pumpSignalPoints(signal: PressSemanticSignalWithIdentity, from: number, to: number, stopStart: number, stopEnd: number, explanation: string): ActionPoint[] {
+  if (!signal.canonicalId.startsWith('ink.pump.frequency.')) return signalPoints(signal, from, to, explanation)
+  return contextualPumpFrequencyActivity(signal, from, to, stopStart, stopEnd).map(({ point, previousValue }) => ({ at: Date.parse(point.observedAtUtc), evidence: signalEvidence(signal, point, previousValue, `${explanation} Pump frequency crossed the 1-unit active boundary in a pattern not repeated both before and after the physical stop.`) }))
+}
+
 function deduplicate(points: ActionPoint[]): ActionPoint[] {
   const unique = new Map<string, ActionPoint>()
   for (const point of points.sort((left, right) => left.at - right.at)) {
     const evidence = point.evidence
-    const signalKey = evidence.signalId ?? `${evidence.canonicalId}:${evidence.deckNumber ?? ''}`
+    const signalKey = evidence.signalId ?? evidence.rawIdentity ?? `${evidence.canonicalId}:${evidence.deckNumber ?? ''}`
     const key = `${signalKey}:${evidence.atUtc}:${scalarKey(evidence.oldValue)}:${scalarKey(evidence.newValue)}`
     if (!unique.has(key)) unique.set(key, point)
   }
   return [...unique.values()]
+}
+
+function complementaryCoordinate(point: ActionPoint): { base: string; state: 'on' | 'off' } | null {
+  const identity = point.evidence.canonicalId ?? point.evidence.rawIdentity
+  if (!identity) return null
+  const match = /^(.*?)(?:[._](on|off))$/i.exec(identity)
+  if (!match?.[1] || !match[2]) return null
+  return { base: `${match[1].toLowerCase()}:${point.evidence.deckNumber ?? ''}`, state: match[2].toLowerCase() as 'on' | 'off' }
+}
+
+/** A paired x_on/x_off PLC transition is one logical state change, not two actions. */
+export function collapseComplementaryStatePoints(points: ActionPoint[]): ActionPoint[] {
+  const ordered = deduplicate(points)
+  const consumed = new Set<number>()
+  const retained: ActionPoint[] = []
+  ordered.forEach((point, index) => {
+    if (consumed.has(index)) return
+    const coordinate = complementaryCoordinate(point)
+    if (!coordinate) { retained.push(point); return }
+    const partnerIndex = ordered.findIndex((candidate, candidateIndex) => {
+      if (candidateIndex === index || consumed.has(candidateIndex)) return false
+      const candidateCoordinate = complementaryCoordinate(candidate)
+      return candidateCoordinate?.base === coordinate.base && candidateCoordinate.state !== coordinate.state && Math.abs(candidate.at - point.at) <= COMPLEMENTARY_TRANSITION_TOLERANCE_MS
+    })
+    if (partnerIndex < 0) { retained.push(point); return }
+    consumed.add(partnerIndex)
+    const partner = ordered[partnerIndex]!
+    const primary = coordinate.state === 'on' ? point : partner
+    retained.push({ ...primary, evidence: { ...primary.evidence, explanation: `${primary.evidence.explanation} Complementary ON/OFF telemetry changed together and is represented once.` } })
+  })
+  return retained.sort((left, right) => left.at - right.at)
 }
 
 function comparisonFor(family: StopSetupFamily | null, allStops: ClassifiedStop[]): ChangeoverActionComparison | null {
@@ -85,6 +166,47 @@ function burstActions(definition: ActionDefinition, points: ActionPoint[], allSt
   })
 }
 
+const rawScalar = (value: unknown): value is TelemetryScalarValue => typeof value === 'string' || typeof value === 'boolean' || typeof value === 'number' && Number.isFinite(value)
+
+function rawHistoryPoints(histories: RawTelemetryHistoryResponse[]): ActionPoint[] {
+  const points = histories.flatMap((history) => {
+    const observations = history.observations
+      .filter((item) => validTime(item.timestampUtc) && normalizeSpeedQuality(item.qualityState) === 'GOOD' && rawScalar(item.rawValue))
+      .sort((left, right) => Date.parse(left.timestampUtc) - Date.parse(right.timestampUtc))
+    return observations.flatMap((observation, index): ActionPoint[] => {
+      const previous = observations[index - 1]
+      if (!previous || !rawScalar(previous.rawValue) || scalarKey(previous.rawValue) === scalarKey(observation.rawValue as TelemetryScalarValue)) return []
+      return [{ at: Date.parse(observation.timestampUtc), evidence: { signalId: null, canonicalId: null, rawIdentity: history.rawIdentity, component: history.signalDisplayName, deckNumber: null, atUtc: observation.timestampUtc, oldValue: previous.rawValue, newValue: observation.rawValue as TelemetryScalarValue, originalQuality: observation.qualityState, normalizedQuality: 'GOOD', explanation: `Observed raw transition in ${history.signalDisplayName}; this identity has not been canonicalized.` } }]
+    })
+  })
+  return collapseComplementaryStatePoints(points)
+}
+
+/** Adds observed, explicitly uncanonicalized evidence without changing the physical stop or its classification. */
+export function buildUncanonicalizedRawActions(input: { stop: ClassifiedStop; allStops: ClassifiedStop[]; histories: RawTelemetryHistoryResponse[] }): ChangeoverAction[] {
+  if (input.stop.classification !== 'CHANGEOVER' || !['HIGH', 'MEDIUM'].includes(input.stop.confidence)) return []
+  const points = rawHistoryPoints(input.histories)
+  const stopStart = Date.parse(input.stop.physicalSegment.startAt)
+  const stopEnd = Date.parse(input.stop.physicalSegment.endAt ?? '9999-12-31T23:59:59.999Z')
+  const byRawIdentity = new Map<string, ActionPoint[]>()
+  for (const point of points) {
+    const rawIdentity = point.evidence.rawIdentity
+    if (!rawIdentity) continue
+    byRawIdentity.set(rawIdentity, [...(byRawIdentity.get(rawIdentity) ?? []), point])
+  }
+  return [...byRawIdentity.entries()].flatMap(([rawIdentity, signalPoints]) => {
+    const contextualPoints = contextualBehaviorPoints(signalPoints, stopStart, stopEnd)
+    const phases = [
+      contextualPoints.filter((point) => point.at < stopStart),
+      contextualPoints.filter((point) => point.at >= stopStart && point.at < stopEnd),
+      contextualPoints.filter((point) => point.at >= stopEnd),
+    ]
+    const tagName = signalPoints[0]?.evidence.component ?? rawIdentity
+    const definition = { ...RAW_DEFINITION, displayName: tagName, explanation: `${RAW_DEFINITION.explanation} The displayed name is the observed raw telemetry tag.` }
+    return phases.flatMap((phase) => phase.length ? [action(definition, 'DETECTED', phase, input.allStops)] : [])
+  }).sort((left, right) => Date.parse(left.startAt ?? '9999-12-31') - Date.parse(right.startAt ?? '9999-12-31') || (left.evidence[0]?.rawIdentity ?? '').localeCompare(right.evidence[0]?.rawIdentity ?? ''))
+}
+
 function physicalEvidence(stop: ClassifiedStop, speed: PressSemanticSignalWithIdentity | undefined, atUtc: string, oldValue: TelemetryScalarValue | null, newValue: TelemetryScalarValue | null, explanation: string): ActionPoint {
   const at = Date.parse(atUtc)
   return { at, evidence: { signalId: stop.physicalSegment.speedSignalId, canonicalId: 'machine.speed.actual', rawIdentity: speed?.rawSignalId ?? null, component: 'Press', deckNumber: null, atUtc, oldValue, newValue, originalQuality: 'DERIVED_FROM_GOOD_SPEED', normalizedQuality: 'GOOD', explanation } }
@@ -107,10 +229,10 @@ function unknown(actionCode: ChangeoverActionCode, displayName: string, explanat
 function familySignals(signals: PressSemanticSignalWithIdentity[], key: keyof typeof ACTION_DEFINITIONS): PressSemanticSignalWithIdentity[] {
   if (key === 'deck') return signals.filter((signal) => signal.canonicalId.startsWith('deck.'))
   if (key === 'wash') return signals.filter((signal) => signal.canonicalId === 'ink.washup.state')
-  if (key === 'pump') return signals.filter((signal) => signal.canonicalId === 'ink.pump.status' || signal.canonicalId === 'ink.pump.sequence')
+  if (key === 'pump') return signals.filter((signal) => signal.canonicalId === 'ink.pump.status' || signal.canonicalId === 'ink.pump.sequence' || signal.canonicalId === 'ink.pump.frequency.supply' || signal.canonicalId === 'ink.pump.frequency.return' || signal.canonicalId === 'ink.viscosity.mode' || signal.canonicalId === 'ink.viscosity.status')
   if (key === 'impression') return signals.filter((signal) => signal.canonicalId.startsWith('impression.'))
   if (key === 'registration') return signals.filter((signal) => signal.canonicalId.startsWith('register.'))
-  return signals.filter((signal) => signal.canonicalId.startsWith('anilox.'))
+  return signals.filter((signal) => isDirectAniloxActivitySignal(signal.canonicalId))
 }
 
 function radiusColorAction(stop: ClassifiedStop, allStops: ClassifiedStop[]): ChangeoverAction | null {
@@ -133,24 +255,17 @@ export function buildChangeoverActions(input: { stop: ClassifiedStop; allStops: 
   if (identityBefore) actions.push(action({ actionCode: 'PREVIOUS_JOB_FINISHED', displayName: 'Previous Job Finished', operatorConcept: null, explanation: 'Stable previous identity plus the physical stop supports this operator concept; no dedicated PLC action is mapped.', family: null }, 'INFERRED', [physicalEvidence(input.stop, input.speedSignal, segment.startAt, null, 0, `Physical stop began with previous ${identityBefore.field} ${identityBefore.beforeValue}.`)], input.allStops))
   else unconfirmed.push(unknown('PREVIOUS_JOB_FINISHED', 'Previous Job Finished', 'No stable previous identity was available to support this inference.'))
   if (identity) actions.push(identity); else unconfirmed.push(unknown('JOB_IDENTITY_TRANSITION', 'Job / Identity Change', 'No usable identity transition was associated with this changeover stop.', 'Possible Job Out'))
+  const rollPoints = input.signals.filter((signal) => signal.canonicalId === 'production.roll' && signal.deckNumber === null).flatMap((signal) => contextualBehaviorPoints(signalPoints(signal, windowFrom, windowTo, ROLL_DEFINITION.explanation), Date.parse(segment.startAt), Date.parse(endAt)))
+  actions.push(...burstActions(ROLL_DEFINITION, rollPoints, input.allStops))
+  if (!actions.some((item) => item.actionCode === 'ROLL_TRANSITION')) unconfirmed.push(unknown('ROLL_TRANSITION', 'Roll Change', 'No canonical Roll identity transition was observed in the bounded action window.', 'Roll identity transition'))
 
   for (const key of Object.keys(ACTION_DEFINITIONS) as Array<keyof typeof ACTION_DEFINITIONS>) {
     const definition = ACTION_DEFINITIONS[key]
-    const points = familySignals(input.signals, key).flatMap((signal) => signalPoints(signal, windowFrom, windowTo, definition.explanation))
+    const discovered = familySignals(input.signals, key).flatMap((signal) => contextualBehaviorPoints(key === 'pump' ? pumpSignalPoints(signal, windowFrom, windowTo, Date.parse(segment.startAt), Date.parse(endAt), definition.explanation) : signalPoints(signal, windowFrom, windowTo, definition.explanation), Date.parse(segment.startAt), Date.parse(endAt)))
+    const points = key === 'deck' ? collapseComplementaryStatePoints(discovered) : discovered
     actions.push(...burstActions(definition, points, input.allStops))
   }
   for (const definition of Object.values(ACTION_DEFINITIONS)) if (!actions.some((item) => item.actionCode === definition.actionCode)) unconfirmed.push(unknown(definition.actionCode, definition.displayName, definition.actionCode === 'DECK_MOVEMENT' ? 'No coordinated multi-signal deck movement burst was directly confirmed; Deck Out/In direction is not mapped.' : `No changing ${definition.displayName.toLowerCase()} telemetry was observed in the bounded action window.`, definition.operatorConcept))
-
-  for (const attempt of segment.movementAttempts) {
-    if (attempt.peakSpeed !== null && attempt.peakSpeed >= 1 && attempt.peakSpeed < 595) actions.push(action({ actionCode: 'SLOW_SETUP_RUN', displayName: 'Slow Setup Run', operatorConcept: 'Start press / slow setup movement', explanation: 'Actual Speed moved above stopped speed but stayed below the physical recovery threshold.', family: null }, 'DETECTED', [physicalEvidence(input.stop, input.speedSignal, attempt.startAt, 0, attempt.peakSpeed, `Movement attempt ${attempt.sequenceNumber} peaked at ${attempt.peakSpeed} ft/min.`), physicalEvidence(input.stop, input.speedSignal, attempt.endAt, attempt.peakSpeed, 0, `Movement attempt ${attempt.sequenceNumber} ended.`)], input.allStops))
-    if (attempt.reachedRecoveryThreshold && attempt.failedRecoveryCount > 0) actions.push(action({ actionCode: 'TRIAL_RUN', displayName: 'Trial Run', operatorConcept: 'Setup run that did not sustain physical recovery', explanation: 'Actual Speed reached the recovery threshold but did not sustain it for five minutes.', family: null }, 'DETECTED', [physicalEvidence(input.stop, input.speedSignal, attempt.startAt, 0, attempt.peakSpeed, `Attempt ${attempt.sequenceNumber} reached ${attempt.peakSpeed ?? 'unknown'} ft/min.`), physicalEvidence(input.stop, input.speedSignal, attempt.endAt, attempt.peakSpeed, 0, `Attempt ${attempt.sequenceNumber} returned below recovery.`)], input.allStops))
-  }
-  for (const streak of segment.failedRecoveryStreaks) actions.push(action({ actionCode: 'FAILED_RECOVERY', displayName: 'Failed Recovery', operatorConcept: null, explanation: 'A recovery candidate ended before five continuous minutes.', family: null }, 'DETECTED', [physicalEvidence(input.stop, input.speedSignal, streak.startAt, null, 595, `Recovery candidate began; ${streak.reason}.`), physicalEvidence(input.stop, input.speedSignal, streak.endAt, 595, null, 'Recovery confirmation failed.')], input.allStops))
-  if (!actions.some((item) => item.actionCode === 'SLOW_SETUP_RUN')) unconfirmed.push(unknown('SLOW_SETUP_RUN', 'Slow Setup Run', 'No movement attempt between 1 and 595 ft/min was observed in this physical stop.'))
-  if (!actions.some((item) => item.actionCode === 'TRIAL_RUN')) unconfirmed.push(unknown('TRIAL_RUN', 'Trial Run', 'No above-recovery attempt that later failed confirmation was observed.'))
-  if (!actions.some((item) => item.actionCode === 'FAILED_RECOVERY')) unconfirmed.push(unknown('FAILED_RECOVERY', 'Failed Recovery', 'No failed recovery streak was observed.'))
-  if (segment.endAt) actions.push(action({ actionCode: 'PHYSICAL_RECOVERY', displayName: 'Physical Recovery', operatorConcept: 'Good production threshold reached', explanation: 'Actual Speed reached at least 595 ft/min and remained there for the accepted confirmation interval.', family: null }, 'DETECTED', [physicalEvidence(input.stop, input.speedSignal, segment.endAt, null, 595, 'Successful sustained physical recovery began.')], input.allStops))
-  else unconfirmed.push(unknown('PHYSICAL_RECOVERY', 'Physical Recovery', 'The stop is right-censored or recovery has not yet been confirmed.'))
 
   const color = radiusColorAction(input.stop, input.allStops); if (color) actions.push(color); else unconfirmed.push(unknown('COLOR_RELATED_ACTIVITY', 'Color Check', 'No direct mapped color telemetry or Radius color-related annotation supports this stage.'))
   unconfirmed.push(

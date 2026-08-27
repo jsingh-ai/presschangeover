@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { RadiusPressKey } from '../radius/models.js'
+import { isGoodTelemetryQuality } from '../telemetry/historical-telemetry-policy.js'
 import { detectDeltaEvents, detectThresholdEvents, detectValueChangeEvents, type ThresholdDetection } from '../telemetry-event-explorer/telemetry-event-engine.js'
 import type { IndustrialAnalyticalObservation, IndustrialBaselineMetricInput, IndustrialNumericSample, IndustrialNumericStats, IndustrialRelationshipResult, IndustrialSequenceEpisode, IndustrialStateSample } from './contracts.js'
 
@@ -23,7 +24,7 @@ function round(value: number, digits = 3): number { const factor = 10 ** digits;
 function median(values: number[]): number { const sorted = [...values].sort((a, b) => a - b); const middle = Math.floor(sorted.length / 2); return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2 }
 function mean(values: number[]): number { return values.reduce((sum, value) => sum + value, 0) / values.length }
 function deviation(values: number[]): number { const average = mean(values); return Math.sqrt(mean(values.map((value) => (value - average) ** 2))) }
-function usableQuality(qualityState?: string): boolean { return !/BAD|INVALID|UNAVAILABLE|NO_DATA|NODATA/i.test(qualityState ?? '') }
+function usableQuality(qualityState?: string): boolean { return qualityState === undefined || isGoodTelemetryQuality(qualityState) }
 function observationId(parts: unknown[]): string { return `industrial.${createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 14)}` }
 function validRange(range: { start: string; end: string }): boolean { return Number.isFinite(Date.parse(range.start)) && Number.isFinite(Date.parse(range.end)) && Date.parse(range.end) > Date.parse(range.start) }
 function numericSamples(input: IndustrialNumericSample[], range?: { start: string; end: string }): IndustrialNumericSample[] {

@@ -1,6 +1,7 @@
 import type { RadiusPressKey } from '../radius/models.js'
 import type { CapabilityAssessment, PressSemanticSignalEvidence, TelemetryChange, TelemetrySample, TelemetrySemanticSelector } from './telemetry-contracts.js'
 import { TelemetryFoundationService } from './telemetry-foundation-service.js'
+import { isGoodTelemetryQuality } from './historical-telemetry-policy.js'
 
 const MINUTE_MS = 60_000
 export const CLUE_MAX_WINDOW_MS = 2 * 60 * MINUTE_MS
@@ -148,7 +149,7 @@ function quantile(values: number[], q: number): number | null {
 export function numericSummary(samples: TelemetrySample[], from: number, to: number): NumericWindowSummary {
   const values = samples.filter((sample) => {
     const at = Date.parse(sample.observedAtUtc)
-    return at >= from && at < to && typeof sample.value === 'number' && Number.isFinite(sample.value)
+    return at >= from && at < to && typeof sample.value === 'number' && Number.isFinite(sample.value) && isGoodTelemetryQuality(sample.qualityState)
   }).map(({ value }) => value as number)
   const q1 = quantile(values, .25)
   const q3 = quantile(values, .75)

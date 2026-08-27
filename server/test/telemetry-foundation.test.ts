@@ -212,10 +212,30 @@ test('speed preserves actual/setpoint samples, blank or ft/min units, and unveri
 })
 
 test('motion preserves RUNNING, STOPPED, TRANSITION, UNKNOWN and never calls it production', async () => {
-  const result = await new TelemetryFoundationService(baseClient()).motion('press5', motionFixture.fromUtc, motionFixture.toUtc)
+  const result = await new TelemetryFoundationService(baseClient(), { now: () => Date.parse(motionFixture.toUtc) }).motion('press5', motionFixture.fromUtc, motionFixture.toUtc)
   assert.deepEqual(result.segments.map(({ state }) => state), ['RUNNING', 'STOPPED', 'TRANSITION', 'UNKNOWN'])
   assert.equal(result.segments[0]?.actualSpeedAtStart, 30)
   assert.doesNotMatch(JSON.stringify(result), /production state/i)
+})
+
+test('historical motion reconstructs transition-first speed and does not call the short-window live endpoint', async () => {
+  const fromUtc = '2026-08-12T03:30:00.000Z'
+  const toUtc = '2026-08-12T03:35:00.000Z'
+  const point = (observedAtUtc: string, value: number, qualityState = 'GOOD') => ({ observedAtUtc, receivedAtUtc: observedAtUtc, sourceTimestampUtc: observedAtUtc, qualityState, valueKind: 'numeric' as const, value })
+  let liveCalls = 0
+  const result = await new TelemetryFoundationService(baseClient({
+    getPhysicalState: async () => { liveCalls += 1; return motionFixture },
+    querySemanticHistory: async (_sourceId, query) => ({
+      sourceId: 41, sourceKey: 'press5', displayName: 'Press 5', fromUtc: query.fromUtc, toUtc: query.toUtc, includeSeed: query.includeSeed,
+      signals: query.signals.map(({ canonicalId, representation }) => canonicalId === 'machine.speed.actual'
+        ? { canonicalId, deckNumber: null, supported: true, mappingStatus: 'MAPPED' as const, historianSignalId: 10, rawSignalId: 'sanitized.speed.actual', sourceUnit: 'ft/min', canonicalUnitStatus: 'unverified', valueKind: 'numeric' as const, sourceSelector: null, selectedVariant: 'primary', representation, seedSample: null, samples: [point(fromUtc, 700), point('2026-08-12T03:31:00.000Z', 0), point('2026-08-12T03:32:00.000Z', 20), point('2026-08-12T03:33:00.000Z', 0, 'false')], changes: [] }
+        : { canonicalId, deckNumber: null, supported: true, mappingStatus: 'MAPPED' as const, historianSignalId: 11, rawSignalId: 'sanitized.speed.setpoint', sourceUnit: 'ft/min', canonicalUnitStatus: 'unverified', valueKind: 'numeric' as const, sourceSelector: null, selectedVariant: 'primary', representation, seedSample: null, samples: [point(fromUtc, 800)], changes: [] }),
+    }),
+  }), { now: () => Date.parse('2026-08-27T12:00:00.000Z') }).motion('press5', fromUtc, toUtc)
+  assert.equal(liveCalls, 0)
+  assert.deepEqual(result.segments.map(({ state }) => state), ['RUNNING', 'STOPPED', 'TRANSITION', 'UNKNOWN'])
+  assert.equal(result.policy.shortStalenessApplied, false)
+  assert.equal(result.historicalAvailability?.state, 'DETAILED_AVAILABLE')
 })
 
 test('curated deck/process evidence requests raw canonical signals and derives no deck counts or fault labels', async () => {

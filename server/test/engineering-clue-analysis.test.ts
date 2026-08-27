@@ -111,6 +111,11 @@ describe('engineering telemetry clue analysis', () => {
     assert.equal(numericSummary(values, Date.parse(occurrence.startUtc), Date.parse(occurrence.endUtc)).count, 1)
   })
 
+  it('preserves row-distribution median and IQR while excluding BAD historian quality', () => {
+    const values = [sample('2026-08-13T12:01:00.000Z', 0), sample('2026-08-13T12:09:00.000Z', 10), sample('2026-08-13T12:10:00.000Z', 10), { ...sample('2026-08-13T12:11:00.000Z', 100), qualityState: 'false' }]
+    assert.deepEqual(numericSummary(values, Date.parse(window.fromUtc), Date.parse(occurrence.startUtc)), { count: 3, median: 10, minimum: 0, maximum: 10, iqr: 5 })
+  })
+
   it('preserves exact boundaries for very short and one-minute occurrences', () => {
     for (const durationMs of [20_000, 60_000]) {
       const shortOccurrence = { ...occurrence, endUtc: new Date(Date.parse(occurrence.startUtc) + durationMs).toISOString(), durationSeconds: durationMs / 1_000 }

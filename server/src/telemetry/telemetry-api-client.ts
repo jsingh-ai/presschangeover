@@ -212,7 +212,7 @@ function parseRawHistory(value: unknown): RawTelemetryHistoryResponse {
     rawIdentity: requireString(record, 'rawIdentity'), signalDisplayName: requireString(record, 'signalDisplayName'), dataType: requireString(record, 'dataType'), dataKind: requireString(record, 'dataKind'),
     sourceUnit: nullableString(record, 'sourceUnit'), plottable: requireBoolean(record, 'plottable'), fromUtc: requireString(record, 'fromUtc'), toUtc: requireString(record, 'toUtc'),
     historianReadCount: requireNumber(record, 'historianReadCount'), alternateRepresentationCount: requireNumber(record, 'alternateRepresentationCount'), alternateRawIdentities: requireStrings(record, 'alternateRawIdentities'),
-    observations: record.observations.map((item) => { const observation = requireRecord(item); return { timestampUtc: requireString(observation, 'timestampUtc'), receivedAtUtc: requireString(observation, 'receivedAtUtc'), sourceTimestampUtc: requireString(observation, 'sourceTimestampUtc'), qualityState: requireString(observation, 'qualityState'), dataType: requireString(observation, 'dataType'), rawValue: requireJson(observation, 'rawValue') } }),
+    observations: record.observations.map((item) => { const observation = requireRecord(item); return { timestampUtc: requireString(observation, 'timestampUtc'), receivedAtUtc: requireString(observation, 'receivedAtUtc'), sourceTimestampUtc: nullableString(observation, 'sourceTimestampUtc'), qualityState: requireString(observation, 'qualityState'), dataType: requireString(observation, 'dataType'), rawValue: requireJson(observation, 'rawValue') } }),
   }
 }
 

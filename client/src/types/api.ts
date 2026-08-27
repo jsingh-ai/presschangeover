@@ -633,7 +633,7 @@ export interface RawUnmappedChangedSignal {
 export interface RawUnmappedObservation {
   timestampUtc: string
   receivedAtUtc: string
-  sourceTimestampUtc: string
+  sourceTimestampUtc: string | null
   qualityState: string
   dataType: string
   rawValue: RawTelemetryValue
@@ -654,6 +654,11 @@ export interface RawUnmappedHistory {
   alternateRepresentationCount: number
   alternateRawIdentities: string[]
   observations: RawUnmappedObservation[]
+  rawHistoryAvailability?: {
+    state: 'RAW_AVAILABLE' | 'RAW_HISTORY_EXPIRED' | 'UNKNOWN'
+    detailedTelemetryMayRemainAvailable: boolean
+    reason: string
+  }
   reviewStatus: RawTelemetryReviewStatus
 }
 
@@ -784,6 +789,7 @@ export interface RawExplorerDetail {
   changedSignals: RawExplorerChangedSignal[]
   rawTelemetry: {
     status: 'available' | 'unavailable'
+    availability?: RawUnmappedHistory['rawHistoryAvailability']
     signals: RawUnmappedChangedSignal[]
     counts: null | { rawCatalogIdentityCount: number; canonicallyRepresentedIdentityCount: number; unmappedIdentityCount: number; usableIdentityCount: number; changedIdentityCount: number }
     historianReadCount: number

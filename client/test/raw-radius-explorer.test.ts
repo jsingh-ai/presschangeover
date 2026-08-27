@@ -31,6 +31,11 @@ describe('Raw Radius Code Explorer client', () => {
     assert.match(shellSource, /Raw Radius Explorer/)
   })
 
+  it('distinguishes expired raw snapshots from still-available mapped detail', () => {
+    assert.match(pageSource, /Raw snapshot history expired for this period; (?:mapped detailed|detailed mapped) telemetry remains available\./)
+    assert.doesNotMatch(pageSource, /RAW_HISTORY_EXPIRED[^\n]*collection outage/i)
+  })
+
   it('validates positive lookback, nonnegative context, and reports the explicit 1,440-minute maximum', () => {
     assert.equal(DEFAULT_RAW_EXPLORER_LOOKBACK_MINUTES, 10)
     assert.equal(DEFAULT_RAW_EXPLORER_CONTEXT_MINUTES, 30)

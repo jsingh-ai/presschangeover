@@ -3,6 +3,7 @@ import { RadiusUnavailableError, type RadiusService } from '../radius/radius-ser
 import { RAW_EXPLORER_DISCOVERY_CATALOG, RAW_EXPLORER_MAX_WINDOW_MINUTES, RawRadiusExplorerService, type RawExplorerOccurrence, type RawExplorerSignalIdentity } from '../raw-radius-explorer/raw-radius-explorer-service.js'
 import type { EngineeringClueCatalogItem } from '../telemetry/engineering-clue-analysis.js'
 import { PRODUCTION_CONTEXT_CANONICAL_IDS, type CapabilityAssessment, type PressSemanticSignalEvidence, type RawTelemetryHistoryResponse, type TelemetrySample, type TelemetryScalarValue, type TelemetrySemanticSelector, type TelemetrySourceSignal } from '../telemetry/telemetry-contracts.js'
+import { assessRawHistory } from '../telemetry/historical-telemetry-policy.js'
 import { TelemetryFoundationService, type PressSemanticSignalWithIdentity } from '../telemetry/telemetry-foundation-service.js'
 import { detectDeltaEvents, detectThresholdEvents, detectValueChangeEvents, type DeltaDirection, type DeltaRule, type EventScalarValue, type NumericEventObservation, type ThresholdOperator, type ThresholdRule, type ValueChangeRule, type ValueEventObservation } from './telemetry-event-engine.js'
 import { IndustrialAnalyticsService } from '../industrial-analytics/industrial-analytics-service.js'
@@ -230,7 +231,9 @@ export class TelemetryEventExplorerService {
     if (!first) throw new RadiusUnavailableError()
     const byTimestamp = new Map<number, RawTelemetryHistoryResponse['observations'][number]>()
     for (const item of responses.flatMap(({ observations }) => observations).sort((a, b) => Date.parse(a.timestampUtc) - Date.parse(b.timestampUtc))) byTimestamp.set(Date.parse(item.timestampUtc), item)
-    return { history: { ...first, fromUtc, toUtc, historianReadCount: responses.reduce((sum, item) => sum + item.historianReadCount, 0), observations: [...byTimestamp.values()] }, requestCount: chunks.length }
+    const historianReadCount = responses.reduce((sum, item) => sum + item.historianReadCount, 0)
+    const observations = [...byTimestamp.values()]
+    return { history: { ...first, fromUtc, toUtc, historianReadCount, observations, rawHistoryAvailability: assessRawHistory({ historianReadCount, observations }) }, requestCount: chunks.length }
   }
 
   async search(input: TelemetryEventSearchInput, requestId?: string, abortSignal?: AbortSignal) {

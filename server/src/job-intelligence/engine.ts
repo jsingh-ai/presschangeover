@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { ProductionContextEvidence, TelemetryScalarValue } from '../telemetry/telemetry-contracts.js'
 import type { RadiusPressKey, RadiusStatusSegment } from '../radius/models.js'
+import { isGoodTelemetryQuality } from '../telemetry/historical-telemetry-policy.js'
 import { JOB_ANALYSIS_DIMENSIONS, type EvidenceSupport, type JobAnalysisDimension, type JobGroupDefinition, type JobIdentityCoverage, type JobIdentitySummary, type JobRadiusEpisode, type PressAffinity, type ProductionRun, type RadiusLossSummary, type TransitionSummary } from './contracts.js'
 
 export const JOB_CONTEXT_SETTLING_MS = 5 * 60_000
@@ -16,7 +17,7 @@ interface ContextChange { atUtc: string; field: JobAnalysisDimension; value: str
 interface ContextCluster { startUtc: string; endUtc: string; changes: ContextChange[] }
 type Identities = Partial<Record<JobAnalysisDimension, string>>
 
-const badQuality = (value?: string) => Boolean(value && /bad|invalid|unavailable|no_data|nodata/i.test(value))
+const badQuality = (value?: string) => value !== undefined && !isGoodTelemetryQuality(value)
 const round = (value: number, digits = 1) => { const factor = 10 ** digits; return Math.round(value * factor) / factor }
 const median = (values: number[]): number | null => { if (!values.length) return null; const sorted = [...values].sort((a, b) => a - b); const middle = Math.floor(sorted.length / 2); return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2 }
 const percentile = (values: number[], fraction: number): number | null => { if (!values.length) return null; const sorted = [...values].sort((a, b) => a - b); const position = (sorted.length - 1) * fraction; const low = Math.floor(position); const high = Math.ceil(position); return low === high ? sorted[low]! : sorted[low]! + (sorted[high]! - sorted[low]!) * (position - low) }

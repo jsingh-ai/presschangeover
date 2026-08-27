@@ -50,11 +50,19 @@ export function PhysicalEvidencePanel({ pressKey, fromUtc, toUtc, evidence, show
   const physicalEvents = physicalEventTrack(physical)
   const changedSignals = physical?.signals.filter(({ changes }) => changes.length > 0) ?? []
   const intervalTracks = [...semanticIntervalTracks, ...contextIntervalTracks(context), ...(motionTrack ? [motionTrack] : [])]
+  const historicalMessage = motion?.historicalAvailability?.state === 'SOURCE_TELEMETRY_UNAVAILABLE'
+    ? 'Press telemetry is unavailable during part of this interval; no exact physical boundary is inferred from the silence.'
+    : motion?.historicalAvailability?.state === 'SHARED_COLLECTION_OUTAGE'
+      ? 'A shared telemetry collection outage is corroborated during part of this interval.'
+      : motion?.historicalAvailability?.state === 'INSUFFICIENT_DETAILED_TELEMETRY'
+        ? 'Detailed telemetry is unavailable for this period, so exact physical analysis cannot be reconstructed.'
+        : undefined
 
   return <section className="drawer-section physical-evidence" aria-labelledby="physical-evidence-title">
     <div className="section-heading"><div><p className="eyebrow">Independent source</p><h3 id="physical-evidence-title">Physical telemetry evidence</h3><p>Telemetry is shown as independent physical evidence. It does not correct Radius or redefine the ProcessIntelligence classification.</p></div></div>
     {range.focused && <p className="telemetry-range-note">The selected interval exceeds two hours. Physical detail is focused on the identified two-hour midpoint window; Radius evidence retains the original interval.</p>}
     <p className="quiet-copy">Physical window: {formatPlantDateTime(range.fromUtc)} – {formatPlantDateTime(range.toUtc)} CT</p>
+    {historicalMessage && <p className="telemetry-range-note" role="status">{historicalMessage}</p>}
     {loading && <div className="drawer-loading" role="status">Loading bounded telemetry…</div>}
     {!loading && !capabilities && <p className="message message--warning">Telemetry capability metadata is temporarily unavailable. Radius and classification evidence remain available.</p>}
     {showTimeline && !loading && (semanticIntervalTracks.length > 0 || capabilities) && <SynchronizedTimeline fromUtc={range.fromUtc} toUtc={range.toUtc} ariaLabel={`${capabilities?.displayName ?? pressKey} synchronized wall-clock evidence`} intervalTracks={intervalTracks} numericTracks={speedTrack ? [speedTrack] : []} eventTracks={[contextEvents, physicalEvents].filter((track): track is NonNullable<typeof track> => Boolean(track))} />}

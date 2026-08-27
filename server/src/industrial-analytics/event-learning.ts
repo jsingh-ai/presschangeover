@@ -1,4 +1,5 @@
 import type { TelemetryScalarValue, TelemetryValueKind } from '../telemetry/telemetry-contracts.js'
+import { isGoodTelemetryQuality } from '../telemetry/historical-telemetry-policy.js'
 
 export const EVENT_LEARNING_LIMITS = {
   maximumCohortOccurrences: 30,
@@ -110,7 +111,7 @@ export interface EventLearningReport {
 }
 
 function signalKey(signal: Pick<EventLearningSignal, 'canonicalId' | 'deckNumber'>) { return `${signal.canonicalId}:${signal.deckNumber ?? ''}` }
-function usableQuality(value?: string) { return !value || !/(bad|invalid|unavailable|no.?data|not.?connected|error)/i.test(value) }
+function usableQuality(value?: string) { return value === undefined || isGoodTelemetryQuality(value) }
 function round(value: number, digits = 2) { const scale = 10 ** digits; return Math.round(value * scale) / scale }
 function median(values: number[]) { const sorted = [...values].sort((a, b) => a - b); if (!sorted.length) return null; const middle = Math.floor(sorted.length / 2); return sorted.length % 2 ? sorted[middle]! : (sorted[middle - 1]! + sorted[middle]!) / 2 }
 function quantile(values: number[], percentile: number) { const sorted = [...values].sort((a, b) => a - b); return sorted.length ? sorted[Math.floor((sorted.length - 1) * percentile)]! : null }

@@ -38,6 +38,21 @@ export type TelemetryScalarValue = number | boolean | string
 export type TelemetryRepresentation = 'samples' | 'changes'
 export type ProductionContextField = 'job' | 'order' | 'recipe' | 'customer' | 'material' | 'roll'
 export type PhysicalEvidenceCategory = 'context' | 'deck_states' | 'register' | 'impression' | 'wash' | 'pump' | 'viscosity' | 'ink_temperature'
+export type DetailedHistoryState = 'DETAILED_AVAILABLE' | 'SOURCE_TELEMETRY_UNAVAILABLE' | 'SHARED_COLLECTION_OUTAGE' | 'INSUFFICIENT_DETAILED_TELEMETRY' | 'UNKNOWN'
+
+export interface HistoricalTelemetryAvailabilityInterval {
+  fromUtc: string
+  toUtc: string
+  state: 'SOURCE_TELEMETRY_UNAVAILABLE' | 'SHARED_COLLECTION_OUTAGE'
+  witnessCount: number
+}
+
+export interface HistoricalTelemetryAvailability {
+  state: DetailedHistoryState
+  detailedTelemetryAvailable: boolean
+  intervals: HistoricalTelemetryAvailabilityInterval[]
+  reason: string
+}
 
 export interface SignalCapability {
   canonicalId: string
@@ -155,6 +170,7 @@ export interface PressMotionEvidence extends PressRef, TimeRange {
   policy: Record<string, unknown>
   summary: { durationsMs: Record<PhysicalState, number>; durationsSeconds?: Record<PhysicalState, number>; segmentCount: number }
   segments: TimedStateInterval[]
+  historicalAvailability?: HistoricalTelemetryAvailability
 }
 
 export interface CuratedPhysicalEvidence extends PressRef, TimeRange {
@@ -172,6 +188,7 @@ export interface PressSemanticHistoryEvidence extends PressRef, TimeRange {
   sourceKey: string
   includeSeed: boolean
   signals: SemanticSignalEvidence[]
+  readDiagnostics?: { historicalAvailability?: HistoricalTelemetryAvailability }
 }
 
 export interface NumericWindowSummary { count: number; median: number | null; minimum: number | null; maximum: number | null; iqr: number | null }

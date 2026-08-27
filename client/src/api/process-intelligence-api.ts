@@ -63,7 +63,7 @@ import type {
   TelemetryRepresentation,
 } from '../types/evidence'
 import type { ChangeoverInspector, ChangeoverReport, ChangeoverRequest } from '../types/changeover'
-import type { StopIntelligenceDetail, StopIntelligenceFleetReport } from '../types/stop-intelligence'
+import type { StopIntelligenceCorrection, StopIntelligenceDetail, StopIntelligenceFleetReport, StopOperatorState, StopPredictedState } from '../types/stop-intelligence'
 
 export class ApiRequestError extends Error {
   constructor(public readonly status: number) {
@@ -181,12 +181,16 @@ export function getJobIntelligenceReport(input: { pressKey: RadiusPressKey; from
   return getJson<JobIntelligenceReport>(`/api/job-intelligence/report?${parameters}`, signal)
 }
 
-export function getStopIntelligenceFleet(fromUtc: string, toUtc: string, signal?: AbortSignal) {
-  return getJson<StopIntelligenceFleetReport>(`/api/stop-intelligence/fleet?${rangeQuery(fromUtc, toUtc)}`, signal)
+export function getStopIntelligenceFleet(pressKey: RadiusPressKey, fromUtc: string, toUtc: string, signal?: AbortSignal) {
+  return getJson<StopIntelligenceFleetReport>(`/api/stop-intelligence/fleet?pressKey=${encodeURIComponent(pressKey)}&${rangeQuery(fromUtc, toUtc)}`, signal)
 }
 
 export function getStopIntelligenceDetail(input: { pressKey: RadiusPressKey; stopId: string; fromUtc: string; toUtc: string }, signal?: AbortSignal) {
   return getJson<StopIntelligenceDetail>(`/api/stop-intelligence/presses/${input.pressKey}/stops/${encodeURIComponent(input.stopId)}?${rangeQuery(input.fromUtc, input.toUtc)}`, signal)
+}
+
+export function recordStopIntelligenceCorrection(input: { pressKey: RadiusPressKey; segmentKey: string; fromUtc: string; toUtc: string; predictedState: StopPredictedState; correctedState: StopOperatorState; comment?: string | null }, signal?: AbortSignal) {
+  return sendJson<StopIntelligenceCorrection>('/api/stop-intelligence/corrections', 'POST', input, signal)
 }
 
 function changeoverParameters(input: ChangeoverRequest): URLSearchParams {

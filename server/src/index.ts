@@ -5,6 +5,7 @@ import { createRadiusService } from './radius/create-radius-service.js'
 import { createClassificationAuthorizer, createClassificationService } from './classification/create-classification-service.js'
 import { ClassifiedRadiusService } from './classification/classified-radius-service.js'
 import { createRawTelemetryReviewService } from './raw-radius-explorer/raw-telemetry-review-service.js'
+import { createStopIntelligenceCorrectionService } from './stop-intelligence/correction-service.js'
 
 const config = loadServerConfig()
 const telemetryClient = new TelemetryApiClient(config.telemetryApi)
@@ -12,8 +13,10 @@ const classificationService = createClassificationService(config.classificationD
 await classificationService.initialize()
 const rawTelemetryReviewService = createRawTelemetryReviewService(config.classificationDatabase)
 await rawTelemetryReviewService.initialize()
+const stopIntelligenceCorrectionService = createStopIntelligenceCorrectionService(config.classificationDatabase)
+await stopIntelligenceCorrectionService.initialize()
 const radiusService = new ClassifiedRadiusService(createRadiusService(config.radius, config.plantTimeZone), classificationService)
-const app = createApp({ telemetryClient, radiusService, classificationService, classificationAuthorizer: createClassificationAuthorizer(config.classificationDatabase.enabled), rawTelemetryReviewService })
+const app = createApp({ telemetryClient, radiusService, classificationService, classificationAuthorizer: createClassificationAuthorizer(config.classificationDatabase.enabled), rawTelemetryReviewService, stopIntelligenceCorrectionService })
 
 app.listen(config.port, config.host, () => {
   console.log(

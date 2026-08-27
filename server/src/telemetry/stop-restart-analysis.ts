@@ -1,4 +1,5 @@
 import type { TelemetrySample } from './telemetry-contracts.js'
+import { isGoodTelemetryQuality } from './historical-telemetry-policy.js'
 
 export const PHYSICAL_SPEED_POLICY = {
   stoppedBelow: 1,
@@ -75,7 +76,8 @@ export function numericObservations(samples: TelemetrySample[] | NumericObservat
   return samples.flatMap((sample) => {
     const value = 'value' in sample ? sample.value : undefined
     const atUtc = 'observedAtUtc' in sample ? sample.observedAtUtc : sample.atUtc
-    return typeof value === 'number' && Number.isFinite(value) && Number.isFinite(Date.parse(atUtc)) ? [{ atUtc, value }] : []
+    const qualityUsable = !('qualityState' in sample) || isGoodTelemetryQuality(sample.qualityState)
+    return qualityUsable && typeof value === 'number' && Number.isFinite(value) && Number.isFinite(Date.parse(atUtc)) ? [{ atUtc, value }] : []
   }).sort((left, right) => Date.parse(left.atUtc) - Date.parse(right.atUtc))
 }
 

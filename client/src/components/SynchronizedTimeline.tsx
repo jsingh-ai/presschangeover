@@ -10,6 +10,7 @@ export interface TimelineIntervalItem {
   startUtc: string
   endUtc: string
   label: string
+  compactLabel?: string
   details?: string
   className?: string
   style?: CSSProperties
@@ -21,6 +22,8 @@ export interface TimelineIntervalTrack {
   label: string
   intervals: TimelineIntervalItem[]
   unavailableLabel?: string
+  className?: string
+  alwaysShowLabels?: boolean
 }
 
 export interface TimelineNumericTrack {
@@ -33,8 +36,10 @@ export interface TimelineNumericTrack {
   interpolation?: 'linear' | 'step'
   holdLastObservation?: boolean
   referenceLines?: Array<{ value: number; label: string }>
-  markers?: Array<{ atUtc: string; label: string; kind?: 'start' | 'trigger' | 'extreme' | 'end' | 'baseline' }>
+  markers?: Array<{ atUtc: string; label: string; kind?: 'start' | 'trigger' | 'extreme' | 'end' | 'baseline' | 'radius-change'; details?: string; color?: string; value?: number | null }>
+  highlightedRanges?: Array<{ fromUtc: string; toUtc: string; label: string }>
   breakIntervals?: Array<{ fromUtc: string; toUtc: string }>
+  showCursorValue?: boolean
 }
 
 export interface TimelineEvent {
@@ -98,7 +103,8 @@ export interface SynchronizedTimelineProps {
   minimumCanvasWidth?: number
   highlightedRange?: { fromUtc: string; toUtc: string; label: string }
   onInspectionTimeChange?(atUtc: string): void
-  renderInspectionTooltip?(atUtc: string): ReactNode
+  renderInspectionTooltip?(atUtc: string, context: { numericTrackId?: string; numericTrackLabel?: string; intervalItem?: TimelineIntervalItem; intervalTrackId?: string; intervalTrackLabel?: string }): ReactNode
+  renderTrackLabelControls?(track: TimelineIntervalTrack | TimelineNumericTrack | TimelineEventTrack, kind: 'interval' | 'numeric' | 'event'): ReactNode
 }
 
 const INSPECTION_TOOLTIP_GAP = 24
@@ -213,14 +219,24 @@ export function numericPaths(samples: TimedNumericSample[], from: number, span: 
   return { paths, minimum, maximum }
 }
 
-export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolute', elapsedOriginUtc, intervalTracks, numericTracks = [], eventTracks = [], trackOrder, selectedId, onSelect, ariaLabel, minimumCanvasWidth = 760, highlightedRange, onInspectionTimeChange, renderInspectionTooltip }: SynchronizedTimelineProps) {
+export function numericValueAtCursor(track: TimelineNumericTrack, atUtc: string): TimedNumericSample | undefined {
+  const at = Date.parse(atUtc)
+  const observed = track.samples.filter((sample) => Number.isFinite(sample.value) && Number.isFinite(Date.parse(sample.observedAtUtc))).sort((left, right) => Date.parse(left.observedAtUtc) - Date.parse(right.observedAtUtc))
+  if (track.holdLastObservation || track.interpolation === 'step') return observed.filter((sample) => Date.parse(sample.observedAtUtc) <= at).at(-1)
+  return observed.sort((left, right) => Math.abs(Date.parse(left.observedAtUtc) - at) - Math.abs(Date.parse(right.observedAtUtc) - at))[0]
+}
+
+export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolute', elapsedOriginUtc, intervalTracks, numericTracks = [], eventTracks = [], trackOrder, selectedId, onSelect, ariaLabel, minimumCanvasWidth = 760, highlightedRange, onInspectionTimeChange, renderInspectionTooltip, renderTrackLabelControls }: SynchronizedTimelineProps) {
   const from = Date.parse(fromUtc)
   const to = Date.parse(toUtc)
   const span = Math.max(1, to - from)
   const labelOrigin = coordinateMode === 'elapsed' && elapsedOriginUtc ? Date.parse(elapsedOriginUtc) : from
   const [hovered, setHovered] = useState<TimelineIntervalItem>()
+  const [hoveredIntervalTrackId, setHoveredIntervalTrackId] = useState<string>()
   const [hoveredEventUtc, setHoveredEventUtc] = useState<string>()
+  const [hoveredNumericTrackId, setHoveredNumericTrackId] = useState<string>()
   const [crosshair, setCrosshair] = useState<number>()
+  const [crosshairLeft, setCrosshairLeft] = useState<number>()
   const [tooltipAnchor, setTooltipAnchor] = useState<{ x: number; y: number }>()
   const [selectedEventCluster, setSelectedEventCluster] = useState<string>()
   const [expandedEventGroups, setExpandedEventGroups] = useState<Set<string>>(() => new Set())
@@ -233,11 +249,14 @@ export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolut
     width: Math.min(1 - Math.min(1, Math.max(0, (Date.parse(highlightedRange.fromUtc) - from) / span)), Math.max(0, (Math.min(to, Date.parse(highlightedRange.toUtc)) - Math.max(from, Date.parse(highlightedRange.fromUtc))) / span)),
   } : undefined
   const inspectionUtc = crosshair === undefined ? undefined : new Date(from + span * crosshair / 100).toISOString()
-  const inspectionContent = inspectionUtc && renderInspectionTooltip ? renderInspectionTooltip(inspectionUtc) : null
+  const hoveredNumericTrack = numericTracks.find((track) => track.id === hoveredNumericTrackId)
+  const hoveredIntervalTrack = intervalTracks.find((track) => track.id === hoveredIntervalTrackId)
+  const inspectionContent = inspectionUtc && renderInspectionTooltip ? renderInspectionTooltip(inspectionUtc, { numericTrackId: hoveredNumericTrackId, numericTrackLabel: hoveredNumericTrack?.label, intervalItem: hovered, intervalTrackId: hoveredIntervalTrackId, intervalTrackLabel: hoveredIntervalTrack?.label }) : null
 
   const eventDescription = (event: TimelineEvent) => `${event.label}. ${formatPlantDateTime(event.atUtc)} CT${coordinateMode === 'elapsed' ? `, ${timeLabel(event.atUtc, labelOrigin, coordinateMode)} elapsed` : ''}${event.detail ? `. ${event.detail}` : ''}`
-  const focusInterval = (item: TimelineIntervalItem) => {
+  const focusInterval = (item: TimelineIntervalItem, trackId: string) => {
     setHovered(item)
+    setHoveredIntervalTrackId(trackId)
     const midpoint = (Date.parse(item.startUtc) + Date.parse(item.endUtc)) / 2
     updateCrosshair(Math.min(100, Math.max(0, (midpoint - from) / span * 100)))
   }
@@ -264,16 +283,21 @@ export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolut
   function moveCrosshair(event: PointerEvent<HTMLDivElement>) {
     const plot = event.currentTarget.querySelector<HTMLElement>('.synchronized-timeline__track, .synchronized-timeline__numeric, .synchronized-timeline__events')
     const bounds = plot?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect()
-    updateCrosshair(Math.min(100, Math.max(0, (event.clientX - bounds.left) / Math.max(1, bounds.width) * 100)), { x: event.clientX, y: event.clientY })
+    const pointerX = Math.min(bounds.right, Math.max(bounds.left, event.clientX))
+    const canvasBounds = canvasRef.current?.getBoundingClientRect()
+    updateCrosshair(Math.min(100, Math.max(0, (pointerX - bounds.left) / Math.max(1, bounds.width) * 100)), { x: event.clientX, y: event.clientY }, canvasBounds ? pointerX - canvasBounds.left - (canvasRef.current?.clientLeft ?? 0) : undefined)
   }
 
-  function updateCrosshair(percent: number, anchor?: { x: number; y: number }) {
+  function updateCrosshair(percent: number, anchor?: { x: number; y: number }, exactLeft?: number) {
     const resolved = Math.min(100, Math.max(0, percent))
     setCrosshair(resolved)
+    const plot = canvasRef.current?.querySelector<HTMLElement>('.synchronized-timeline__track, .synchronized-timeline__numeric, .synchronized-timeline__events')
+    const plotBounds = plot?.getBoundingClientRect()
+    const canvasBounds = canvasRef.current?.getBoundingClientRect()
+    setCrosshairLeft(exactLeft ?? (plotBounds && canvasBounds ? plotBounds.left - canvasBounds.left - (canvasRef.current?.clientLeft ?? 0) + plotBounds.width * resolved / 100 : undefined))
     if (anchor) setTooltipAnchor(anchor)
     else {
-      const bounds = canvasRef.current?.getBoundingClientRect()
-      if (bounds) setTooltipAnchor({ x: bounds.left + bounds.width * resolved / 100, y: bounds.top + Math.min(bounds.height / 2, 160) })
+      if (plotBounds && canvasBounds) setTooltipAnchor({ x: plotBounds.left + plotBounds.width * resolved / 100, y: canvasBounds.top + Math.min(canvasBounds.height / 2, 160) })
     }
     onInspectionTimeChange?.(new Date(from + span * resolved / 100).toISOString())
   }
@@ -288,30 +312,33 @@ export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolut
 
   return <div className="synchronized-timeline" aria-label={ariaLabel}>
     <div className="synchronized-timeline__scroll" tabIndex={0} aria-label={`Scrollable ${coordinateMode === 'absolute' ? 'wall-clock' : 'elapsed-time'} timeline. Use Left and Right Arrow keys to move the inspection time; Shift moves farther.`} onKeyDown={moveCrosshairWithKeyboard}>
-      <div ref={canvasRef} className="synchronized-timeline__canvas" style={canvasStyle} onPointerMove={moveCrosshair} onPointerLeave={() => { setCrosshair(undefined); setTooltipAnchor(undefined); setHovered(undefined); setHoveredEventUtc(undefined) }}>
-        <div className="synchronized-timeline__axis"><time>{timeLabel(fromUtc, labelOrigin, coordinateMode)}</time><span>{coordinateMode === 'absolute' ? 'Wall clock' : 'Elapsed Run time'}</span><time>{timeLabel(toUtc, labelOrigin, coordinateMode)}</time></div>
+      <div ref={canvasRef} className="synchronized-timeline__canvas" style={canvasStyle} onPointerMove={moveCrosshair} onPointerLeave={() => { setCrosshair(undefined); setCrosshairLeft(undefined); setTooltipAnchor(undefined); setHovered(undefined); setHoveredIntervalTrackId(undefined); setHoveredEventUtc(undefined); setHoveredNumericTrackId(undefined) }}>
+        <div className="synchronized-timeline__axis"><time>{timeLabel(fromUtc, labelOrigin, coordinateMode)}</time><span>{coordinateMode === 'absolute' ? 'Wall clock · CT' : 'Elapsed Run time'}</span><time>{timeLabel(toUtc, labelOrigin, coordinateMode)}</time></div>
         {highlightedGeometry && <div className="synchronized-timeline__highlight" style={{ '--timeline-highlight-start': highlightedGeometry.start, '--timeline-highlight-width': highlightedGeometry.width } as CSSProperties} title={highlightedRange?.label} aria-hidden="true" />}
-        {intervalTracks.map((track) => <div className="synchronized-timeline__row" key={track.id} style={rowOrder('interval', track.id)}>
-          <strong>{track.label}</strong>
+        {intervalTracks.map((track) => <div className={`synchronized-timeline__row ${track.className ?? ''}`.trim()} key={track.id} style={rowOrder('interval', track.id)}>
+          <strong>{renderTrackLabelControls?.(track, 'interval')}<span className="synchronized-timeline__track-label-text">{track.label}</span></strong>
           <div className="synchronized-timeline__track" role="group" aria-label={`${track.label} intervals`}>
             {track.intervals.length ? track.intervals.map((item) => {
               const left = Math.max(0, (Date.parse(item.startUtc) - from) / span * 100)
               const width = Math.max(.12, Math.min(100 - left, (Date.parse(item.endUtc) - Date.parse(item.startUtc)) / span * 100))
               const linked = hovered ? overlap(item, hovered) : hoveredEventUtc ? Date.parse(item.startUtc) <= Date.parse(hoveredEventUtc) && Date.parse(item.endUtc) > Date.parse(hoveredEventUtc) : false
-              return <button type="button" key={item.id} className={`synchronized-timeline__interval ${item.className ?? ''} ${item.unavailable ? 'is-unavailable' : ''} ${linked ? 'is-linked' : ''} ${selectedId === item.id ? 'is-selected' : ''}`.trim()} style={{ left: `${left}%`, width: `${width}%`, ...item.style }} title={item.details} aria-label={item.details?.replaceAll('\n', '. ') ?? `${item.label}, ${timeLabel(item.startUtc, labelOrigin, coordinateMode)} to ${timeLabel(item.endUtc, labelOrigin, coordinateMode)}`} onMouseEnter={() => focusInterval(item)} onFocus={() => focusInterval(item)} onMouseLeave={() => { setHovered(undefined); setCrosshair(undefined) }} onBlur={() => { setHovered(undefined); setCrosshair(undefined) }} onClick={() => onSelect?.(item, track)}>{width >= 4 && <span>{item.label}</span>}</button>
+              const useCompactLabel = item.compactLabel && width < Math.min(20, Math.max(6, item.label.length * .62))
+              return <button type="button" key={item.id} className={`synchronized-timeline__interval ${item.className ?? ''} ${item.unavailable ? 'is-unavailable' : ''} ${linked ? 'is-linked' : ''} ${selectedId === item.id ? 'is-selected' : ''}`.trim()} style={{ left: `${left}%`, width: `${width}%`, ...item.style }} title={item.details} aria-label={item.details?.replaceAll('\n', '. ') ?? `${item.label}, ${timeLabel(item.startUtc, labelOrigin, coordinateMode)} to ${timeLabel(item.endUtc, labelOrigin, coordinateMode)}`} onMouseEnter={() => focusInterval(item, track.id)} onFocus={() => focusInterval(item, track.id)} onMouseLeave={() => { setHovered(undefined); setHoveredIntervalTrackId(undefined); setCrosshair(undefined) }} onBlur={() => { setHovered(undefined); setHoveredIntervalTrackId(undefined); setCrosshair(undefined) }} onClick={() => onSelect?.(item, track)}>{(track.alwaysShowLabels || width >= 4) && <span>{useCompactLabel ? item.compactLabel : item.label}</span>}</button>
             }) : <span className="synchronized-timeline__empty">{track.unavailableLabel ?? 'No observed state in this range'}</span>}
           </div>
         </div>)}
         {numericGeometry.map(({ track, geometry }) => <div className="synchronized-timeline__row synchronized-timeline__row--numeric" key={track.id} style={rowOrder('numeric', track.id)}>
-          <strong>{track.label}{track.unit ? <small>{track.unit}</small> : null}</strong>
-          <div className="synchronized-timeline__numeric" role="img" aria-label={`${track.label}. ${track.samples.length ? `${track.samples.length} observed samples from ${geometry.minimum} to ${geometry.maximum}${track.unit ? ` ${track.unit}` : ''}` : track.unavailableLabel ?? 'No samples in this range'}`}>
+          <strong>{renderTrackLabelControls?.(track, 'numeric')}<span className="synchronized-timeline__track-label-text">{track.label}{track.unit ? <small>{track.unit}</small> : null}</span></strong>
+          <div className="synchronized-timeline__numeric" role="img" aria-label={`${track.label}. ${track.samples.length ? `${track.samples.length} observed samples from ${geometry.minimum} to ${geometry.maximum}${track.unit ? ` ${track.unit}` : ''}` : track.unavailableLabel ?? 'No samples in this range'}`} onPointerEnter={() => setHoveredNumericTrackId(track.id)} onPointerLeave={() => setHoveredNumericTrackId((current) => current === track.id ? undefined : current)}>
+            {track.highlightedRanges?.filter((range) => Date.parse(range.toUtc) >= from && Date.parse(range.fromUtc) <= to).map((range, index) => { const left = Math.max(0, (Date.parse(range.fromUtc) - from) / span * 100); const right = Math.min(100, (Date.parse(range.toUtc) - from) / span * 100); return <i key={`${range.fromUtc}:${range.toUtc}:${index}`} className="synchronized-timeline__numeric-highlight" style={{ left: `${left}%`, width: `${Math.max(.15, right - left)}%` }} title={range.label} aria-hidden="true" /> })}
             {track.samples.length ? <svg viewBox="0 0 1000 88" preserveAspectRatio="none" aria-hidden="true">{geometry.paths.map((path, index) => <path key={index} d={path} />)}</svg> : <span>{track.unavailableLabel ?? 'No samples in this range'}</span>}
             {track.referenceLines?.map((line) => { const valueSpan = Math.max(1, geometry.maximum - geometry.minimum); const top = (6 + (geometry.maximum - line.value) / valueSpan * 76) / 88 * 100; return <i key={`${line.label}:${line.value}`} className="synchronized-timeline__reference-line" style={{ top: `${top}%` }} title={line.label}><b>{line.label}</b></i> })}
-            {track.markers?.filter(({ atUtc }) => Date.parse(atUtc) >= from && Date.parse(atUtc) <= to).map((marker) => <i key={`${marker.kind}:${marker.atUtc}:${marker.label}`} className={`synchronized-timeline__numeric-marker synchronized-timeline__numeric-marker--${marker.kind ?? 'event'}`} style={{ left: `${(Date.parse(marker.atUtc) - from) / span * 100}%` }} title={`${marker.label} · ${timeLabel(marker.atUtc, labelOrigin, coordinateMode)}`}><b>{marker.label}</b></i>)}
+            {track.markers?.filter(({ atUtc }) => Date.parse(atUtc) >= from && Date.parse(atUtc) <= to).map((marker) => { const valueSpan = Math.max(1, geometry.maximum - geometry.minimum); const markerTop = marker.value === null || marker.value === undefined ? undefined : (6 + (geometry.maximum - marker.value) / valueSpan * 76) / 88 * 100; const description = marker.details ?? `${marker.label} · ${timeLabel(marker.atUtc, labelOrigin, coordinateMode)}`; return <i key={`${marker.kind}:${marker.atUtc}:${marker.label}`} tabIndex={0} aria-label={description.replaceAll('\n', '. ')} className={`synchronized-timeline__numeric-marker synchronized-timeline__numeric-marker--${marker.kind ?? 'event'}`} style={{ left: `${(Date.parse(marker.atUtc) - from) / span * 100}%`, '--timeline-marker-color': marker.color, '--timeline-marker-top': markerTop === undefined ? undefined : `${markerTop}%` } as CSSProperties} title={description}><b>{marker.label}</b></i> })}
+            {track.showCursorValue && hoveredNumericTrackId === track.id && inspectionUtc && (() => { const sample = numericValueAtCursor(track, inspectionUtc); return <output className="synchronized-timeline__numeric-cursor-value" style={{ '--timeline-position': (crosshair ?? 0) / 100 } as CSSProperties}><b>{track.label}</b><time>{timeLabel(inspectionUtc, labelOrigin, coordinateMode)}{coordinateMode === 'absolute' ? ' CT' : ''}</time><strong>{sample ? `${Math.round(sample.value * 100) / 100}${track.unit ? ` ${track.unit}` : ''}` : 'No observed value'}</strong></output> })()}
           </div>
         </div>)}
         {eventGeometry.map(({ track, clusters }) => <div className="synchronized-timeline__row synchronized-timeline__row--events" key={track.id} style={rowOrder('event', track.id)}>
-          <strong>{track.label}</strong>
+          <strong>{renderTrackLabelControls?.(track, 'event')}<span className="synchronized-timeline__track-label-text">{track.label}</span></strong>
           <div className="synchronized-timeline__event-column">
             <div className="synchronized-timeline__events" role="group" aria-label={`${track.label} event markers`}>
               {clusters.length ? clusters.map((cluster) => {
@@ -323,7 +350,7 @@ export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolut
             {clusters.map((cluster) => selectedEventCluster === cluster.id && <div className="synchronized-timeline__event-detail" role="region" aria-label="Selected event details" key={`detail:${cluster.id}`}><header><strong>{cluster.events.length === 1 ? 'Observed event' : `${cluster.events.length} events`}</strong><span>{groupTimelineEvents(cluster.events).length} {groupTimelineEvents(cluster.events).length === 1 ? 'change group' : 'change groups'}</span></header><div className="synchronized-timeline__event-groups">{groupTimelineEvents(cluster.events).map((group) => { const groupId = `${cluster.id}:${group.key}`; const expanded = expandedEventGroups.has(groupId); const visible = expanded ? group.events : group.events.slice(0, 6); return <section key={group.key} className="synchronized-timeline__event-group"><div><strong>{group.label}</strong><b>{group.events.length}</b></div><ol>{visible.map((event) => <li key={event.id}><time>{formatPlantDateTime(event.atUtc)} CT</time><span>{event.label}</span></li>)}</ol>{group.events.length > 6 && <button type="button" className="secondary-action" onClick={() => toggleEventGroup(groupId)}>{expanded ? 'Show first 6' : `Show all ${group.events.length}`}</button>}</section> })}</div></div>)}
           </div>
         </div>)}
-        {crosshair !== undefined && <div className="synchronized-timeline__crosshair" style={{ '--timeline-position': crosshair / 100 } as CSSProperties} aria-hidden="true" />}
+        {crosshair !== undefined && <div className="synchronized-timeline__crosshair" style={{ '--timeline-position': crosshair / 100, left: crosshairLeft === undefined ? undefined : `${crosshairLeft}px` } as CSSProperties} aria-hidden="true" />}
       </div>
     </div>
     {crosshair !== undefined && tooltipAnchor && inspectionContent && typeof document !== 'undefined' && <ViewportInspectionTooltip anchor={tooltipAnchor}>{inspectionContent}</ViewportInspectionTooltip>}

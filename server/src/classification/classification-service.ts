@@ -33,7 +33,7 @@ export class ClassificationForbiddenError extends Error {
   constructor() { super('classification_forbidden'); this.name = 'ClassificationForbiddenError' }
 }
 
-function assertEditor(actor: ClassificationActor) {
+export function assertClassificationEditor(actor: ClassificationActor) {
   if (!actor.canEdit) throw new ClassificationForbiddenError()
 }
 
@@ -167,7 +167,7 @@ export class ClassificationService {
   }
 
   async createDraft(actor: ClassificationActor, expectedVersion?: number) {
-    assertEditor(actor)
+    assertClassificationEditor(actor)
     const [published, current] = await Promise.all([this.repository.getPublished(), this.repository.getDraft()])
     if (current) return current
     if (expectedVersion !== undefined && expectedVersion !== published.version) throw new ClassificationConflictError()
@@ -178,7 +178,7 @@ export class ClassificationService {
   }
 
   private async editableDraft(actor: ClassificationActor, expectedRevision: number | null) {
-    assertEditor(actor)
+    assertClassificationEditor(actor)
     const current = await this.repository.getDraft()
     if (!current) {
       if (expectedRevision !== null) throw new ClassificationConflictError()
@@ -249,7 +249,7 @@ export class ClassificationService {
   async validateCurrentDraft(observed: ObservedRadiusIdentity[]) { return this.validateDraft(await this.repository.getDraft(), observed) }
 
   async publish(actor: ClassificationActor, expectedRevision: number, observed: ObservedRadiusIdentity[]) {
-    assertEditor(actor)
+    assertClassificationEditor(actor)
     const draft = await this.repository.getDraft()
     if (!draft || draft.revision !== expectedRevision) throw new ClassificationConflictError()
     const validation = this.validateDraft(draft, observed)
@@ -258,7 +258,7 @@ export class ClassificationService {
   }
 
   async discard(actor: ClassificationActor, expectedRevision: number) {
-    assertEditor(actor)
+    assertClassificationEditor(actor)
     const change = nowChange(actor, 'DRAFT_DISCARDED', 'draft', 'Discarded the current classification draft.')
     await this.repository.discardDraft(expectedRevision, change)
   }

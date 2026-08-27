@@ -246,11 +246,12 @@ test('raw telemetry history requests one exact raw identity and preserves suppor
   let body: Record<string, unknown> = {}
   const client = new TelemetryApiClient({ baseUrl: 'http://telemetry.internal:5080', timeoutMs: 500 }, async (_input, init) => {
     body = JSON.parse(String(init?.body))
-    return jsonResponse({ press: 'press12', displayName: 'Press 12', rawIdentity: 'Press12.unique.state', signalDisplayName: 'state', dataType: 'integer', dataKind: 'state', sourceUnit: null, plottable: true, fromUtc: '2026-08-14T16:45:00.000Z', toUtc: '2026-08-14T16:55:00.000Z', historianReadCount: 1, alternateRepresentationCount: 0, alternateRawIdentities: [], observations: [{ timestampUtc: '2026-08-14T16:46:00.000Z', receivedAtUtc: '2026-08-14T16:46:01.000Z', sourceTimestampUtc: '2026-08-14T16:46:00.000Z', qualityState: 'GOOD', dataType: 'integer', rawValue: 10 }] })
+    return jsonResponse({ press: 'press12', displayName: 'Press 12', rawIdentity: 'Press12.unique.state', signalDisplayName: 'state', dataType: 'integer', dataKind: 'state', sourceUnit: null, plottable: true, fromUtc: '2026-08-14T16:45:00.000Z', toUtc: '2026-08-14T16:55:00.000Z', historianReadCount: 1, alternateRepresentationCount: 0, alternateRawIdentities: [], observations: [{ timestampUtc: '2026-08-14T16:46:00.000Z', receivedAtUtc: '2026-08-14T16:46:01.000Z', sourceTimestampUtc: null, qualityState: 'GOOD', dataType: 'integer', rawValue: 10 }] })
   })
   const result = await client.getRawTelemetryHistory({ press: 'press12', rawIdentity: 'Press12.unique.state', fromUtc: '2026-08-14T16:45:00.000Z', toUtc: '2026-08-14T16:55:00.000Z' })
   assert.deepEqual(body, { press: 'press12', rawIdentity: 'Press12.unique.state', fromUtc: '2026-08-14T16:45:00.000Z', toUtc: '2026-08-14T16:55:00.000Z' })
   assert.equal(result.observations[0]?.timestampUtc, '2026-08-14T16:46:00.000Z')
+  assert.equal(result.observations[0]?.sourceTimestampUtc, null)
   assert.equal(result.observations[0]?.rawValue, 10)
 })
 

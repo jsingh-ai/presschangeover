@@ -3,9 +3,9 @@ import type { RadiusPressKey } from './api'
 export type StopClassification = 'CHANGEOVER' | 'DOWNTIME' | 'UNCERTAIN' | 'IGNORE_BAD_DATA'
 export type StopConfidence = 'HIGH' | 'MEDIUM' | 'LOW'
 export type RadiusAlignment = 'AGREES' | 'PARTIAL' | 'RADIUS_LATE' | 'RADIUS_EARLY' | 'RADIUS_UNAVAILABLE' | 'CONTRADICTORY'
-export type StopEvidenceState = 'AVAILABLE' | 'UNKNOWN_COLLECTION' | 'UNKNOWN_SPEED_QUALITY'
+export type StopEvidenceState = 'AVAILABLE' | 'SOURCE_TELEMETRY_UNAVAILABLE' | 'SHARED_COLLECTION_OUTAGE' | 'INSUFFICIENT_DETAILED_TELEMETRY' | 'UNKNOWN_SPEED_QUALITY'
 export type ChangeoverActionConfidence = 'DETECTED' | 'INFERRED' | 'UNKNOWN'
-export type ChangeoverActionCode = 'PREVIOUS_JOB_FINISHED' | 'JOB_IDENTITY_TRANSITION' | 'DECK_MOVEMENT' | 'WASH_ACTIVITY' | 'INK_PUMP_ACTIVITY' | 'SLOW_SETUP_RUN' | 'IMPRESSION_ADJUSTMENT' | 'REGISTRATION_ADJUSTMENT' | 'ANILOX_ACTIVITY' | 'COLOR_RELATED_ACTIVITY' | 'TRIAL_RUN' | 'FAILED_RECOVERY' | 'PHYSICAL_RECOVERY' | 'VISTAPORT_ACTIVITY' | 'CHOPOVER' | 'KNIFE_CUTTING_ACTIVITY' | 'MASTER_IMAGE_RUN'
+export type ChangeoverActionCode = 'PREVIOUS_JOB_FINISHED' | 'JOB_IDENTITY_TRANSITION' | 'ROLL_TRANSITION' | 'DECK_MOVEMENT' | 'WASH_ACTIVITY' | 'INK_PUMP_ACTIVITY' | 'IMPRESSION_ADJUSTMENT' | 'REGISTRATION_ADJUSTMENT' | 'ANILOX_ACTIVITY' | 'COLOR_RELATED_ACTIVITY' | 'UNCANONICALIZED_RAW_ACTIVITY' | 'TRIAL_RUN' | 'FAILED_RECOVERY' | 'PHYSICAL_RECOVERY' | 'VISTAPORT_ACTIVITY' | 'CHOPOVER' | 'KNIFE_CUTTING_ACTIVITY' | 'MASTER_IMAGE_RUN'
 
 export interface ChangeoverActionEvidence {
   signalId: number | null
@@ -73,12 +73,29 @@ export interface StopFleetPressSummary {
   speedContext: {
     fromUtc: string
     toUtc: string
-    unit: 'ft/min'
+    unit: string | null
     stopThreshold: number
     recoveryThreshold: number
     observations: Array<{ atUtc: string; speed: number | null; qualityState: string }>
-    unknownIntervals: Array<{ fromUtc: string; toUtc: string; state: 'UNKNOWN_COLLECTION' | 'UNKNOWN_SPEED_QUALITY' }>
+    unknownIntervals: Array<{ fromUtc: string; toUtc: string; state: Exclude<StopEvidenceState, 'AVAILABLE'> }>
   }
+  radiusContext: {
+    states: Array<{ kind: 'radius' | 'offline'; startUtc: string; endUtc: string; eventType: string | null; statusCode: string | null; statusDescription: string | null; isProduction: boolean }>
+    reason: string
+  }
+  identityContext: Array<{
+    signalId: number | null
+    canonicalId: 'production.order' | 'production.recipe'
+    rawIdentity: string | null
+    observations: Array<{ atUtc: string; value: string | number | boolean; qualityState: string }>
+  }>
+  rollLengthContext: {
+    signalId: number | null
+    canonicalId: 'production.roll.length.actual'
+    rawIdentity: string | null
+    unit: string | null
+    observations: Array<{ atUtc: string; value: number; qualityState: string }>
+  } | null
 }
 
 export interface StopIntelligenceFleetReport {
@@ -87,6 +104,22 @@ export interface StopIntelligenceFleetReport {
   algorithmVersion: string
   classificationVersion: string
   presses: StopFleetPressSummary[]
+  operatorCorrections: StopIntelligenceCorrection[]
+  correctionPersistence: 'postgresql' | 'memory'
+}
+
+export type StopPredictedState = StopClassification | 'OBSERVABLE_NON_STOP' | 'UNKNOWN'
+export type StopOperatorState = 'CHANGEOVER' | 'DOWNTIME' | 'UNCERTAIN' | 'ROUTINE' | 'GOOD_PRODUCTION'
+export interface StopIntelligenceCorrection {
+  correctionId: string
+  pressKey: RadiusPressKey
+  segmentKey: string
+  fromUtc: string
+  toUtc: string
+  predictedState: StopPredictedState
+  correctedState: StopOperatorState
+  comment: string | null
+  createdAtUtc: string
 }
 
 export interface MovementAttempt {
@@ -204,11 +237,39 @@ export interface StopIntelligenceDetail {
   speedContext: {
     fromUtc: string
     toUtc: string
-    unit: 'ft/min'
+    unit: string | null
     stopThreshold: number
     recoveryThreshold: number
     observations: Array<{ atUtc: string; speed: number | null; qualityState: string }>
-    unknownIntervals: Array<{ fromUtc: string; toUtc: string; state: 'UNKNOWN_COLLECTION' | 'UNKNOWN_SPEED_QUALITY' }>
+    unknownIntervals: Array<{ fromUtc: string; toUtc: string; state: Exclude<StopEvidenceState, 'AVAILABLE'> }>
+  }
+  radiusContext: {
+    fromUtc: string
+    toUtc: string
+    states: Array<{ kind: 'radius' | 'offline'; startUtc: string; endUtc: string; eventType: string | null; statusCode: string | null; statusDescription: string | null; isProduction: boolean }>
+    reason: string
+  }
+  actionSignalContext: Array<{
+    signalId: number | null
+    canonicalId: string
+    rawIdentity: string | null
+    component: string | null
+    deckNumber: number | null
+    unit: string | null
+    representation: 'samples' | 'changes'
+    observations: Array<{ atUtc: string; value: string | number | boolean; qualityState: string }>
+  }>
+  deckStatusContext: {
+    fromUtc: string
+    toUtc: string
+    availability: 'AVAILABLE' | 'PARTIAL' | 'UNAVAILABLE'
+    reason: string
+    sourceIdentities: Array<{ role: 'active' | 'deck_out' | 'print_on' | 'print_off'; rawIdentity: string }>
+    decks: Array<{
+      deckNumber: number
+      intervals: Array<{ startUtc: string; endUtc: string; state: 'PRINTING' | 'OUT' | 'READY' | 'INACTIVE' | 'UNKNOWN'; active: boolean | null; printing: boolean | null; out: boolean | null }>
+      events: Array<{ atUtc: string; kind: 'PRINT_OFF_COMMAND'; label: string }>
+    }>
   }
   changeoverActions: {
     eligible: boolean

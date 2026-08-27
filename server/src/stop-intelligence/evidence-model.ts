@@ -1,7 +1,8 @@
 import { JOB_CONTEXT_SETTLING_MS, usableJobIdentity } from '../job-intelligence/engine.js'
 import type { RadiusPressKey } from '../radius/models.js'
 import type { PressSemanticSignalWithIdentity } from '../telemetry/telemetry-foundation-service.js'
-import type { TelemetryChange, TelemetrySample } from '../telemetry/telemetry-contracts.js'
+import type { TelemetryChange, TelemetrySample, TelemetryScalarValue } from '../telemetry/telemetry-contracts.js'
+import { isGoodTelemetryQuality } from '../telemetry/historical-telemetry-policy.js'
 import type { PhysicalStopSegment, StopFamilyEvidence, StopIdentityAssociationConfiguration, StopIdentityEvidence, StopIdentityField, StopIdentityUsefulness, StopSetupFamily } from './contracts.js'
 
 export const STOP_FAMILY_EVIDENCE_WINDOW_MS = JOB_CONTEXT_SETTLING_MS
@@ -27,13 +28,25 @@ const IDENTITY_DEFINITIONS: Record<'press14' | 'press15', IdentityDefinition[]> 
 }
 
 export function stopIdentityDefinitions(pressKey: RadiusPressKey): IdentityDefinition[] {
-  return pressKey === 'press14' || pressKey === 'press15' ? IDENTITY_DEFINITIONS[pressKey] : []
+  if (pressKey === 'press14' || pressKey === 'press15') return IDENTITY_DEFINITIONS[pressKey]
+  const displayName = pressKey.replace('press', 'Press ')
+  return [
+    { field: 'order', canonicalId: 'production.order', usefulness: 'STRONG', reason: `${displayName} Order is canonical primary job identity evidence.` },
+    { field: 'recipe', canonicalId: 'production.recipe', usefulness: 'STRONG', reason: `${displayName} Recipe is canonical primary product identity evidence.` },
+    { field: 'customer', canonicalId: 'production.customer', usefulness: 'WEAK', reason: `${displayName} Customer is canonical supporting context only.` },
+    { field: 'material', canonicalId: 'production.material', usefulness: 'WEAK', reason: `${displayName} Material is canonical supporting context only.` },
+  ]
+}
+
+/** Only direct state/command/selection telemetry can establish Anilox activity. Natural torque, temperature, speed, and current decay are process context. */
+export function isDirectAniloxActivitySignal(canonicalId: string): boolean {
+  return /^anilox\.(?:drive\.)?(?:active|engaged|position|selection|selected|change|command|mode)(?:\.|$)/i.test(canonicalId)
 }
 
 export const STOP_FAMILY_CANONICAL_PATTERNS: Array<{ family: StopSetupFamily; matches: (canonicalId: string) => boolean }> = [
   { family: 'DECK', matches: (value) => value.startsWith('deck.') },
-  { family: 'ANILOX', matches: (value) => value.startsWith('anilox.drive.') },
-  { family: 'WASH_PUMP_INK', matches: (value) => value === 'ink.washup.state' || value === 'ink.pump.status' || value.startsWith('ink.viscosity.') || value.startsWith('ink.temperature.') },
+  { family: 'ANILOX', matches: isDirectAniloxActivitySignal },
+  { family: 'WASH_PUMP_INK', matches: (value) => value === 'ink.washup.state' || value === 'ink.pump.status' || value === 'ink.pump.sequence' || value === 'ink.pump.frequency.supply' || value === 'ink.pump.frequency.return' || value === 'ink.viscosity.mode' || value === 'ink.viscosity.status' },
   { family: 'IMPRESSION', matches: (value) => value.startsWith('impression.') },
   { family: 'REGISTRATION', matches: (value) => value.startsWith('register.') },
   { family: 'WINDER_CORE_WIDTH', matches: (value) => /(?:winder|core.*width|width.*core)/i.test(value) },
@@ -41,9 +54,10 @@ export const STOP_FAMILY_CANONICAL_PATTERNS: Array<{ family: StopSetupFamily; ma
 ]
 
 const validTime = (value: string) => Number.isFinite(Date.parse(value))
-const goodQuality = (value: string) => !/bad|false|invalid|unavailable|no_data|nodata/i.test(value)
+const goodQuality = isGoodTelemetryQuality
 const scalarKey = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? String(value) : typeof value === 'string' || typeof value === 'boolean' ? String(value).trim() : ''
 const segmentEnd = (segment: PhysicalStopSegment, rangeEndUtc: string) => Date.parse(segment.endAt ?? rangeEndUtc)
+const PUMP_FREQUENCY_CONTEXT_MS = 15 * 60_000
 
 function identityClusters(signal: PressSemanticSignalWithIdentity, evidenceCutoffUtc: string): IdentityCluster[] {
   const cutoff = Date.parse(evidenceCutoffUtc)
@@ -110,11 +124,46 @@ function activityPoints(signal: PressSemanticSignalWithIdentity, fromMs: number,
   return new Set(samples.map((value) => scalarKey(value.value))).size > 1 ? samples : []
 }
 
+export interface PumpFrequencyActivityTransition { point: TelemetrySample; previousValue: TelemetryScalarValue }
+
+/**
+ * Frequency is analog operating context, not an action merely because it moves.
+ * Keep only on/off boundary behavior that is distinct from behavior seen on both
+ * sides of the physical stop.
+ */
+export function contextualPumpFrequencyActivity(signal: PressSemanticSignalWithIdentity, fromMs: number, toMs: number, stopStartMs: number, stopEndMs: number): PumpFrequencyActivityTransition[] {
+  if (!signal.canonicalId.startsWith('ink.pump.frequency.')) return []
+  const active = (value: TelemetryScalarValue | null) => typeof value === 'number' && Number.isFinite(value) ? Math.abs(value) >= 1 : null
+  const transitions: PumpFrequencyActivityTransition[] = signal.changes.flatMap((point) => {
+    const at = Date.parse(point.observedAtUtc); const before = active(point.previousValue); const after = active(point.value)
+    if (!validTime(point.observedAtUtc) || at < fromMs || at > toMs || !goodQuality(point.qualityState) || before === null || after === null || before === after) return []
+    return [{ point, previousValue: point.previousValue }]
+  })
+  if (!transitions.length) {
+    const ordered = [signal.seed, ...signal.samples].filter((point): point is TelemetrySample => Boolean(point) && validTime(point!.observedAtUtc) && Date.parse(point!.observedAtUtc) <= toMs && goodQuality(point!.qualityState)).sort((left, right) => Date.parse(left.observedAtUtc) - Date.parse(right.observedAtUtc))
+    for (let index = 1; index < ordered.length; index += 1) {
+      const previous = ordered[index - 1]!; const point = ordered[index]!; const at = Date.parse(point.observedAtUtc); const before = active(previous.value); const after = active(point.value)
+      if (at >= fromMs && before !== null && after !== null && before !== after) transitions.push({ point, previousValue: previous.value })
+    }
+  }
+  const signature = ({ point }: PumpFrequencyActivityTransition) => active(point.value) ? 'ON' : 'OFF'
+  const before = new Set(transitions.filter(({ point }) => Date.parse(point.observedAtUtc) < stopStartMs).map(signature))
+  const after = new Set(transitions.filter(({ point }) => Date.parse(point.observedAtUtc) >= stopEndMs).map(signature))
+  const repeatedOutside = new Set([...before].filter((value) => after.has(value)))
+  return transitions.filter((transition) => !repeatedOutside.has(signature(transition)))
+}
+
 function familyEvidence(family: StopSetupFamily, signals: PressSemanticSignalWithIdentity[], segment: PhysicalStopSegment, rangeEndUtc: string, evidenceCutoffUtc: string, available: boolean): StopFamilyEvidence {
   const definition = STOP_FAMILY_CANONICAL_PATTERNS.find((value) => value.family === family)!
   const candidates = signals.filter((value) => definition.matches(value.canonicalId))
   const fromMs = Date.parse(segment.startAt) - STOP_FAMILY_EVIDENCE_WINDOW_MS; const toMs = Math.min(segmentEnd(segment, rangeEndUtc) + STOP_FAMILY_EVIDENCE_WINDOW_MS, Date.parse(evidenceCutoffUtc))
-  const observed = candidates.flatMap((signal) => activityPoints(signal, fromMs, toMs).map((point) => ({ signal, point }))).sort((left, right) => Date.parse(left.point.observedAtUtc) - Date.parse(right.point.observedAtUtc))
+  const stopStartMs = Date.parse(segment.startAt); const stopEndMs = segmentEnd(segment, rangeEndUtc)
+  const observed = candidates.flatMap((signal) => {
+    const points = signal.canonicalId.startsWith('ink.pump.frequency.')
+      ? contextualPumpFrequencyActivity(signal, stopStartMs - PUMP_FREQUENCY_CONTEXT_MS, Math.min(stopEndMs + PUMP_FREQUENCY_CONTEXT_MS, Date.parse(evidenceCutoffUtc)), stopStartMs, stopEndMs).map(({ point }) => point).filter((point) => { const at = Date.parse(point.observedAtUtc); return at >= fromMs && at <= toMs })
+      : activityPoints(signal, fromMs, toMs)
+    return points.map((point) => ({ signal, point }))
+  }).sort((left, right) => Date.parse(left.point.observedAtUtc) - Date.parse(right.point.observedAtUtc))
   const identities = new Set(observed.map(({ signal }) => `${signal.canonicalId}:${signal.deckNumber ?? ''}`))
   const deckNumbers = [...new Set(observed.flatMap(({ signal }) => signal.deckNumber === null ? [] : [signal.deckNumber]))].sort((left, right) => left - right)
   return { family, available, observed: observed.length > 0, coordinated: identities.size >= 2 || deckNumbers.length >= 2, changeCount: observed.length, deckNumbers, canonicalIds: [...new Set(observed.map(({ signal }) => signal.canonicalId))], firstObservedAtUtc: observed[0]?.point.observedAtUtc ?? null, lastObservedAtUtc: observed.at(-1)?.point.observedAtUtc ?? null, reason: observed.length ? `${family} activity changed on ${identities.size} independent signal${identities.size === 1 ? '' : 's'} around the physical stop.` : `No changing ${family} evidence was observed around the physical stop.` }

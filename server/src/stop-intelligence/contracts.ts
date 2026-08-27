@@ -1,9 +1,10 @@
 import type { RadiusPressKey } from '../radius/models.js'
+import type { StopIntelligenceCorrection } from './correction-service.js'
 
 export const STOP_INTELLIGENCE_ALGORITHM_VERSION = 'stop-intelligence-physical-v1.0.0'
-export const STOP_INTELLIGENCE_CONFIG_VERSION = 'stop-intelligence-config-v1.0.0'
-export const STOP_INTELLIGENCE_CLASSIFICATION_VERSION = 'stop-intelligence-classification-v2.0.0'
-export const STOP_INTELLIGENCE_ACTION_VERSION = 'stop-intelligence-actions-v1.0.0'
+export const STOP_INTELLIGENCE_CONFIG_VERSION = 'stop-intelligence-config-v1.1.0'
+export const STOP_INTELLIGENCE_CLASSIFICATION_VERSION = 'stop-intelligence-classification-v2.2.0'
+export const STOP_INTELLIGENCE_ACTION_VERSION = 'stop-intelligence-actions-v1.3.0'
 export const STOP_SPEED_THRESHOLD_DEFAULT = 1
 export const STOP_RECOVERY_THRESHOLD_DEFAULT = 595
 export const STOP_RECOVERY_CONFIRMATION_SECONDS_DEFAULT = 300
@@ -11,9 +12,9 @@ export const STOP_IDENTITY_CONTEXT_BEFORE_SECONDS_DEFAULT = 3_600
 export const STOP_IDENTITY_CONTEXT_AFTER_SECONDS_DEFAULT = 3_600
 export const STOP_IDENTITY_SETTLING_SECONDS = 300
 
-export type TelemetryEvidenceState = 'AVAILABLE' | 'UNKNOWN_COLLECTION' | 'UNKNOWN_SPEED_QUALITY'
+export type TelemetryEvidenceState = 'AVAILABLE' | 'SOURCE_TELEMETRY_UNAVAILABLE' | 'SHARED_COLLECTION_OUTAGE' | 'INSUFFICIENT_DETAILED_TELEMETRY' | 'UNKNOWN_SPEED_QUALITY'
 export type NormalizedSpeedQuality = 'GOOD' | 'BAD'
-export type StopCensorReason = 'RANGE_START' | 'RANGE_END' | 'UNKNOWN_COLLECTION' | 'UNKNOWN_SPEED_QUALITY'
+export type StopCensorReason = 'RANGE_START' | 'RANGE_END' | Exclude<TelemetryEvidenceState, 'AVAILABLE'>
 export type StopClassification = 'CHANGEOVER' | 'DOWNTIME' | 'UNCERTAIN' | 'IGNORE_BAD_DATA'
 export type StopClassificationConfidence = 'HIGH' | 'MEDIUM' | 'LOW'
 export type StopEvidenceStrength = 'STRONG' | 'MEDIUM' | 'WEAK' | 'SUPPORTING'
@@ -22,7 +23,7 @@ export type StopIdentityUsefulness = 'STRONG' | 'MEDIUM' | 'WEAK' | 'UNUSABLE' |
 export type StopSetupFamily = 'DECK' | 'ANILOX' | 'WASH_PUMP_INK' | 'IMPRESSION' | 'REGISTRATION' | 'WINDER_CORE_WIDTH' | 'WEB_TENSION_SETPOINT'
 export type RadiusAlignment = 'AGREES' | 'PARTIAL' | 'RADIUS_LATE' | 'RADIUS_EARLY' | 'RADIUS_UNAVAILABLE' | 'CONTRADICTORY'
 export type ChangeoverActionConfidence = 'DETECTED' | 'INFERRED' | 'UNKNOWN'
-export type ChangeoverActionCode = 'PREVIOUS_JOB_FINISHED' | 'JOB_IDENTITY_TRANSITION' | 'DECK_MOVEMENT' | 'WASH_ACTIVITY' | 'INK_PUMP_ACTIVITY' | 'SLOW_SETUP_RUN' | 'IMPRESSION_ADJUSTMENT' | 'REGISTRATION_ADJUSTMENT' | 'ANILOX_ACTIVITY' | 'COLOR_RELATED_ACTIVITY' | 'TRIAL_RUN' | 'FAILED_RECOVERY' | 'PHYSICAL_RECOVERY' | 'VISTAPORT_ACTIVITY' | 'CHOPOVER' | 'KNIFE_CUTTING_ACTIVITY' | 'MASTER_IMAGE_RUN'
+export type ChangeoverActionCode = 'PREVIOUS_JOB_FINISHED' | 'JOB_IDENTITY_TRANSITION' | 'ROLL_TRANSITION' | 'DECK_MOVEMENT' | 'WASH_ACTIVITY' | 'INK_PUMP_ACTIVITY' | 'IMPRESSION_ADJUSTMENT' | 'REGISTRATION_ADJUSTMENT' | 'ANILOX_ACTIVITY' | 'COLOR_RELATED_ACTIVITY' | 'UNCANONICALIZED_RAW_ACTIVITY' | 'TRIAL_RUN' | 'FAILED_RECOVERY' | 'PHYSICAL_RECOVERY' | 'VISTAPORT_ACTIVITY' | 'CHOPOVER' | 'KNIFE_CUTTING_ACTIVITY' | 'MASTER_IMAGE_RUN'
 
 export interface CanonicalSpeedConfiguration {
   pressKey: RadiusPressKey
@@ -238,6 +239,23 @@ export interface StopFleetPressSummary {
   warningReason: string | null
   episodes: StopFleetEpisode[]
   speedContext: StopSpeedContext
+  radiusContext: {
+    states: Array<{ kind: 'radius' | 'offline'; startUtc: string; endUtc: string; eventType: string | null; statusCode: string | null; statusDescription: string | null; isProduction: boolean }>
+    reason: string
+  }
+  identityContext: Array<{
+    signalId: number | null
+    canonicalId: 'production.order' | 'production.recipe'
+    rawIdentity: string | null
+    observations: Array<{ atUtc: string; value: string | number | boolean; qualityState: string }>
+  }>
+  rollLengthContext: {
+    signalId: number | null
+    canonicalId: 'production.roll.length.actual'
+    rawIdentity: string | null
+    unit: string | null
+    observations: Array<{ atUtc: string; value: number; qualityState: string }>
+  } | null
 }
 
 export interface StopIntelligenceFleetReport {
@@ -246,12 +264,14 @@ export interface StopIntelligenceFleetReport {
   algorithmVersion: string
   classificationVersion: typeof STOP_INTELLIGENCE_CLASSIFICATION_VERSION
   presses: StopFleetPressSummary[]
+  operatorCorrections: StopIntelligenceCorrection[]
+  correctionPersistence: 'postgresql' | 'memory'
 }
 
 export interface StopSpeedContext {
   fromUtc: string
   toUtc: string
-  unit: 'ft/min'
+  unit: string | null
   stopThreshold: number
   recoveryThreshold: number
   observations: CanonicalSpeedObservation[]
@@ -305,6 +325,28 @@ export interface ChangeoverActionAnalysis {
   detectorVersion: typeof STOP_INTELLIGENCE_ACTION_VERSION
 }
 
+export type DeckStatusState = 'PRINTING' | 'OUT' | 'READY' | 'INACTIVE' | 'UNKNOWN'
+
+export interface StopDeckStatusContext {
+  fromUtc: string
+  toUtc: string
+  availability: 'AVAILABLE' | 'PARTIAL' | 'UNAVAILABLE'
+  reason: string
+  sourceIdentities: Array<{ role: 'active' | 'deck_out' | 'print_on' | 'print_off'; rawIdentity: string }>
+  decks: Array<{
+    deckNumber: number
+    intervals: Array<{
+      startUtc: string
+      endUtc: string
+      state: DeckStatusState
+      active: boolean | null
+      printing: boolean | null
+      out: boolean | null
+    }>
+    events: Array<{ atUtc: string; kind: 'PRINT_OFF_COMMAND'; label: string }>
+  }>
+}
+
 export interface StopIntelligenceDetail {
   stopId: string
   displayName: string
@@ -314,5 +356,22 @@ export interface StopIntelligenceDetail {
   identityAssociationConfiguration: StopIdentityAssociationConfiguration
   stop: ClassifiedStop
   speedContext: StopSpeedContext
+  radiusContext: {
+    fromUtc: string
+    toUtc: string
+    states: Array<{ kind: 'radius' | 'offline'; startUtc: string; endUtc: string; eventType: string | null; statusCode: string | null; statusDescription: string | null; isProduction: boolean }>
+    reason: string
+  }
+  actionSignalContext: Array<{
+    signalId: number | null
+    canonicalId: string
+    rawIdentity: string | null
+    component: string | null
+    deckNumber: number | null
+    unit: string | null
+    representation: 'samples' | 'changes'
+    observations: Array<{ atUtc: string; value: string | number | boolean; qualityState: string }>
+  }>
+  deckStatusContext: StopDeckStatusContext
   changeoverActions: ChangeoverActionAnalysis
 }
