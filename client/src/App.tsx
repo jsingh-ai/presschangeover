@@ -19,7 +19,7 @@ import { StateClassificationPage } from './components/StateClassificationPage'
 import { RawRadiusExplorerPage } from './components/RawRadiusExplorerPage'
 import { TelemetryEventExplorerPage } from './components/TelemetryEventExplorerPage'
 import { JobIntelligencePage } from './components/JobIntelligencePage'
-import { ChangeoverIntelligencePage } from './components/ChangeoverIntelligencePage'
+import { StopIntelligencePage } from './components/StopIntelligencePage'
 import { areaFromPathname, areaPath, operationalSectionFromSearch, pressFromLocation, type AnalyticsArea, type OperationalSection } from './navigation'
 import { findRadiusSegment } from './segment-selection'
 import { createPresetRange, restoreSelectedRange, type SelectedRange } from './time-ranges'
@@ -80,7 +80,7 @@ function App() {
   const [error, setError] = useState<string>()
   const [pressError, setPressError] = useState<string>()
   const operationsArea = area === 'overview' || area === 'operational-analysis' || area === 'patterns-episodes'
-  const radiusDataArea = operationsArea || area === 'job-intelligence' || area === 'changeover-intelligence' || area === 'raw-radius-explorer' || area === 'telemetry-event-explorer'
+  const radiusDataArea = operationsArea || area === 'job-intelligence' || area === 'stop-intelligence' || area === 'raw-radius-explorer' || area === 'telemetry-event-explorer'
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme
@@ -206,7 +206,7 @@ function App() {
 
   function navigateArea(nextArea: AnalyticsArea, section?: OperationalSection) {
     const nextSection = section ?? analysisSection
-    window.history.pushState({}, '', nextArea === 'raw-radius-explorer' || nextArea === 'telemetry-event-explorer' || nextArea === 'changeover-intelligence' ? areaPath(nextArea) : workspaceUrl(range, selectedPress, undefined, nextArea, nextSection))
+    window.history.pushState({}, '', nextArea === 'raw-radius-explorer' || nextArea === 'telemetry-event-explorer' || nextArea === 'stop-intelligence' ? areaPath(nextArea) : workspaceUrl(range, selectedPress, undefined, nextArea, nextSection))
     setArea(nextArea)
     setAnalysisSection(nextSection)
     setInvestigation(undefined)
@@ -225,7 +225,7 @@ function App() {
   }
 
   function selectPressScope(pressKey: RadiusPressKey | undefined) {
-    if (area === 'job-intelligence' || area === 'changeover-intelligence') {
+    if (area === 'job-intelligence' || area === 'stop-intelligence') {
       const url = new URL(window.location.href)
       if (pressKey) url.searchParams.set('press', pressKey); else url.searchParams.delete('press')
       window.history.pushState({}, '', `${url.pathname}?${url.searchParams}`)
@@ -341,7 +341,7 @@ function App() {
   const rawExplorerContext = <div className="context-summary search-context"><div><span>Engineering evidence</span><strong>Raw Radius Code Explorer</strong><small>Exact recorded Radius states and synchronized telemetry.</small></div><span className={`data-health data-health--${dataStatus}`} role="status"><i aria-hidden="true" />{dataStatus === 'healthy' ? 'Evidence services healthy' : dataStatus === 'loading' ? 'Checking evidence services' : 'Evidence services unavailable'}</span></div>
   const telemetryEventContext = <div className="context-summary search-context"><div><span>Find telemetry behavior</span><strong>Telemetry Event Explorer</strong><small>Threshold and change occurrences with synchronized Radius context.</small></div><span className={`data-health data-health--${dataStatus}`} role="status"><i aria-hidden="true" />{dataStatus === 'healthy' ? 'Evidence services healthy' : dataStatus === 'loading' ? 'Checking evidence services' : 'Evidence services unavailable'}</span></div>
   const jobIntelligenceContext = <div className="context-summary search-context"><div><span>Decision support</span><strong>Job Intelligence</strong><small>Production identity performance, press affinity, and sequence-aware changeovers.</small></div><span className={`data-health data-health--${dataStatus}`} role="status"><i aria-hidden="true" />{dataStatus === 'healthy' ? 'Read-only evidence healthy' : dataStatus === 'loading' ? 'Checking evidence services' : 'Evidence services unavailable'}</span></div>
-  const changeoverIntelligenceContext = <div className="context-summary search-context"><div><span>Deterministic transition analysis</span><strong>Changeover Intelligence</strong><small>Physical speed envelope · settled Order confirmation · Radius explanation.</small></div><span className={`data-health data-health--${dataStatus}`} role="status"><i aria-hidden="true" />{dataStatus === 'healthy' ? 'Read-only evidence healthy' : dataStatus === 'loading' ? 'Checking evidence services' : 'Evidence services unavailable'}</span></div>
+  const stopIntelligenceContext = <div className="context-summary search-context"><div><span>Read-only stop investigation</span><strong>Stop Intelligence</strong><small>Physical behavior · classification evidence · Radius alignment.</small></div><span className={`data-health data-health--${dataStatus}`} role="status"><i aria-hidden="true" />{dataStatus === 'healthy' ? 'Read-only evidence healthy' : dataStatus === 'loading' ? 'Checking evidence services' : 'Evidence services unavailable'}</span></div>
 
   const footer = <details className="system-status-drawer"><summary>System and dependency health</summary><SystemStatus items={[
     { label: 'ProcessIntelligence API', status: apiStatus },
@@ -350,7 +350,7 @@ function App() {
     { label: 'Telemetry historian', status: historianStatus },
   ]} /></details>
 
-  return <ApplicationShell area={area} theme={theme} onNavigate={navigateArea} onToggleTheme={toggleTheme} context={area === 'state-classification' ? administrationContext : area === 'intelligent-search' ? searchContext : area === 'raw-radius-explorer' ? rawExplorerContext : area === 'telemetry-event-explorer' ? telemetryEventContext : area === 'job-intelligence' ? jobIntelligenceContext : area === 'changeover-intelligence' ? changeoverIntelligenceContext : context} footer={footer}>
+  return <ApplicationShell area={area} theme={theme} onNavigate={navigateArea} onToggleTheme={toggleTheme} context={area === 'state-classification' ? administrationContext : area === 'intelligent-search' ? searchContext : area === 'raw-radius-explorer' ? rawExplorerContext : area === 'telemetry-event-explorer' ? telemetryEventContext : area === 'job-intelligence' ? jobIntelligenceContext : area === 'stop-intelligence' ? stopIntelligenceContext : context} footer={footer}>
     {operationsArea && loading && !overview && <section className="panel loading-panel" role="status">Loading Radius operations…</section>}
     {operationsArea && loading && overview && <span className="background-refresh-status" role="status">Updating the selected time range; current results remain visible.</span>}
     {operationsArea && error && !overview && <section className="panel unavailable-panel"><h1>Radius data unavailable</h1><p>{error}</p><p>Dependency health remains available below.</p></section>}
@@ -365,7 +365,7 @@ function App() {
     {area === 'raw-radius-explorer' && <RawRadiusExplorerPage />}
     {area === 'telemetry-event-explorer' && <TelemetryEventExplorerPage />}
     {area === 'job-intelligence' && <JobIntelligencePage range={range} selectedPress={selectedPress} onRangeChange={changeRange} onPressChange={(pressKey) => selectPressScope(pressKey)} />}
-    {area === 'changeover-intelligence' && <ChangeoverIntelligencePage selectedPress={selectedPress} onPressChange={(pressKey) => selectPressScope(pressKey)} />}
+    {area === 'stop-intelligence' && <StopIntelligencePage range={range} selectedPress={selectedPress} onRangeChange={changeRange} onPressChange={selectPressScope} />}
     {area === 'state-classification' && <StateClassificationPage />}
 
     {investigation && !(area === 'overview' && investigation.mode === 'segment') && investigation.mode !== 'status' && investigation.mode !== 'anomaly' && drawerResultPress && (drawerResult || drawerPressLoading || (investigation.mode === 'segment' && drawerSegment)) && <InvestigationDrawer route={investigation} result={drawerResult} episode={episodeDetail} segment={selectedSegmentDetail} finding={selectedFinding} loading={investigation.mode === 'segment' ? false : drawerPressLoading || drawerLoading} onClose={closeInvestigation} onSelectSegment={(nextSegment) => navigateSegment(nextSegment.pressKey, nextSegment)} contextSegments={drawerContextSegments} />}

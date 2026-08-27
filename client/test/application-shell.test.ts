@@ -19,7 +19,7 @@ describe('application shell', () => {
     assert.match(html, /Overview/)
     assert.match(html, /Operational Analysis/)
     assert.match(html, /Job Intelligence/)
-    assert.match(html, /Changeover Intelligence/)
+    assert.match(html, /Stop Intelligence/)
     assert.match(html, /Raw Radius Explorer/)
     assert.match(html, /Telemetry Event Explorer/)
     assert.match(html, /Patterns &amp; Episodes/)

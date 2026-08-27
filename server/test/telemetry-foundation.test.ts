@@ -2,9 +2,10 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import type { TelemetryClient } from '../src/telemetry/telemetry-api-client.js'
-import { TelemetryFoundationService } from '../src/telemetry/telemetry-foundation-service.js'
+import { sourceWideEvidenceGaps, TelemetryFoundationService } from '../src/telemetry/telemetry-foundation-service.js'
 import type { TelemetrySemanticHistoryResponse } from '../src/telemetry/telemetry-contracts.js'
 import { TelemetryApiError } from '../src/telemetry/telemetry-error.js'
+import { parseSemanticHistoryResponse } from '../src/telemetry/telemetry-response-parsers.js'
 import { TelemetrySourceRegistry } from '../src/telemetry/telemetry-source-registry.js'
 import { mixedHistoryFixture, motionFixture, press12CapabilitiesFixture, press12EvidenceFixture, press14CapabilitiesFixture, press14ContextFixture, press14SpeedFixture, press5CapabilitiesFixture, press5SpeedFixture, sourcesFixture } from './fixtures/telemetry-fixtures.js'
 
@@ -121,6 +122,23 @@ test('bounded semantic history preserves detected gaps and reuses identical read
   const query = { fromUtc: start, toUtc: end, includeSeed: false, signals: [{ canonicalId: 'ink.temperature.actual', representation: 'samples' as const }] }
   const first = await service.semanticHistory('press5', query, 'same-analysis'); const second = await service.semanticHistory('press5', query, 'same-analysis')
   assert.equal(calls, 1); assert.equal(first.readDiagnostics?.gaps.length, 1); assert.equal(first.readDiagnostics?.gaps[0]?.startUtc, at(2)); assert.equal(first.readDiagnostics?.gaps[0]?.endUtc, at(30)); assert.equal(second.readDiagnostics?.cacheHits, 1)
+})
+
+test('source-wide availability preserves quiet transition-first telemetry with heartbeat witnesses', () => {
+  const start = '2026-08-17T00:00:00.000Z'; const atMinute = (minute: number) => new Date(Date.parse(start) + minute * 60_000).toISOString()
+  const points = (minutes: number[]) => minutes.map((minute) => ({ observedAtUtc: atMinute(minute), receivedAtUtc: atMinute(minute), sourceTimestampUtc: atMinute(minute), qualityState: 'GOOD', valueKind: 'numeric' as const, value: 0 }))
+  const signal = (canonicalId: string, minutes: number[]) => ({ canonicalId, deckNumber: null, samples: points(minutes), changes: [] })
+  const range = { start, end: atMinute(45) }
+  assert.deepEqual(sourceWideEvidenceGaps([signal('machine.speed.actual', [0, 5, 10, 15, 20, 25, 30, 35, 40]), signal('physical.motion_state', [0, 5, 10, 15, 20, 25, 30, 35, 40])] as never, range), [])
+  assert.deepEqual(sourceWideEvidenceGaps([signal('production.recipe', [0, 30]), signal('physical.motion_state', [0, 5, 10, 15, 20, 25, 30, 35, 40])] as never, range), [])
+  assert.deepEqual(sourceWideEvidenceGaps([signal('machine.speed.actual', [0, 5, 10, 35, 40]), signal('physical.motion_state', [0, 5, 10, 15, 20, 25, 30, 35, 40])] as never, range), [])
+})
+
+test('source-wide availability marks a corroborated multi-signal heartbeat outage', () => {
+  const start = '2026-08-17T00:00:00.000Z'; const atMinute = (minute: number) => new Date(Date.parse(start) + minute * 60_000).toISOString()
+  const signal = (canonicalId: string, minutes: number[]) => ({ canonicalId, deckNumber: null, samples: minutes.map((minute) => ({ observedAtUtc: atMinute(minute), receivedAtUtc: atMinute(minute), sourceTimestampUtc: atMinute(minute), qualityState: 'GOOD', valueKind: 'numeric' as const, value: minute })), changes: [] })
+  const gaps = sourceWideEvidenceGaps([signal('machine.speed.actual', [0, 5, 10, 35, 40, 45]), signal('physical.motion_state', [0, 5, 10, 35, 40, 45])] as never, { start, end: atMinute(45) })
+  assert.deepEqual(gaps, [{ startUtc: atMinute(10), endUtc: atMinute(35), durationMs: 25 * 60_000, witnessCount: 2 }])
 })
 
 test('analysis cache reuses exact, selector-subset, contained-range, and combined reads with exact clipping', async () => {
@@ -241,6 +259,15 @@ test('telemetry cancellation and outage remain typed and independent', async () 
   await assert.rejects(new TelemetryFoundationService(baseClient()).sources.resolve('press5', undefined, controller.signal), (error: unknown) => error instanceof TelemetryApiError && error.kind === 'cancelled')
   const down = new TelemetryFoundationService(baseClient({ getSources: async () => { throw new TelemetryApiError('unavailable') } }))
   await assert.rejects(down.speed('press5', press14SpeedFixture.fromUtc, press14SpeedFixture.toUtc), (error: unknown) => error instanceof TelemetryApiError && error.kind === 'unavailable')
+})
+
+test('semantic history preserves a missing source timestamp without rejecting valid historian time', () => {
+  const signal = mixedHistoryFixture.signals[0]!
+  const seedSample = { ...(signal.seedSample ?? signal.samples[0]!), sourceTimestampUtc: null }
+  const parsed = parseSemanticHistoryResponse({ ...mixedHistoryFixture, signals: [{ ...signal, seedSample, samples: [], changes: [] }] })
+  assert.equal(parsed.signals[0]?.seedSample?.sourceTimestampUtc, null)
+  assert.ok(parsed.signals[0]?.seedSample?.observedAtUtc)
+  assert.ok(parsed.signals[0]?.seedSample?.receivedAtUtc)
 })
 
 test('telemetry foundation contains no database writes and uses read-only upstream routes', async () => {

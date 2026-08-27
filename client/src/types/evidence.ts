@@ -64,7 +64,7 @@ export interface PressTelemetryCapabilities extends PressRef {
 export interface TimedTelemetryValue {
   observedAtUtc: string
   receivedAtUtc: string
-  sourceTimestampUtc: string
+  sourceTimestampUtc: string | null
   qualityState: string
   valueKind: TelemetryValueKind
   value: TelemetryScalarValue
@@ -78,7 +78,7 @@ export interface TimedNumericSample extends TimedTelemetryValue {
 export interface TelemetryChange extends TimedTelemetryValue {
   previousObservedAtUtc: string
   previousReceivedAtUtc: string
-  previousSourceTimestampUtc: string
+  previousSourceTimestampUtc: string | null
   previousQualityState: string
   previousValueKind: TelemetryValueKind
   previousValue: TelemetryScalarValue

@@ -33,9 +33,12 @@ import { JOB_ANALYSIS_DIMENSIONS, JOB_GROUP_OPERATORS, type JobGroupDefinition }
 import { JOB_INTELLIGENCE_MAX_RANGE_MS, JobIntelligenceService } from './job-intelligence/service.js'
 import { CHANGEOVER_CONFIRMATION_SECONDS_DEFAULT, CHANGEOVER_RECOVERY_SPEED_DEFAULT, CHANGEOVER_STOP_SPEED_DEFAULT, type ChangeoverMode } from './changeover-intelligence/contracts.js'
 import { ChangeoverIntelligenceService } from './changeover-intelligence/service.js'
+import { canonicalSpeedConfiguration } from './stop-intelligence/configuration.js'
+import { StopIntelligenceConfigurationError, StopIntelligenceService } from './stop-intelligence/service.js'
 
 const MAX_PHYSICAL_STATE_RANGE_MS = 2 * 60 * 60 * 1_000
 const MAX_RADIUS_RANGE_MS = 31 * 24 * 60 * 60 * 1_000
+const MAX_STOP_INTELLIGENCE_RANGE_MS = 24 * 60 * 60 * 1_000
 const SAFE_REQUEST_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/
 const UTC_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/
 const DEFAULT_CLASSIFICATION_SEARCH_LIMIT = 10
@@ -463,6 +466,20 @@ function parseChangeoverQuery(query: Request['query']) {
   return { fromUtc, toUtc, mode, stopSpeed, recoverySpeed, recoveryConfirmationSeconds, focusPressKey }
 }
 
+function parseStopIntelligenceQuery(query: Request['query']) {
+  const { fromUtc, toUtc } = validateRadiusRange(query)
+  const pressKey = parsePressKey(String(query.pressKey ?? ''))
+  if (!canonicalSpeedConfiguration(pressKey)) throw new RequestValidationError('stop_intelligence_press_not_configured')
+  if (Date.parse(toUtc) - Date.parse(fromUtc) > MAX_STOP_INTELLIGENCE_RANGE_MS) throw new RequestValidationError('stop_intelligence_range_too_large')
+  return { pressKey, fromUtc, toUtc }
+}
+
+function parseStopIntelligenceRange(query: Request['query']) {
+  const { fromUtc, toUtc } = validateRadiusRange(query)
+  if (Date.parse(toUtc) - Date.parse(fromUtc) > MAX_STOP_INTELLIGENCE_RANGE_MS) throw new RequestValidationError('stop_intelligence_range_too_large')
+  return { fromUtc, toUtc }
+}
+
 function parsePressKey(value: string | string[]): RadiusPressKey {
   if (
     Array.isArray(value) ||
@@ -504,6 +521,7 @@ export function createApp({
   const telemetryEventExplorer = new TelemetryEventExplorerService(telemetry, radiusService, rawRadiusExplorer)
   const jobIntelligence = new JobIntelligenceService(radiusService, telemetry)
   const changeoverIntelligence = new ChangeoverIntelligenceService(radiusService, telemetry)
+  const stopIntelligence = new StopIntelligenceService(telemetry, radiusService)
   const observedIdentityCache = new ObservedIdentityCache(
     () => radiusService.getObservedIdentities?.() ?? Promise.resolve([]),
     { onRefreshError: () => { if (logger) logger.error('classification_observed_identity_refresh_unavailable') } },
@@ -669,6 +687,24 @@ export function createApp({
 
   app.get('/api/changeover-intelligence/report', asyncRoute(async (request, response) => {
     response.status(200).json(await changeoverIntelligence.report(parseChangeoverQuery(request.query), String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.get('/api/stop-intelligence/presses/:pressKey', asyncRoute(async (request, response) => {
+    const query = parseStopIntelligenceQuery({ ...request.query, pressKey: request.params.pressKey })
+    response.status(200).json(await stopIntelligence.analyze(query, String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.get('/api/stop-intelligence/fleet', asyncRoute(async (request, response) => {
+    response.status(200).json(await stopIntelligence.fleet(parseStopIntelligenceRange(request.query), String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
+  app.get('/api/stop-intelligence/presses/:pressKey/stops/:stopId', asyncRoute(async (request, response) => {
+    const query = parseStopIntelligenceQuery({ ...request.query, pressKey: request.params.pressKey })
+    const stopId = request.params.stopId
+    if (Array.isArray(stopId) || !/^press(?:14|15)-\d{1,16}$/.test(stopId)) throw new RequestValidationError('invalid_stop_intelligence_stop_id')
+    const detail = await stopIntelligence.detail({ ...query, stopId }, String(response.locals.requestId), cancellationSignal(request, response))
+    if (!detail) { response.status(404).json({ error: 'stop_intelligence_stop_not_found' }); return }
+    response.status(200).json(detail)
   }))
 
   app.get('/api/changeover-intelligence/changeovers/:changeoverId', asyncRoute(async (request, response) => {
@@ -991,6 +1027,12 @@ export function createApp({
       if (error instanceof ClassificationForbiddenError) { response.status(403).json({ error: 'classification_forbidden' }); return }
       if (error instanceof ClassificationConflictError) { response.status(409).json({ error: 'classification_draft_conflict' }); return }
       if (error instanceof ClassificationValidationError) { response.status(422).json({ error: 'classification_validation_failed', details: error.errors }); return }
+
+      if (error instanceof StopIntelligenceConfigurationError) {
+        if (logger) logger.error(`[${requestId}] ${request.method} ${request.path} 503 stop_intelligence_mapping_unavailable`)
+        response.status(503).json({ status: 'unavailable', service: 'StopIntelligence' })
+        return
+      }
 
       if (error instanceof TelemetryApiError) {
         const status = error.kind === 'not_found' || error.kind === 'unsupported_source' ? 404 : error.kind === 'request_invalid' ? 400 : error.kind === 'payload_too_large' ? 413 : 503

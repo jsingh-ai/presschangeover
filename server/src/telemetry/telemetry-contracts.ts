@@ -101,7 +101,7 @@ export interface RawTelemetryHistoryResponse {
 export interface TelemetrySample {
   observedAtUtc: string
   receivedAtUtc: string
-  sourceTimestampUtc: string
+  sourceTimestampUtc: string | null
   qualityState: string
   valueKind: TelemetryValueKind
   value: TelemetryScalarValue
@@ -110,7 +110,7 @@ export interface TelemetrySample {
 export interface TelemetryChange extends TelemetrySample {
   previousObservedAtUtc: string
   previousReceivedAtUtc: string
-  previousSourceTimestampUtc: string
+  previousSourceTimestampUtc: string | null
   previousQualityState: string
   previousValueKind: TelemetryValueKind
   previousValue: TelemetryScalarValue
@@ -268,6 +268,13 @@ export interface TelemetryEvidenceGap {
   durationMs: number
 }
 
+export interface TelemetrySourceEvidenceGap {
+  startUtc: string
+  endUtc: string
+  durationMs: number
+  witnessCount: number
+}
+
 export interface BoundedTelemetryReadDiagnostics {
   requestedRange: { start: string; end: string }
   chunkCount: number
@@ -283,6 +290,8 @@ export interface BoundedTelemetryReadDiagnostics {
   pointsRetained: number
   boundaryDuplicatesRemoved: number
   gaps: TelemetryEvidenceGap[]
+  /** Corroborated inactivity shared by at least two regularly observed signals. */
+  sourceGaps?: TelemetrySourceEvidenceGap[]
   requests?: Array<{
     pressKey: string
     selectorCount: number

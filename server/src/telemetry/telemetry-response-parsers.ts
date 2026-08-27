@@ -26,6 +26,12 @@ export function requireNumber(record: JsonRecord, key: string): number { const v
 export function requireInteger(record: JsonRecord, key: string): number { const value = requireNumber(record, key); return Number.isSafeInteger(value) ? value : invalid() }
 export function requireTimestamp(record: JsonRecord, key: string): string { const value = requireString(record, key); return Number.isFinite(Date.parse(value)) ? value : invalid() }
 
+function nullableTimestamp(record: JsonRecord, key: string): string | null {
+  const value = record[key]
+  if (value === null) return null
+  return typeof value === 'string' && value.length > 0 && Number.isFinite(Date.parse(value)) ? value : invalid()
+}
+
 function nullableString(record: JsonRecord, key: string): string | null {
   const value = record[key]
   return value === null ? null : typeof value === 'string' ? value : invalid()
@@ -54,7 +60,7 @@ export function parseTelemetrySample(value: unknown): TelemetrySample {
   return {
     observedAtUtc: requireTimestamp(record, 'observedAtUtc'),
     receivedAtUtc: requireTimestamp(record, 'receivedAtUtc'),
-    sourceTimestampUtc: requireTimestamp(record, 'sourceTimestampUtc'),
+    sourceTimestampUtc: nullableTimestamp(record, 'sourceTimestampUtc'),
     qualityState: requireString(record, 'qualityState'),
     valueKind: kind,
     value: scalar(kind, record.value),
@@ -69,7 +75,7 @@ export function parseTelemetryChange(value: unknown): TelemetryChange {
     ...current,
     previousObservedAtUtc: requireTimestamp(record, 'previousObservedAtUtc'),
     previousReceivedAtUtc: requireTimestamp(record, 'previousReceivedAtUtc'),
-    previousSourceTimestampUtc: requireTimestamp(record, 'previousSourceTimestampUtc'),
+    previousSourceTimestampUtc: nullableTimestamp(record, 'previousSourceTimestampUtc'),
     previousQualityState: requireString(record, 'previousQualityState'),
     previousValueKind: previousKind,
     previousValue: scalar(previousKind, record.previousValue),

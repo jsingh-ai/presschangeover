@@ -63,6 +63,7 @@ import type {
   TelemetryRepresentation,
 } from '../types/evidence'
 import type { ChangeoverInspector, ChangeoverReport, ChangeoverRequest } from '../types/changeover'
+import type { StopIntelligenceDetail, StopIntelligenceFleetReport } from '../types/stop-intelligence'
 
 export class ApiRequestError extends Error {
   constructor(public readonly status: number) {
@@ -178,6 +179,14 @@ export function getJobIntelligenceReport(input: { pressKey: RadiusPressKey; from
     if (input.group.delimiter !== undefined) parameters.set('delimiter', input.group.delimiter)
   }
   return getJson<JobIntelligenceReport>(`/api/job-intelligence/report?${parameters}`, signal)
+}
+
+export function getStopIntelligenceFleet(fromUtc: string, toUtc: string, signal?: AbortSignal) {
+  return getJson<StopIntelligenceFleetReport>(`/api/stop-intelligence/fleet?${rangeQuery(fromUtc, toUtc)}`, signal)
+}
+
+export function getStopIntelligenceDetail(input: { pressKey: RadiusPressKey; stopId: string; fromUtc: string; toUtc: string }, signal?: AbortSignal) {
+  return getJson<StopIntelligenceDetail>(`/api/stop-intelligence/presses/${input.pressKey}/stops/${encodeURIComponent(input.stopId)}?${rangeQuery(input.fromUtc, input.toUtc)}`, signal)
 }
 
 function changeoverParameters(input: ChangeoverRequest): URLSearchParams {

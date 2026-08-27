@@ -34,6 +34,7 @@ export interface TimelineNumericTrack {
   holdLastObservation?: boolean
   referenceLines?: Array<{ value: number; label: string }>
   markers?: Array<{ atUtc: string; label: string; kind?: 'start' | 'trigger' | 'extreme' | 'end' | 'baseline' }>
+  breakIntervals?: Array<{ fromUtc: string; toUtc: string }>
 }
 
 export interface TimelineEvent {
@@ -174,7 +175,7 @@ function timeLabel(value: string, from: number, coordinateMode: TimelineCoordina
   return `${hours ? `${hours}h ` : ''}${minutes ? `${minutes}m ` : ''}${remainder}s`
 }
 
-export function numericPaths(samples: TimedNumericSample[], from: number, span: number, width: number, height: number, connectObservedGaps = false, interpolation: 'linear' | 'step' = 'linear', holdLastObservation = false, referenceValues: number[] = []): { paths: string[]; minimum: number; maximum: number } {
+export function numericPaths(samples: TimedNumericSample[], from: number, span: number, width: number, height: number, connectObservedGaps = false, interpolation: 'linear' | 'step' = 'linear', holdLastObservation = false, referenceValues: number[] = [], breakIntervals: Array<{ fromUtc: string; toUtc: string }> = []): { paths: string[]; minimum: number; maximum: number } {
   const to = from + span
   const observed = samples.filter(({ observedAtUtc, value }) => Number.isFinite(Date.parse(observedAtUtc)) && Number.isFinite(value) && Date.parse(observedAtUtc) <= to).sort((left, right) => Date.parse(left.observedAtUtc) - Date.parse(right.observedAtUtc))
   const seed = observed.filter(({ observedAtUtc }) => Date.parse(observedAtUtc) <= from).at(-1)
@@ -190,7 +191,8 @@ export function numericPaths(samples: TimedNumericSample[], from: number, span: 
   visible.forEach((sample, index) => {
     const timestamp = Date.parse(sample.observedAtUtc)
     const previous = visible[index - 1]
-    if (!connectObservedGaps && previous && timestamp - Date.parse(previous.observedAtUtc) > maximumConnectedGap) {
+    const crossesExplicitBreak = previous && breakIntervals.some((interval) => Date.parse(interval.fromUtc) < timestamp && Date.parse(interval.toUtc) > Date.parse(previous.observedAtUtc))
+    if (previous && (crossesExplicitBreak || !connectObservedGaps && timestamp - Date.parse(previous.observedAtUtc) > maximumConnectedGap)) {
       if (current.length) paths.push(current.join(' '))
       current = []
     }
@@ -224,7 +226,7 @@ export function SynchronizedTimeline({ fromUtc, toUtc, coordinateMode = 'absolut
   const [expandedEventGroups, setExpandedEventGroups] = useState<Set<string>>(() => new Set())
   const canvasRef = useRef<HTMLDivElement>(null)
   const canvasStyle = { '--timeline-min-width': `${minimumCanvasWidth}px` } as CSSProperties
-  const numericGeometry = useMemo(() => numericTracks.map((track) => ({ track, geometry: numericPaths(track.samples, from, span, 1000, 88, track.connectObservedGaps, track.interpolation, track.holdLastObservation, track.referenceLines?.map(({ value }) => value)) })), [numericTracks, from, span])
+  const numericGeometry = useMemo(() => numericTracks.map((track) => ({ track, geometry: numericPaths(track.samples, from, span, 1000, 88, track.connectObservedGaps, track.interpolation, track.holdLastObservation, track.referenceLines?.map(({ value }) => value), track.breakIntervals) })), [numericTracks, from, span])
   const eventGeometry = useMemo(() => eventTracks.map((track) => ({ track, clusters: clusterTimelineEvents(track.events, fromUtc, toUtc) })), [eventTracks, fromUtc, toUtc])
   const highlightedGeometry = highlightedRange ? {
     start: Math.min(1, Math.max(0, (Date.parse(highlightedRange.fromUtc) - from) / span)),

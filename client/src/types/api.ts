@@ -748,7 +748,7 @@ export interface RawExplorerChangedSignal extends RawExplorerSignalIdentity {
 export interface RawTelemetrySample {
   observedAtUtc: string
   receivedAtUtc: string
-  sourceTimestampUtc: string
+  sourceTimestampUtc: string | null
   qualityState: string
   valueKind: string
   value: RawTelemetryScalar
@@ -757,7 +757,7 @@ export interface RawTelemetrySample {
 export interface RawTelemetryChange extends RawTelemetrySample {
   previousObservedAtUtc: string
   previousReceivedAtUtc: string
-  previousSourceTimestampUtc: string
+  previousSourceTimestampUtc: string | null
   previousQualityState: string
   previousValueKind: string
   previousValue: RawTelemetryScalar
