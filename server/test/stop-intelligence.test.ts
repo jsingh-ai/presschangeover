@@ -4,16 +4,17 @@ import type { AddressInfo } from 'node:net'
 import test from 'node:test'
 import { createApp } from '../src/app.js'
 import { canonicalSpeedConfiguration, hasStopIntelligenceCanonicalPolicy, stopIdentityAssociationConfiguration } from '../src/stop-intelligence/configuration.js'
-import { classifyStop } from '../src/stop-intelligence/classification-engine.js'
-import type { CanonicalSpeedObservation, PhysicalStopAnalysisInput, PhysicalStopSegment, StopFamilyEvidence, StopIdentityEvidence, StopRadiusOverlay, TelemetryAvailabilityInterval } from '../src/stop-intelligence/contracts.js'
+import { classifyStop, hasInStopSpeedTest, type RequiredChangeoverEvidence } from '../src/stop-intelligence/classification-engine.js'
+import { STOP_INTELLIGENCE_ACTION_VERSION, type CanonicalSpeedObservation, type ChangeoverAction, type PhysicalStopAnalysisInput, type PhysicalStopSegment, type StopDeckStatusContext, type StopFamilyEvidence, type StopIdentityEvidence, type StopRadiusOverlay, type TelemetryAvailabilityInterval } from '../src/stop-intelligence/contracts.js'
 import { buildStopEvidence, isDirectAniloxActivitySignal, STOP_FAMILY_CANONICAL_PATTERNS, stopIdentityDefinitions } from '../src/stop-intelligence/evidence-model.js'
-import { analyzePhysicalStops, normalizeSpeedQuality } from '../src/stop-intelligence/physical-stop-engine.js'
+import { analyzePhysicalStops, bridgeMatchingSpeedStateEvidence, normalizeSpeedQuality } from '../src/stop-intelligence/physical-stop-engine.js'
 import { overlayRadius } from '../src/stop-intelligence/radius-overlay.js'
-import { buildDeckStatusContext, deckStatusRawCandidates, downsampleFleetRollLength, downsampleFleetSpeed, StopIntelligenceService, stopIntelligenceStopId, uncanonicalizedRawCandidates } from '../src/stop-intelligence/service.js'
-import { buildChangeoverActions, buildUncanonicalizedRawActions } from '../src/stop-intelligence/action-engine.js'
+import { buildDeckStatusContext, deckStatusRawCandidates, downsampleFleetRollLength, downsampleFleetSpeed, evidenceSelectors, latestSustainedGoodRunAnchor, productionAttributeDisplayUnit, productionAttributeHistoryRanges, productionAttributeRawCandidates, selectBoundedRawEvidenceCandidates, STOP_DETAIL_RAW_EVIDENCE_LIMIT, StopIntelligenceService, stopIntelligenceStopId, uncanonicalizedRawCandidates } from '../src/stop-intelligence/service.js'
+import { buildChangeoverActions, buildUncanonicalizedRawActions, detectRequiredChangeoverActivity } from '../src/stop-intelligence/action-engine.js'
 import { InMemoryStopIntelligenceCorrectionRepository, STOP_OPERATOR_DECISION_STATES, StopIntelligenceCorrectionService } from '../src/stop-intelligence/correction-service.js'
+import { buildChangeoverActivityWindows } from '../src/stop-intelligence/changeover-stage-engine.js'
 import type { PressSemanticSignalWithIdentity, TelemetryFoundationService } from '../src/telemetry/telemetry-foundation-service.js'
-import type { RawTelemetryHistoryResponse, TelemetrySample } from '../src/telemetry/telemetry-contracts.js'
+import type { PressEvidenceCapabilities, RawTelemetryHistoryResponse, TelemetrySample, TelemetrySourceSignal } from '../src/telemetry/telemetry-contracts.js'
 import type { TelemetryClient } from '../src/telemetry/telemetry-api-client.js'
 import type { RadiusStatusSegment } from '../src/radius/models.js'
 import type { RadiusService } from '../src/radius/radius-service.js'
@@ -35,10 +36,10 @@ function analyze(values: Array<[minute: number, speed: number | null, quality?: 
 }
 
 test('preserves validated Press 14/15 speed identities and enables dynamic canonical policy for all registered presses', () => {
-  assert.deepEqual(canonicalSpeedConfiguration('press14'), { pressKey: 'press14', sourceId: 1, canonicalSpeedSignalId: 204, canonicalId: 'machine.speed.actual', stopThreshold: 1, recoveryThreshold: 595, recoveryConfirmationSeconds: 300 })
-  assert.deepEqual(canonicalSpeedConfiguration('press15'), { pressKey: 'press15', sourceId: 34, canonicalSpeedSignalId: 222, canonicalId: 'machine.speed.actual', stopThreshold: 1, recoveryThreshold: 595, recoveryConfirmationSeconds: 300 })
+  assert.deepEqual(canonicalSpeedConfiguration('press14'), { pressKey: 'press14', sourceId: 1, canonicalSpeedSignalId: 204, canonicalId: 'machine.speed.actual', stopThreshold: 1, recoveryThreshold: 595, recoveryConfirmationSeconds: 420, matchingStateGapBridgeSeconds: 900 })
+  assert.deepEqual(canonicalSpeedConfiguration('press15'), { pressKey: 'press15', sourceId: 34, canonicalSpeedSignalId: 222, canonicalId: 'machine.speed.actual', stopThreshold: 1, recoveryThreshold: 595, recoveryConfirmationSeconds: 420, matchingStateGapBridgeSeconds: 900 })
   assert.equal(canonicalSpeedConfiguration('press5'), undefined)
-  assert.deepEqual(canonicalSpeedConfiguration('press5', { sourceId: 50, canonicalSpeedSignalId: 500 }), { pressKey: 'press5', sourceId: 50, canonicalSpeedSignalId: 500, canonicalId: 'machine.speed.actual', stopThreshold: 1, recoveryThreshold: 595, recoveryConfirmationSeconds: 300 })
+  assert.deepEqual(canonicalSpeedConfiguration('press5', { sourceId: 50, canonicalSpeedSignalId: 500 }), { pressKey: 'press5', sourceId: 50, canonicalSpeedSignalId: 500, canonicalId: 'machine.speed.actual', stopThreshold: 1, recoveryThreshold: 595, recoveryConfirmationSeconds: 420, matchingStateGapBridgeSeconds: 900 })
   assert.equal(canonicalSpeedConfiguration('press14', { sourceId: 99, canonicalSpeedSignalId: 999 }), undefined)
   for (const pressKey of ['press3', 'press5', 'press6', 'press7', 'press8', 'press9', 'press10', 'press11', 'press12', 'press13', 'press14', 'press15'] as const) {
     assert.equal(hasStopIntelligenceCanonicalPolicy(pressKey), true)
@@ -63,7 +64,7 @@ test('normalizes both historical quality encodings without treating bad telemetr
 })
 
 test('finds a simple physical stop and ends it at the successful recovery streak start', () => {
-  const [segment] = analyze([[0, 1_000], [1, 0], [3, 0], [4, 700], [9, 700]])
+  const [segment] = analyze([[0, 1_000], [1, 0], [3, 0], [4, 700], [11, 700]])
   assert.equal(segment?.startAt, at(1))
   assert.equal(segment?.endAt, at(4))
   assert.equal(segment?.physicalDurationSeconds, 180)
@@ -73,7 +74,7 @@ test('finds a simple physical stop and ends it at the successful recovery streak
 })
 
 test('keeps slow movement inside the same stop and records the micro-start attempt', () => {
-  const [segment] = analyze([[0, 1_000], [1, 0], [2, 100], [3, 300], [4, 0], [5, 700], [10, 700]])
+  const [segment] = analyze([[0, 1_000], [1, 0], [2, 100], [3, 300], [4, 0], [5, 700], [12, 700]])
   assert.equal(segment?.startAt, at(1))
   assert.equal(segment?.endAt, at(5))
   assert.equal(segment?.movementAttempts.length, 2)
@@ -81,24 +82,31 @@ test('keeps slow movement inside the same stop and records the micro-start attem
 })
 
 test('keeps a failed high-speed recovery inside the same stop', () => {
-  const [segment] = analyze([[0, 1_000], [1, 0], [2, 800], [4, 0], [5, 700], [10, 700]])
+  const [segment] = analyze([[0, 1_000], [1, 0], [2, 800], [4, 0], [5, 700], [12, 700]])
   assert.equal(segment?.endAt, at(5))
   assert.equal(segment?.failedRecoveryCount, 1)
   assert.deepEqual(segment?.failedRecoveryStreaks[0], { startAt: at(2), endAt: at(4), durationSeconds: 120, reason: 'DROPPED_BELOW_RECOVERY', movementAttemptSequenceNumber: 1 })
 })
 
 test('does not treat a short above-1000 excursion as recovery', () => {
-  const [segment] = analyze([[0, 1_000], [1, 0], [2, 1_200], [6, 0], [7, 800], [12, 800]])
+  const [segment] = analyze([[0, 1_000], [1, 0], [2, 1_200], [6, 0], [7, 800], [14, 800]])
   assert.equal(segment?.endAt, at(7))
   assert.equal(segment?.failedRecoveryCount, 1)
   assert.equal(segment?.movementAttempts[0]?.peakSpeed, 1_200)
 })
 
 test('retains multiple movement attempts, including the final successful recovery attempt', () => {
-  const [segment] = analyze([[0, 0], [1, 100], [2, 0], [3, 400], [4, 0], [5, 750], [10, 750]])
+  const [segment] = analyze([[0, 0], [1, 100], [2, 0], [3, 400], [4, 0], [5, 750], [12, 750]])
   assert.equal(segment?.leftCensored, true)
   assert.equal(segment?.movementAttempts.length, 3)
   assert.deepEqual(segment?.movementAttempts.map(({ sequenceNumber, startAt, endAt }) => [sequenceNumber, startAt, endAt]), [[1, at(1), at(2)], [2, at(3), at(4)], [3, at(5), at(5)]])
+})
+
+test('requires an observed positive-speed return to zero inside the stop as the changeover speed test', () => {
+  const segment = physical({ startAt: at(1), endAt: at(12) })
+  assert.equal(hasInStopSpeedTest(segment, observations([[1, 0], [2, .1], [3, 0], [5, 700], [12, 700]])), true)
+  assert.equal(hasInStopSpeedTest(segment, observations([[1, 0], [5, 700], [12, 700]])), false)
+  assert.equal(hasInStopSpeedTest(segment, observations([[1, 0], [2, .1, 'BAD'], [3, 0]])), false)
 })
 
 test('right-censors a stop on bad quality and never carries it through the bad value', () => {
@@ -109,10 +117,27 @@ test('right-censors a stop on bad quality and never carries it through the bad v
   assert.equal(segment?.physicalDurationSeconds, 60)
 })
 
-test('splits rather than bridges source-specific telemetry silence during a stop', () => {
-  const segments = analyze([[0, 1_000], [1, 0], [5, 0], [6, 700], [11, 700]], [{ fromUtc: at(2), toUtc: at(5), state: 'SOURCE_TELEMETRY_UNAVAILABLE' }])
-  assert.equal(segments.length, 2)
-  assert.deepEqual(segments.map(({ startAt, endAt, leftCensorReason, rightCensorReason }) => [startAt, endAt, leftCensorReason, rightCensorReason]), [[at(1), at(2), null, 'SOURCE_TELEMETRY_UNAVAILABLE'], [at(5), at(6), 'SOURCE_TELEMETRY_UNAVAILABLE', null]])
+test('bridges a source-specific gap under 15 minutes when trusted speed is stopped on both sides', () => {
+  const segments = analyze([[0, 1_000], [1, 0], [5, 0], [6, 700], [13, 700]], [{ fromUtc: at(2), toUtc: at(5), state: 'SOURCE_TELEMETRY_UNAVAILABLE' }])
+  assert.equal(segments.length, 1)
+  assert.deepEqual([segments[0]?.startAt, segments[0]?.endAt, segments[0]?.leftCensorReason, segments[0]?.rightCensorReason], [at(1), at(6), null, null])
+  assert.equal(segments[0]?.physicalDurationSeconds, 300)
+})
+
+test('bridges bad quality under 15 minutes when trusted speed is running on both sides', () => {
+  const input: PhysicalStopAnalysisInput = { configuration, fromUtc: at(0), toUtc: at(5), observations: observations([[0, 800], [2, 0, 'BAD'], [3, 900], [5, 900]]) }
+  const bridged = bridgeMatchingSpeedStateEvidence(input)
+  assert.deepEqual(bridged.availabilityIntervals, [])
+  assert.equal(bridged.bridgedIntervals[0]?.state, 'UNKNOWN_SPEED_QUALITY')
+  assert.equal(bridged.observations.some(({ qualityState }) => qualityState === 'BAD'), false)
+  assert.deepEqual(analyzePhysicalStops(input).segments, [])
+})
+
+test('retains unknown separation for mixed states and gaps of exactly 15 minutes', () => {
+  const mixed = bridgeMatchingSpeedStateEvidence({ configuration, fromUtc: at(0), toUtc: at(8), observations: observations([[0, 800], [5, 0], [8, 0]]), availabilityIntervals: [{ fromUtc: at(1), toUtc: at(5), state: 'SOURCE_TELEMETRY_UNAVAILABLE' }] })
+  assert.equal(mixed.availabilityIntervals.length, 1)
+  const exactLimit = bridgeMatchingSpeedStateEvidence({ configuration, fromUtc: at(0), toUtc: at(20), observations: observations([[0, 0], [16, 0], [20, 0]]), availabilityIntervals: [{ fromUtc: at(1), toUtc: at(16), state: 'SOURCE_TELEMETRY_UNAVAILABLE' }] })
+  assert.equal(exactLimit.availabilityIntervals.length, 1)
 })
 
 test('does not invent a stop for an outage while the press is running', () => {
@@ -130,34 +155,61 @@ test('fails a recovery interrupted one second before confirmation', () => {
   const input: PhysicalStopAnalysisInput = {
     configuration,
     fromUtc: at(0),
-    toUtc: at(12),
+    toUtc: at(14),
     observations: [
       { atUtc: at(0), speed: 1_000, qualityState: 'GOOD' },
       { atUtc: at(1), speed: 0, qualityState: 'GOOD' },
       { atUtc: at(2), speed: 700, qualityState: 'GOOD' },
-      { atUtc: new Date(Date.parse(at(7)) - 1_000).toISOString(), speed: 500, qualityState: 'GOOD' },
+      { atUtc: new Date(Date.parse(at(9)) - 1_000).toISOString(), speed: 500, qualityState: 'GOOD' },
     ],
   }
   const [segment] = analyzePhysicalStops(input).segments
   assert.equal(segment?.endAt, null)
   assert.equal(segment?.failedRecoveryCount, 1)
-  assert.equal(segment?.failedRecoveryStreaks[0]?.durationSeconds, 299)
+  assert.equal(segment?.failedRecoveryStreaks[0]?.durationSeconds, 419)
 })
 
 test('uses exact threshold comparisons: <1 stopped, 1-<595 movement, and >=595 recovery', () => {
-  const [segment] = analyze([[0, 1_000], [1, 0.999], [2, 1], [3, 594.999], [4, 595], [9, 595]])
+  const [segment] = analyze([[0, 1_000], [1, 0.999], [2, 1], [3, 594.999], [4, 595], [11, 595]])
   assert.equal(segment?.startAt, at(1))
   assert.equal(segment?.endAt, at(4))
   assert.equal(segment?.zeroSpeedSeconds, 60)
   assert.equal(segment?.lowMovementSeconds, 120)
-  assert.equal(analyze([[0, 1_000], [1, -0.01], [2, 700], [7, 700]])[0]?.startAt, at(1))
+  assert.equal(analyze([[0, 1_000], [1, -0.01], [2, 700], [9, 700]])[0]?.startAt, at(1))
 })
 
 test('integrates transition-first intervals by elapsed time rather than averaging rows', () => {
-  const [segment] = analyze([[0, 1_000], [1, 0], [3, 100], [4, 300], [8, 0], [9, 700], [14, 700]])
+  const [segment] = analyze([[0, 1_000], [1, 0], [3, 100], [4, 300], [8, 0], [9, 700], [16, 700]])
   assert.equal(segment?.lowMovementSeconds, 300)
   assert.equal(segment?.movementAttempts[0]?.averageSpeed, 260)
   assert.equal(segment?.movementAttempts[0]?.peakSpeed, 300)
+})
+
+test('finds only a fully observed seven-minute Good Run as a leading-stop lookback anchor', () => {
+  assert.equal(latestSustainedGoodRunAnchor({ observations: observations([[-20, 800], [-10, 0]]), unavailable: [], fromUtc: at(-20), toUtc: at(0), recoveryThreshold: 595, confirmationSeconds: 420 }), at(-17))
+  assert.equal(latestSustainedGoodRunAnchor({ observations: observations([[-20, 800], [-10, 0]]), unavailable: [{ fromUtc: at(-16), toUtc: at(-15), state: 'SOURCE_TELEMETRY_UNAVAILABLE' }], fromUtc: at(-20), toUtc: at(0), recoveryThreshold: 595, confirmationSeconds: 420 }), null)
+  assert.equal(latestSustainedGoodRunAnchor({ observations: observations([[-6, 800], [0, 0]]), unavailable: [], fromUtc: at(-6), toUtc: at(0), recoveryThreshold: 595, confirmationSeconds: 420 }), null)
+})
+
+test('recovers a range-leading stop from hidden history and reapplies normal downtime classification', async () => {
+  const requestedFromUtc: string[] = []
+  const allSpeed = telemetrySamples([[-110, 800], [-90, 0], [-20, 80], [-19, 0], [20, 700], [27, 700]])
+  const telemetry = {
+    sources: { resolve: async () => ({ pressKey: 'press14', source: { id: 1, sourceKey: 'press14', displayName: 'Press 14', enabled: true }, metadataStatus: 'FRESH' }) },
+    capabilities: { get: async () => ({ pressKey: 'press14', sourceId: 1, sourceKey: 'press14', displayName: 'Press 14', metadataStatus: 'FRESH', capabilities: [{ canonicalId: 'machine.speed.actual', state: 'SUPPORTED', deckNumbers: [], historyQueryable: true, evidenceKind: 'semantic_history' }] }) },
+    semanticHistoryWithIdentity: async (_pressKey: string, query: { fromUtc: string; toUtc: string; includeSeed: boolean }) => {
+      requestedFromUtc.push(query.fromUtc)
+      const from = Date.parse(query.fromUtc); const to = Date.parse(query.toUtc)
+      const seed = allSpeed.filter((item) => Date.parse(item.observedAtUtc) < from).at(-1) ?? null
+      const samples = allSpeed.filter((item) => Date.parse(item.observedAtUtc) >= from && Date.parse(item.observedAtUtc) <= to)
+      return { pressKey: 'press14', sourceKey: 'press14', displayName: 'Press 14', fromUtc: query.fromUtc, toUtc: query.toUtc, includeSeed: query.includeSeed, signals: [{ canonicalId: 'machine.speed.actual', deckNumber: null, historianSignalId: 204, seed, samples, changes: [] }], readDiagnostics: { gaps: [], sourceGaps: [], historicalAvailability: { state: 'DETAILED_AVAILABLE', detailedTelemetryAvailable: true, intervals: [], reason: 'Detailed history available.' } } }
+    },
+  } as unknown as TelemetryFoundationService
+  const report = await new StopIntelligenceService(telemetry, undefined, () => Date.parse(at(60))).analyze({ pressKey: 'press14', fromUtc: at(0), toUtc: at(45) })
+  assert.deepEqual([report.fromUtc, report.toUtc], [at(0), at(45)])
+  assert.deepEqual([report.segments[0]?.startAt, report.segments[0]?.endAt, report.segments[0]?.leftCensored], [at(-90), at(20), false])
+  assert.deepEqual([report.classifiedStops[0]?.classification, report.classifiedStops[0]?.confidence], ['DOWNTIME', 'HIGH'])
+  assert.ok(requestedFromUtc.some((value) => Date.parse(value) <= Date.parse(at(-360))))
 })
 
 test('uses the configured speed plus bounded evidence selectors through the shared read-only telemetry foundation', async () => {
@@ -175,7 +227,7 @@ test('uses the configured speed plus bounded evidence selectors through the shar
       return {
         pressKey: 'press14', sourceKey: 'press14', displayName: 'Press 14', fromUtc: at(0), toUtc: at(10), includeSeed: true,
         signals: [
-          { canonicalId: 'machine.speed.actual', deckNumber: null, historianSignalId: 204, seed: null, samples: telemetrySamples([[0, 1_000], [1, 0], [2, 700], [7, 700]]), changes: [] },
+          { canonicalId: 'machine.speed.actual', deckNumber: null, historianSignalId: 204, seed: null, samples: telemetrySamples([[0, 1_000], [1, 0], [2, 700], [9, 700]]), changes: [] },
           { canonicalId: 'production.recipe', deckNumber: null, historianSignalId: 205, seed: { ...telemetrySamples([[0, 1]])[0]!, valueKind: 'string', value: 'R1' }, samples: [], changes: [] },
         ],
         readDiagnostics: { gaps: [], sourceGaps: [] },
@@ -197,7 +249,7 @@ test('reconstructs a 14-day-old stop from detailed history when raw snapshots ha
     capabilities: { get: async () => ({ pressKey: 'press14', sourceId: 1, sourceKey: 'press14', displayName: 'Press 14', metadataStatus: 'FRESH', capabilities: [{ canonicalId: 'machine.speed.actual', state: 'SUPPORTED', deckNumbers: [], historyQueryable: true, evidenceKind: 'semantic_history' }] }) },
     semanticHistoryWithIdentity: async () => ({
       pressKey: 'press14', sourceKey: 'press14', displayName: 'Press 14', fromUtc: at(-60), toUtc: at(80), includeSeed: true,
-      signals: [{ canonicalId: 'machine.speed.actual', deckNumber: null, historianSignalId: 204, seed: null, samples: telemetrySamples([[0, 900], [5, 0], [35, 700], [40, 700]]), changes: [] }],
+      signals: [{ canonicalId: 'machine.speed.actual', deckNumber: null, historianSignalId: 204, seed: null, samples: telemetrySamples([[0, 900], [5, 0], [35, 700], [42, 700]]), changes: [] }],
       readDiagnostics: { gaps: [], sourceGaps: [], historicalAvailability: { state: 'DETAILED_AVAILABLE', detailedTelemetryAvailable: true, intervals: [], reason: 'Detailed transition-first historian evidence is available for this range.' } },
     }),
     rawCatalog: async () => { rawCalls += 1; throw new Error('RAW_HISTORY_EXPIRED') },
@@ -223,7 +275,7 @@ test('reports insufficient detailed telemetry instead of a collection outage whe
   assert.deepEqual(report.segments, [])
 })
 
-test('resolves canonical speed identity dynamically and classifies canonical Order evidence on another press', async () => {
+test('resolves canonical speed identity dynamically but does not let Order bypass required changeover activity', async () => {
   const telemetry = {
     sources: { resolve: async () => ({ pressKey: 'press5', source: { id: 50, sourceKey: 'press5', displayName: 'Press 5', enabled: true }, metadataStatus: 'FRESH' }) },
     capabilities: { get: async () => ({ pressKey: 'press5', sourceId: 50, sourceKey: 'press5', displayName: 'Press 5', metadataStatus: 'FRESH', capabilities: [
@@ -235,7 +287,7 @@ test('resolves canonical speed identity dynamically and classifies canonical Ord
     semanticHistoryWithIdentity: async () => ({
       pressKey: 'press5', sourceKey: 'press5', displayName: 'Press 5', fromUtc: at(-60), toUtc: at(75), includeSeed: true,
       signals: [
-        { canonicalId: 'machine.speed.actual', deckNumber: null, historianSignalId: 500, seed: null, samples: telemetrySamples([[0, 1_000], [1, 0], [8, 700], [13, 700]]), changes: [] },
+        { canonicalId: 'machine.speed.actual', deckNumber: null, historianSignalId: 500, seed: null, samples: telemetrySamples([[0, 1_000], [1, 0], [8, 700], [15, 700]]), changes: [] },
         actionSignal('production.order', null, 501, 'press5.Order', [[2, 'ORDER-A', 'ORDER-B']], 'ORDER-A'),
         actionSignal('production.recipe', null, 502, 'press5.Recipe', [], 'RECIPE-A'),
         actionSignal('production.roll', null, 503, 'press5.Roll', [[3, 'ROLL-A', 'ROLL-B']], 'ROLL-A'),
@@ -246,13 +298,13 @@ test('resolves canonical speed identity dynamically and classifies canonical Ord
   const service = new StopIntelligenceService(telemetry, undefined, () => Date.parse(at(120)))
   const report = await service.analyze({ pressKey: 'press5', fromUtc: at(0), toUtc: at(20) })
   assert.deepEqual([report.configuration.sourceId, report.configuration.canonicalSpeedSignalId], [50, 500])
-  assert.equal(report.classifiedStops[0]?.classification, 'CHANGEOVER')
+  assert.equal(report.classifiedStops[0]?.classification, 'DOWNTIME')
   assert.equal(report.classifiedStops[0]?.confidence, 'HIGH')
   assert.ok(report.classifiedStops[0]?.supportingEvidence.some(({ code }) => code === 'ORDER_CHANGED'))
   assert.equal((await service.fleet({ pressKey: 'press5', fromUtc: at(0), toUtc: at(20) })).presses[0]?.speedContext.unit, null)
 })
 
-test('service clamps live identity evidence to now and can strengthen the same stop retrospectively', async () => {
+test('service clamps live identity evidence to now but identity cannot bypass required changeover activity', async () => {
   let requestedToUtc = ''
   const recipe = identityHistory('production.recipe', [[40, 'R1', 'R2']], 'R1')
   const telemetry = {
@@ -265,7 +317,7 @@ test('service clamps live identity evidence to now and can strengthen the same s
     ] }) },
     semanticHistoryWithIdentity: async (_pressKey: string, query: { toUtc: string }) => {
       requestedToUtc = query.toUtc
-      return { pressKey: 'press14', sourceKey: 'press14', displayName: 'Press 14', fromUtc: at(-60), toUtc: query.toUtc, includeSeed: true, signals: [{ canonicalId: 'machine.speed.actual', deckNumber: null, historianSignalId: 204, seed: null, samples: telemetrySamples([[0, 1_000], [1, 0], [2, 700], [7, 700]]), changes: [] }, recipe], readDiagnostics: { gaps: [], sourceGaps: [] } }
+      return { pressKey: 'press14', sourceKey: 'press14', displayName: 'Press 14', fromUtc: at(-60), toUtc: query.toUtc, includeSeed: true, signals: [{ canonicalId: 'machine.speed.actual', deckNumber: null, historianSignalId: 204, seed: null, samples: telemetrySamples([[0, 1_000], [1, 0], [2, 700], [9, 700]]), changes: [] }, recipe], readDiagnostics: { gaps: [], sourceGaps: [] } }
     },
   } as unknown as TelemetryFoundationService
   const request = { pressKey: 'press14' as const, fromUtc: at(0), toUtc: at(10) }
@@ -275,7 +327,8 @@ test('service clamps live identity evidence to now and can strengthen the same s
   assert.notEqual(live.classifiedStops[0]?.classification, 'CHANGEOVER')
   const retrospective = await new StopIntelligenceService(telemetry, undefined, () => Date.parse(at(50))).analyze(request)
   assert.equal(requestedToUtc, at(50))
-  assert.deepEqual([retrospective.classifiedStops[0]?.classification, retrospective.classifiedStops[0]?.confidence], ['CHANGEOVER', 'HIGH'])
+  assert.equal(retrospective.classifiedStops[0]?.identities.find(({ field }) => field === 'recipe')?.changed, true)
+  assert.deepEqual([retrospective.classifiedStops[0]?.classification, retrospective.classifiedStops[0]?.confidence], ['DOWNTIME', 'HIGH'])
 })
 
 test('keeps physical analysis read-only while isolating operator corrections to the application document store', () => {
@@ -298,7 +351,63 @@ function physical(overrides: Partial<PhysicalStopSegment> = {}): PhysicalStopSeg
 const noRadius = (): StopRadiusOverlay => ({ alignment: 'RADIUS_UNAVAILABLE', firstNonProductionAtUtc: null, firstProductionReturnAtUtc: null, physicalStartOffsetSeconds: null, physicalEndOffsetSeconds: null, coveredSeconds: 0, physicalSeconds: 0, coveragePercent: 0, states: [], reason: 'Unavailable in test.' })
 const identity = (field: StopIdentityEvidence['field'], usefulness: StopIdentityEvidence['usefulness'], changed = false): StopIdentityEvidence => ({ field, usefulness, available: true, canonicalId: `production.${field}`, beforeValue: 'A', afterValue: changed ? 'B' : 'A', changed, settled: changed, firstChangeAtUtc: changed ? at(12) : null, lastChangeAtUtc: changed ? at(12) : null, settledAtUtc: changed ? at(17) : null, associationOffsetSeconds: changed ? 0 : null, intermediateValues: changed ? ['B'] : [], reason: 'Synthetic research evidence.' })
 const family = (name: StopFamilyEvidence['family'], observed = true, coordinated = false): StopFamilyEvidence => ({ family: name, available: true, observed, coordinated, changeCount: observed ? coordinated ? 3 : 1 : 0, deckNumbers: coordinated ? [1, 2] : [], canonicalIds: observed ? [`test.${name.toLowerCase()}`] : [], firstObservedAtUtc: observed ? at(12) : null, lastObservedAtUtc: observed ? at(14) : null, reason: 'Synthetic research evidence.' })
-const classify = (values: { segment?: PhysicalStopSegment; identities?: StopIdentityEvidence[]; families?: StopFamilyEvidence[]; identityCoverageAdequate?: boolean; familyCoverageAdequate?: boolean; evidenceIntegrity?: 'VALID' | 'LIMITED' | 'INVALID'; radius?: StopRadiusOverlay }) => classifyStop({ segment: values.segment ?? physical(), identities: values.identities ?? [identity('recipe', 'STRONG')], families: values.families ?? [], identityCoverageAdequate: values.identityCoverageAdequate ?? true, familyCoverageAdequate: values.familyCoverageAdequate ?? true, evidenceIntegrity: values.evidenceIntegrity ?? 'VALID', radius: values.radius ?? noRadius() })
+const completeRequiredEvidence = (): RequiredChangeoverEvidence => ({ washActivity: true, pumpInkActivity: true, impressionAdjustment: true, speedTestReturnedToZero: true })
+const classify = (values: { segment?: PhysicalStopSegment; identities?: StopIdentityEvidence[]; families?: StopFamilyEvidence[]; identityCoverageAdequate?: boolean; familyCoverageAdequate?: boolean; evidenceIntegrity?: 'VALID' | 'LIMITED' | 'INVALID'; radius?: StopRadiusOverlay; requiredChangeoverEvidence?: RequiredChangeoverEvidence }) => classifyStop({ segment: values.segment ?? physical(), identities: values.identities ?? [identity('recipe', 'STRONG')], families: values.families ?? [], identityCoverageAdequate: values.identityCoverageAdequate ?? true, familyCoverageAdequate: values.familyCoverageAdequate ?? true, evidenceIntegrity: values.evidenceIntegrity ?? 'VALID', radius: values.radius ?? noRadius(), requiredChangeoverEvidence: values.requiredChangeoverEvidence ?? completeRequiredEvidence() })
+
+test('derives overlapping activity windows only for backend-classified Changeovers', () => {
+  const action = (actionCode: ChangeoverAction['actionCode'], displayName: string, startAt: string, canonicalId: string, oldValue: number | boolean | string = 0, newValue: number | boolean | string = 1): ChangeoverAction => ({ actionCode, displayName, operatorConcept: null, confidence: 'DETECTED', startAt, endAt: new Date(Date.parse(startAt) + 30_000).toISOString(), explanation: `${displayName} telemetry.`, evidence: [{ signalId: 1, canonicalId, rawIdentity: canonicalId, component: null, deckNumber: null, atUtc: startAt, oldValue, newValue, originalQuality: 'GOOD', normalizedQuality: 'GOOD', explanation: 'Changed.' }], evidenceCount: 1, evidenceLimited: false, comparison: null, detectorVersion: STOP_INTELLIGENCE_ACTION_VERSION })
+  const stop = classify({ segment: physical({ movementAttempts: [
+    { startAt: at(14, 20), endAt: at(16), durationSeconds: 100, averageSpeed: 200, peakSpeed: 300, reachedRecoveryThreshold: false, failedRecoveryCount: 0, sequenceNumber: 1 },
+    { startAt: at(16, 20), endAt: at(18), durationSeconds: 100, averageSpeed: 220, peakSpeed: 340, reachedRecoveryThreshold: false, failedRecoveryCount: 0, sequenceNumber: 2 },
+  ] }) })
+  const deckStatus: StopDeckStatusContext = {
+    fromUtc: at(9), toUtc: at(21), availability: 'AVAILABLE', reason: 'Synthetic normalized deck status.', sourceIdentities: [],
+    decks: Array.from({ length: 10 }, (_, index) => index === 0 ? { deckNumber: 1, intervals: [
+      { startUtc: at(9), endUtc: at(11), state: 'READY' as const, active: true, printing: false, out: false },
+      { startUtc: at(11), endUtc: at(14), state: 'OUT' as const, active: false, printing: false, out: true },
+      { startUtc: at(14), endUtc: at(15), state: 'READY' as const, active: true, printing: false, out: false },
+      { startUtc: at(15), endUtc: at(16), state: 'PRINTING' as const, active: true, printing: true, out: false },
+      { startUtc: at(16), endUtc: at(17), state: 'READY' as const, active: true, printing: false, out: false },
+      { startUtc: at(17), endUtc: at(18), state: 'PRINTING' as const, active: true, printing: true, out: false },
+      { startUtc: at(18), endUtc: at(21), state: 'READY' as const, active: true, printing: false, out: false },
+    ], events: [] } : { deckNumber: index + 1, intervals: [{ startUtc: at(9), endUtc: at(21), state: 'INACTIVE' as const, active: false, printing: false, out: false }], events: [] }),
+  }
+  const washSignals = Array.from({ length: 10 }, (_, index) => ({ canonicalId: 'ink.washup.state', deckNumber: index + 1, seed: { observedAtUtc: at(9), qualityState: 'GOOD', value: 1 }, samples: [], changes: [{ observedAtUtc: index === 9 ? at(13, 30) : at(13), qualityState: 'GOOD', value: 0 }] })) as unknown as PressSemanticSignalWithIdentity[]
+  const speedObservations: CanonicalSpeedObservation[] = [
+    { atUtc: at(14), speed: 0, qualityState: 'GOOD' },
+    { atUtc: at(14, 20), speed: 30, qualityState: 'GOOD' },
+    { atUtc: at(16), speed: 0, qualityState: 'GOOD' },
+    { atUtc: at(16, 20), speed: 35, qualityState: 'GOOD' },
+    { atUtc: at(18), speed: 0, qualityState: 'GOOD' },
+  ]
+  const actions = [
+    action('WASH_ACTIVITY', 'Wash activity', at(12), 'ink.washup.state'),
+    action('REGISTRATION_ADJUSTMENT', 'Zero-speed registration noise', at(13, 30), 'register.long.actual_or_correction'),
+    action('REGISTRATION_ADJUSTMENT', 'Registration adjustment 1', at(14, 30), 'register.long.actual_or_correction'),
+    action('WASH_ACTIVITY', 'Wash activity 2', at(15), 'ink.washup.state'),
+    action('IMPRESSION_ADJUSTMENT', 'Impression adjustment 1', at(15, 10), 'impression.print_side'),
+    action('INK_PUMP_ACTIVITY', 'Color-check pump activity 1', at(16, 10), 'ink.pump.status', 1, 0),
+    action('REGISTRATION_ADJUSTMENT', 'Registration adjustment 2', at(16, 30), 'register.long.actual_or_correction'),
+    action('IMPRESSION_ADJUSTMENT', 'Impression adjustment 2', at(17, 10), 'impression.print_side'),
+    action('INK_PUMP_ACTIVITY', 'Color-check pump activity 2', at(18, 10), 'ink.pump.status', 1, 0),
+  ]
+  const stages = buildChangeoverActivityWindows({ stop, actions, signals: washSignals, speedObservations, deckStatus, rangeEndUtc: at(30) })
+  assert.deepEqual(stages.map(({ label }) => label), ['Job Out', 'Deck Out', 'Washing of Ink', 'Ink Up', 'Deck In', 'Registration Setup', 'Impression Setup', 'Color Check', 'Color Check', 'Good Run'])
+  assert.equal(stages.some(({ label }) => /Previous Job/i.test(label)), false)
+  assert.equal(stages.some(({ explanation }) => /predicted boundary|predicted sequence/i.test(explanation)), false)
+  assert.equal(stages.filter(({ kind }) => kind === 'wash').length, 1)
+  assert.deepEqual([stages.find(({ kind }) => kind === 'wash')?.startAt, stages.find(({ kind }) => kind === 'wash')?.endAt], [at(12), at(15, 30)])
+  assert.deepEqual([stages.find(({ kind }) => kind === 'ink-up')?.startAt, stages.find(({ kind }) => kind === 'ink-up')?.endAt], [at(16, 10), at(18, 40)])
+  assert.deepEqual([stages.find(({ kind }) => kind === 'register')?.startAt, stages.find(({ kind }) => kind === 'register')?.endAt], [at(13, 30), at(17)])
+  assert.deepEqual([stages.find(({ kind }) => kind === 'impression')?.startAt, stages.find(({ kind }) => kind === 'impression')?.endAt], [at(15, 10), at(17, 40)])
+  assert.deepEqual(stages.filter(({ kind }) => kind === 'color-check').map(({ startAt, endAt }) => [startAt, endAt]), [[at(16), at(16, 20)], [at(18), at(20)]])
+  assert.ok(Date.parse(stages.find(({ kind }) => kind === 'register')!.endAt) > Date.parse(stages.find(({ kind }) => kind === 'impression')!.startAt))
+  assert.deepEqual(buildChangeoverActivityWindows({ stop, actions, signals: washSignals.slice(0, 9), speedObservations, deckStatus, rangeEndUtc: at(30) }).map(({ label }) => label), ['Job Out', 'Deck Out', 'Washing of Ink', 'Ink Up', 'Registration Setup', 'Impression Setup', 'Color Check', 'Color Check', 'Good Run'])
+  const oneDeckStillOut: StopDeckStatusContext = { ...deckStatus, decks: deckStatus.decks.map((deck) => deck.deckNumber === 2 ? { ...deck, intervals: [{ startUtc: at(9), endUtc: at(21), state: 'OUT', active: false, printing: false, out: true }] } : deck) }
+  assert.deepEqual(buildChangeoverActivityWindows({ stop, actions, signals: washSignals, speedObservations, deckStatus: oneDeckStillOut, rangeEndUtc: at(30) }).map(({ label }) => label), ['Job Out', 'Deck Out', 'Washing of Ink', 'Ink Up', 'Registration Setup', 'Impression Setup', 'Color Check', 'Color Check', 'Good Run'])
+  const downtime = { ...stop, classification: 'DOWNTIME' as const }
+  assert.deepEqual(buildChangeoverActivityWindows({ stop: downtime, actions, signals: washSignals, speedObservations, deckStatus, rangeEndUtc: at(30) }), [])
+})
 
 test('research P14 E030/E031 classify HIGH CHANGEOVER from settled Recipe identity', () => {
   for (const event of ['E030', 'E031']) {
@@ -318,17 +427,33 @@ test('research P14 E038 stays HIGH CHANGEOVER despite contradictory Radius annot
   assert.ok(result.conflictingEvidence.some(({ code }) => code === 'RADIUS_RUN_PRODUCTION'))
 })
 
-test('research P14 E072/E075 remain DOWNTIME without coordinated setup evidence', () => {
-  assert.equal(classify({ families: [] }).classification, 'DOWNTIME')
-  const pumpOnly = classify({ families: [family('WASH_PUMP_INK')] })
-  assert.equal(pumpOnly.classification, 'DOWNTIME')
-  assert.equal(pumpOnly.confidence, 'LOW')
-  assert.equal(classify({ families: [family('WASH_PUMP_INK'), family('ANILOX')] }).classification, 'DOWNTIME')
+test('requires wash, pump or ink, impression, and an in-stop positive-speed return to zero before predicting CHANGEOVER', () => {
+  const qualifying = classify({ identities: [identity('recipe', 'STRONG', true)], families: [family('WASH_PUMP_INK'), family('IMPRESSION')], requiredChangeoverEvidence: completeRequiredEvidence() })
+  assert.deepEqual([qualifying.classification, qualifying.confidence], ['CHANGEOVER', 'HIGH'])
+  for (const key of Object.keys(completeRequiredEvidence()) as Array<keyof RequiredChangeoverEvidence>) {
+    const requiredChangeoverEvidence = { ...completeRequiredEvidence(), [key]: false }
+    const result = classify({ identities: [identity('recipe', 'STRONG', true)], families: [family('WASH_PUMP_INK'), family('IMPRESSION')], requiredChangeoverEvidence })
+    assert.deepEqual([key, result.classification, result.confidence], [key, 'DOWNTIME', 'HIGH'])
+    assert.ok(result.conflictingEvidence.some(({ code }) => code.startsWith('CHANGEOVER_REQUIRES_')))
+  }
+  assert.equal(classify({ evidenceIntegrity: 'LIMITED', requiredChangeoverEvidence: { ...completeRequiredEvidence(), washActivity: false } }).classification, 'UNCERTAIN')
 })
 
-test('multiple independent setup families classify MEDIUM while one isolated setup anchor stays UNCERTAIN', () => {
-  assert.deepEqual([classify({ families: [family('IMPRESSION'), family('REGISTRATION')] }).classification, classify({ families: [family('IMPRESSION'), family('REGISTRATION')] }).confidence], ['CHANGEOVER', 'MEDIUM'])
-  assert.equal(classify({ families: [family('DECK')] }).classification, 'UNCERTAIN')
+test('the same four-condition rule classifies every configured press without press-specific legacy scoring', () => {
+  const pressKeys = ['press3', 'press5', 'press6', 'press7', 'press8', 'press9', 'press10', 'press11', 'press12', 'press13', 'press14', 'press15'] as const
+  for (const pressKey of pressKeys) {
+    const qualifying = classify({ segment: physical({ pressKey }), identities: [], families: [], identityCoverageAdequate: false, familyCoverageAdequate: false })
+    assert.deepEqual([pressKey, qualifying.classification, qualifying.confidence], [pressKey, 'CHANGEOVER', 'HIGH'])
+    const missingWash = classify({ segment: physical({ pressKey }), identities: [identity('order', 'STRONG', true)], families: [family('DECK', true, true), family('IMPRESSION'), family('REGISTRATION')], requiredChangeoverEvidence: { ...completeRequiredEvidence(), washActivity: false } })
+    assert.deepEqual([pressKey, missingWash.classification, missingWash.confidence], [pressKey, 'DOWNTIME', 'HIGH'])
+  }
+})
+
+test('identity and setup-family evidence remains descriptive and cannot raise or lower the four-condition decision', () => {
+  const sparse = classify({ identities: [], families: [], identityCoverageAdequate: false, familyCoverageAdequate: false })
+  const broad = classify({ identities: [identity('order', 'STRONG', true)], families: [family('DECK', true, true), family('WASH_PUMP_INK'), family('IMPRESSION'), family('REGISTRATION')] })
+  assert.deepEqual([sparse.classification, sparse.confidence], ['CHANGEOVER', 'HIGH'])
+  assert.deepEqual([broad.classification, broad.confidence], ['CHANGEOVER', 'HIGH'])
 })
 
 test('research P15 E148 is HIGH CHANGEOVER from settled Order identity', () => {
@@ -344,7 +469,7 @@ test('research P15 E155 is HIGH telemetry-only CHANGEOVER from broad independent
 test('research E166/E167/E168 expose supporting, conflicting, and missing evidence instead of hiding uncertainty', () => {
   const unsettledOrder = { ...identity('order', 'STRONG', true), settled: false, settledAtUtc: null }
   const result = classify({ segment: physical({ failedRecoveryCount: 2 }), identities: [unsettledOrder, identity('previous_order', 'MEDIUM', true)], families: [family('DECK', true, true), family('WASH_PUMP_INK'), family('REGISTRATION')], identityCoverageAdequate: false, familyCoverageAdequate: false, radius: { ...noRadius(), alignment: 'CONTRADICTORY', reason: 'Radius remained Run Production.' } })
-  assert.equal(result.classification, 'UNCERTAIN')
+  assert.deepEqual([result.classification, result.confidence], ['CHANGEOVER', 'HIGH'])
   assert.ok(['PREVIOUS_ORDER_CHANGED', 'COORDINATED_DECK_MOVEMENT', 'WASH_PUMP_INK_ACTIVITY', 'REGISTRATION_ACTIVITY', 'RESTART_ATTEMPTS_CONTEXT'].every((code) => result.supportingEvidence.some((value) => value.code === code)))
   assert.ok(['UNSETTLED_IDENTITY_TRANSITION', 'RADIUS_RUN_PRODUCTION'].every((code) => result.conflictingEvidence.some((value) => value.code === code)))
   assert.ok(['RELEVANT_IDENTITY_COVERAGE', 'SETUP_FAMILY_COVERAGE'].every((code) => result.missingEvidence.includes(code)))
@@ -360,8 +485,8 @@ test('collection censorship is UNCERTAIN and invalid quality evidence is IGNORE_
 
 test('duration, restart attempts, anilox, and Radius Make Ready never classify a changeover alone', () => {
   const segment = physical({ physicalDurationSeconds: 7_200, failedRecoveryCount: 3 })
-  const result = classify({ segment, families: [family('ANILOX')], radius: { ...noRadius(), alignment: 'AGREES', reason: 'Make Ready aligned.' } })
-  assert.equal(result.classification, 'DOWNTIME')
+  const result = classify({ segment, families: [family('ANILOX')], radius: { ...noRadius(), alignment: 'AGREES', reason: 'Make Ready aligned.' }, requiredChangeoverEvidence: { ...completeRequiredEvidence(), impressionAdjustment: false } })
+  assert.deepEqual([result.classification, result.confidence], ['DOWNTIME', 'HIGH'])
   assert.ok(result.supportingEvidence.some(({ code }) => code === 'LONG_DURATION_CONTEXT'))
   assert.ok(result.supportingEvidence.some(({ code }) => code === 'RESTART_ATTEMPTS_CONTEXT'))
 })
@@ -504,6 +629,7 @@ test('bounds the Stop Intelligence API to 72 hours before telemetry source acces
 test('builds a lightweight single-press summary and loads bounded detail only for the selected stop', async () => {
   const readOrder: string[] = []
   const radiusReads: Array<{ pressKey: string; fromUtc: string; toUtc: string }> = []
+  let rawDiscoveryReads = 0
   const telemetry = {
     sources: { resolve: async (pressKey: 'press14' | 'press15') => ({ pressKey, source: { id: pressKey === 'press14' ? 1 : 34, sourceKey: pressKey, displayName: pressKey === 'press14' ? 'Press 14' : 'Press 15', enabled: true }, metadataStatus: 'FRESH' }) },
     capabilities: { get: async (pressKey: 'press14' | 'press15') => ({ pressKey, sourceId: pressKey === 'press14' ? 1 : 34, sourceKey: pressKey, displayName: pressKey === 'press14' ? 'Press 14' : 'Press 15', metadataStatus: 'FRESH', capabilities: [
@@ -522,6 +648,9 @@ test('builds a lightweight single-press summary and loads bounded detail only fo
         readDiagnostics: { gaps: [], sourceGaps: [{ startUtc: at(5), endUtc: at(8) }] },
       }
     },
+    rawCatalog: async () => [],
+    rawChanges: async () => { rawDiscoveryReads += 1; throw new Error('RAW_HISTORY_EXPIRED') },
+    rawHistory: async () => { throw new Error('RAW_HISTORY_EXPIRED') },
   } as unknown as TelemetryFoundationService
   const radius = { getRawTimeline: async (pressKey: 'press14' | 'press15', fromUtc: string, toUtc: string) => {
     radiusReads.push({ pressKey, fromUtc, toUtc })
@@ -549,24 +678,34 @@ test('builds a lightweight single-press summary and loads bounded detail only fo
 
   const detail = await service.detail({ pressKey: 'press14', ...range, stopId: episode.stopId })
   assert.ok(detail)
+  assert.deepEqual(readOrder, ['press14'])
   assert.deepEqual([detail!.speedContext.fromUtc, detail!.speedContext.toUtc], [at(-5), at(35)])
   assert.deepEqual([detail!.speedContext.stopThreshold, detail!.speedContext.recoveryThreshold], [1, 595])
   assert.ok(detail!.speedContext.unknownIntervals.some(({ state }) => state === 'SOURCE_TELEMETRY_UNAVAILABLE'))
   assert.ok(detail!.speedContext.unknownIntervals.some(({ state }) => state === 'UNKNOWN_SPEED_QUALITY'))
   assert.equal(detail!.stop.physicalSegment.movementAttempts.length, 2)
-  assert.equal(detail!.changeoverActions.eligible, false)
-  assert.deepEqual(detail!.changeoverActions.actions, [])
+  assert.equal(detail!.changeoverActions.eligible, true)
+  assert.match(detail!.changeoverActions.reason, /every selected physical stop/i)
+  assert.ok(detail!.changeoverActions.actions.some(({ actionCode }) => actionCode === 'ROLL_TRANSITION'))
+  assert.ok(detail!.changeoverActions.actions.some(({ actionCode }) => actionCode === 'INK_PUMP_ACTIVITY'))
   assert.deepEqual([detail!.radiusContext.fromUtc, detail!.radiusContext.toUtc], [at(-5), at(35)])
   assert.equal(detail!.radiusContext.states[0]?.startUtc, at(-5))
   assert.ok(detail!.actionSignalContext.some(({ canonicalId }) => canonicalId === 'machine.speed.actual'))
   assert.ok(detail!.actionSignalContext.some(({ canonicalId }) => canonicalId === 'production.roll'))
   assert.ok(detail!.actionSignalContext.some(({ canonicalId }) => canonicalId === 'ink.pump.frequency.supply'))
   assert.equal(detail!.deckStatusContext.availability, 'UNAVAILABLE')
+  assert.equal(detail!.rawUnmappedContext.availability, 'NOT_LOADED')
+  assert.equal(rawDiscoveryReads, 0)
   assert.equal(detail!.actionSignalContext.find(({ canonicalId }) => canonicalId === 'production.roll')?.observations[0]?.atUtc, at(-5))
   assert.equal(detail!.actionSignalContext.find(({ canonicalId }) => canonicalId === 'production.roll')?.observations[0]?.value, 'R100')
   assert.deepEqual(detail!.actionSignalContext.find(({ canonicalId }) => canonicalId === 'ink.pump.frequency.supply')?.observations.map(({ value }) => value), [0, 20, 18, 0])
   assert.ok(radiusReads.some((read) => read.pressKey === 'press14' && read.fromUtc === at(-5) && read.toUtc === at(35)))
   assert.equal('changeoverActions' in episode, false)
+
+  const enriched = await service.detail({ pressKey: 'press14', ...range, stopId: episode.stopId, includeRaw: true })
+  assert.deepEqual(readOrder, ['press14'])
+  assert.equal(rawDiscoveryReads, 1)
+  assert.equal(enriched!.rawUnmappedContext.availability, 'UNAVAILABLE')
 })
 
 test('fleet speed display projection is bounded while preserving bucket extrema', () => {
@@ -663,6 +802,9 @@ test('validates fleet and selected-stop API bounds and identifiers before any so
     const detail = await fetch(`http://127.0.0.1:${port}/api/stop-intelligence/presses/press14/stops/not-a-stop?fromUtc=${encodeURIComponent(at(0))}&toUtc=${encodeURIComponent(at(10))}`)
     assert.equal(detail.status, 400)
     assert.deepEqual(await detail.json(), { error: 'invalid_stop_intelligence_stop_id' })
+    const invalidRaw = await fetch(`http://127.0.0.1:${port}/api/stop-intelligence/presses/press14/stops/press14-123?fromUtc=${encodeURIComponent(at(0))}&toUtc=${encodeURIComponent(at(10))}&includeRaw=1`)
+    assert.equal(invalidRaw.status, 400)
+    assert.deepEqual(await invalidRaw.json(), { error: 'invalid_include_raw' })
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()))
   }
@@ -700,6 +842,18 @@ function rawHistory(rawIdentity: string, displayName: string, values: Array<[num
   }
 }
 
+test('detects each required canonical changeover activity separately and only inside the physical stop', () => {
+  const fixture = actionFixture()
+  const detected = detectRequiredChangeoverActivity({ segment: fixture.segment, signals: fixture.signals, rangeEndUtc: at(90), evidenceCutoffUtc: at(90) })
+  assert.deepEqual(detected, { washActivity: true, pumpInkActivity: true, impressionAdjustment: true })
+  const without = (prefix: string) => fixture.signals.filter(({ canonicalId }) => !canonicalId.startsWith(prefix))
+  assert.equal(detectRequiredChangeoverActivity({ segment: fixture.segment, signals: without('ink.washup.'), rangeEndUtc: at(90), evidenceCutoffUtc: at(90) }).washActivity, false)
+  assert.equal(detectRequiredChangeoverActivity({ segment: fixture.segment, signals: without('ink.pump.'), rangeEndUtc: at(90), evidenceCutoffUtc: at(90) }).pumpInkActivity, false)
+  assert.equal(detectRequiredChangeoverActivity({ segment: fixture.segment, signals: without('impression.'), rangeEndUtc: at(90), evidenceCutoffUtc: at(90) }).impressionAdjustment, false)
+  const beforeOnly = [...fixture.signals.filter(({ canonicalId }) => canonicalId !== 'ink.washup.state'), actionSignal('ink.washup.state', 1, 999, 'P15.Ink[1].WASHING', [[5, 0, 512]])]
+  assert.equal(detectRequiredChangeoverActivity({ segment: fixture.segment, signals: beforeOnly, rangeEndUtc: at(90), evidenceCutoffUtc: at(90) }).washActivity, false)
+})
+
 test('discovers raw deck containers and derives only Decks 1-10 into one status chronology', () => {
   const catalog = ['active', 'deck_out', 'print_on', 'print_off'].map((displayName, index) => ({ id: index + 1, sourceId: 28, signalId: `P12.PLC.deck.${displayName}`, displayName, sourceUnit: null, valueKind: 'string', enabled: true }))
   catalog.push({ id: 9, sourceId: 28, signalId: 'P12.PLC.gravure.print_on', displayName: 'print_on', sourceUnit: null, valueKind: 'string', enabled: true })
@@ -719,10 +873,76 @@ test('discovers raw deck containers and derives only Decks 1-10 into one status 
   assert.deepEqual(context.decks[0]?.events, [{ atUtc: at(10), kind: 'PRINT_OFF_COMMAND', label: 'Print-off command' }])
 })
 
-test('filters uncanonicalized numeric behavior repeated before, during, and after the physical stop', () => {
+test('normalizes scalar indexed deck status used by presses 3-11 and ignores auxiliary indexes', () => {
+  const catalog = ['active', 'deck_out', 'print_on', 'print_off'].flatMap((role, roleIndex) => Array.from({ length: 13 }, (_, index) => ({
+    id: roleIndex * 20 + index, sourceId: 3, signalId: `DA.BuRServer.Press3.deck_${role}[${index}]`, displayName: `deck_${role}`, sourceUnit: null, valueKind: 'boolean', enabled: true,
+  })))
+  const candidates = deckStatusRawCandidates(catalog)
+  assert.equal(candidates.length, 40)
+  assert.deepEqual([...new Set(candidates.map(({ deckNumber }) => deckNumber))], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+  const scalarHistory = (role: 'active' | 'deck_out' | 'print_on' | 'print_off', deckNumber: number, values: Array<[number, boolean]>) => ({
+    role, deckNumber, history: rawHistory(`DA.BuRServer.Press3.deck_${role}[${deckNumber}]`, `deck_${role}`, values),
+  })
+  const histories = Array.from({ length: 10 }, (_, index) => index + 1).flatMap((deckNumber) => [
+    scalarHistory('active', deckNumber, [[-5, true]]),
+    scalarHistory('print_on', deckNumber, [[-5, true], [10, false], [60, true]]),
+    scalarHistory('deck_out', deckNumber, [[-5, false], [10, true], [20, false]]),
+    scalarHistory('print_off', deckNumber, [[-5, false], [10, true], [11, false]]),
+  ])
+  const context = buildDeckStatusContext(histories, at(0), at(75))
+  assert.equal(context.availability, 'AVAILABLE')
+  assert.deepEqual(context.decks[9]?.intervals.map(({ state }) => state), ['PRINTING', 'OUT', 'READY', 'PRINTING'])
+})
+
+test('normalizes the validated Ruby Status and Position contract for Presses 14 and 15', () => {
+  for (const pressNumber of [14, 15]) {
+    const catalog = Array.from({ length: 10 }, (_, index) => index + 1).flatMap((deckNumber, index) => [
+      { id: index * 2 + 1, sourceId: pressNumber, signalId: `Ruby.Press${pressNumber}.Line${pressNumber}.ProcessData.Color deck ${deckNumber}.Status [0/1]`, displayName: `Color deck ${deckNumber}.Status`, sourceUnit: null, valueKind: 'boolean', enabled: true },
+      { id: index * 2 + 2, sourceId: pressNumber, signalId: `Ruby.Press${pressNumber}.Line${pressNumber}.ProcessData.Color deck ${deckNumber}.Position [#]`, displayName: `Color deck ${deckNumber}.Position`, sourceUnit: null, valueKind: 'number', enabled: true },
+    ])
+    catalog.push({ id: 99, sourceId: pressNumber, signalId: `Ruby.Press${pressNumber}.Line${pressNumber}.ProcessData.Color deck 11.Position [#]`, displayName: 'Color deck 11.Position', sourceUnit: null, valueKind: 'number', enabled: true })
+    const candidates = deckStatusRawCandidates(catalog)
+    assert.equal(candidates.length, 20)
+    assert.deepEqual([...new Set(candidates.map(({ role }) => role))].sort(), ['position', 'status'])
+    assert.deepEqual([...new Set(candidates.map(({ deckNumber }) => deckNumber))], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+
+    const histories = candidates.map((candidate) => ({
+      ...candidate,
+      history: rawHistory(candidate.rawIdentity, candidate.rawIdentity, candidate.role === 'status'
+        ? [[-5, true], [40, false], [50, true]]
+        : [[-5, 3], [10, 1], [20, 2], [30, 3], [40, 1], [50, 0]]),
+    }))
+    const context = buildDeckStatusContext(histories, at(0), at(75))
+    assert.equal(context.availability, 'AVAILABLE')
+    assert.match(context.reason, /Validated Ruby Status\/Position telemetry/)
+    assert.deepEqual(context.decks[0]?.intervals.map(({ state }) => state), ['PRINTING', 'OUT', 'READY', 'PRINTING', 'INACTIVE', 'UNKNOWN'])
+    assert.deepEqual(context.decks[0]?.intervals.map(({ active, printing, out }) => ({ active, printing, out })), [
+      { active: true, printing: true, out: false },
+      { active: true, printing: false, out: true },
+      { active: true, printing: false, out: false },
+      { active: true, printing: true, out: false },
+      { active: false, printing: false, out: false },
+      { active: true, printing: null, out: null },
+    ])
+  }
+})
+
+test('selects complete per-deck wash, pump, impression, and deck evidence beyond the former fleet cap', () => {
+  const ids = [
+    'ink.washup.state', 'ink.pump.status', 'ink.pump.sequence', 'ink.pump.frequency.supply', 'ink.pump.frequency.return', 'ink.viscosity.mode', 'ink.viscosity.status',
+    ...Array.from({ length: 14 }, (_, index) => `impression.test_${index + 1}`),
+    'deck.active', 'deck.print_on', 'deck.print_off', 'register.long.actual_or_correction',
+  ]
+  const capabilities = { pressKey: 'press3', sourceId: 3, sourceKey: 'press3', displayName: 'Press 3', metadataStatus: 'FRESH', capabilities: ids.map((canonicalId) => ({ canonicalId, state: 'SUPPORTED', deckNumbers: Array.from({ length: 10 }, (_, index) => index + 1), historyQueryable: true, evidenceKind: 'semantic_history' })) } as PressEvidenceCapabilities
+  const selection = evidenceSelectors('press3', capabilities)
+  assert.ok(selection.selectors.length > 120)
+  for (const prefix of ['ink.washup.', 'ink.pump.', 'ink.viscosity.', 'impression.', 'deck.']) assert.ok(selection.selectors.some(({ canonicalId, deckNumber }) => canonicalId.startsWith(prefix) && deckNumber === 10), prefix)
+})
+
+test('keeps raw/unmapped observations visible below the chronology even when behavior repeats in all phases', () => {
   const fixture = actionFixture()
   const actions = buildUncanonicalizedRawActions({ stop: fixture.stop, allStops: [fixture.stop], histories: [rawHistory('P15.unique.unmapped', 'Unmapped analog', [[0, 0], [5, 1], [12, 2], [65, 3]])] })
-  assert.deepEqual(actions, [])
+  assert.deepEqual(actions.map(({ startAt }) => startAt), [at(5), at(12), at(65)])
 })
 
 test('keeps every changing raw identity independently selectable within its stop phase', () => {
@@ -737,13 +957,13 @@ test('keeps every changing raw identity independently selectable within its stop
   assert.ok(actions.every(({ startAt }) => startAt && Date.parse(startAt) >= Date.parse(fixture.stop.physicalSegment.startAt)))
 })
 
-test('retains a raw numeric phase-level anomaly when before and after return to a similar baseline', () => {
+test('separates raw numeric transitions into before, during, and after chronology markers', () => {
   const fixture = actionFixture()
   const actions = buildUncanonicalizedRawActions({ stop: fixture.stop, allStops: [fixture.stop], histories: [rawHistory('P15.unique.level', 'Unmapped phase level', [[0, 10], [2, 11], [4, 10], [6, 11], [12, 50], [14, 51], [16, 50], [18, 51], [65, 10], [67, 11], [69, 10], [71, 11]])] })
-  assert.equal(actions.length, 1)
-  assert.equal(actions[0]?.displayName, 'Unmapped phase level')
-  assert.ok(actions[0]?.evidence.every(({ atUtc }) => Date.parse(atUtc) >= Date.parse(fixture.stop.physicalSegment.startAt) && Date.parse(atUtc) < Date.parse(fixture.stop.physicalSegment.endAt!)))
-  assert.match(actions[0]?.evidence[0]?.explanation ?? '', /phase medians were similar/i)
+  assert.equal(actions.length, 3)
+  assert.ok(actions.every(({ displayName }) => displayName === 'Unmapped phase level'))
+  assert.ok(actions.some(({ evidence }) => evidence.every(({ atUtc }) => Date.parse(atUtc) < Date.parse(fixture.stop.physicalSegment.startAt))))
+  assert.ok(actions.some(({ evidence }) => evidence.every(({ atUtc }) => Date.parse(atUtc) >= Date.parse(fixture.stop.physicalSegment.endAt!))))
 })
 
 test('applies phase-context behavior filtering to canonical action variables, not only pump frequency', () => {
@@ -755,7 +975,7 @@ test('applies phase-context behavior filtering to canonical action variables, no
   assert.equal(analysis.actions.some(({ actionCode }) => actionCode === 'WASH_ACTIVITY'), true)
 })
 
-test('loads every eligible unmapped changing signal while excluding canonical, unavailable, and container identities', () => {
+test('discovers every eligible unmapped signal but bounds eager raw-history enrichment to the most active candidates', () => {
   const candidate = (index: number) => ({ rawIdentity: `P15.unique.raw_${index}`, displayName: `Raw ${index}`, dataKind: 'numeric', plottable: true, changeCount: index + 1, unavailableObservationCount: 0, alternateRawIdentities: [] })
   const eligible = Array.from({ length: 30 }, (_, index) => candidate(index))
   const inputs = [
@@ -768,6 +988,10 @@ test('loads every eligible unmapped changing signal while excluding canonical, u
   const selected = uncanonicalizedRawCandidates(inputs, ['P15.mapped.direct', 'P15.mapped.alternate'])
   assert.equal(selected.length, 30)
   assert.ok(selected.every(({ rawIdentity }) => rawIdentity.startsWith('P15.unique.raw_')))
+  const bounded = selectBoundedRawEvidenceCandidates(inputs, ['P15.mapped.direct', 'P15.mapped.alternate'])
+  assert.equal(bounded.discovered.length, 30)
+  assert.equal(bounded.selected.length, STOP_DETAIL_RAW_EVIDENCE_LIMIT)
+  assert.deepEqual(bounded.selected.map(({ changeCount }) => changeCount), [...bounded.selected.map(({ changeCount }) => changeCount)].sort((left, right) => right - left))
 })
 
 test('represents complementary raw print on/off transitions once', () => {
@@ -891,11 +1115,21 @@ test('P15 E166-E168-like restart-heavy evidence keeps component actions and Radi
   assert.equal(analysis.actions.some(({ actionCode }) => actionCode === 'COLOR_RELATED_ACTIVITY'), false)
 })
 
-test('ordinary P14 E072-like downtime does not receive full Changeover Actions analysis', () => {
-  const downtime = classify({ identities: [identity('recipe', 'STRONG')], families: [family('WASH_PUMP_INK')] })
+test('ordinary P14 E072-like downtime receives the same bounded action discovery for classification review', () => {
+  const downtime = classify({ identities: [identity('recipe', 'STRONG')], families: [family('WASH_PUMP_INK')], requiredChangeoverEvidence: { ...completeRequiredEvidence(), washActivity: false } })
   const analysis = buildChangeoverActions({ stop: downtime, allStops: [downtime], signals: [actionSignal('ink.pump.status', 1, 500, 'P14.Pump[1]', [[12, 0, 1]])], rangeEndUtc: at(30), evidenceCutoffUtc: at(30) })
-  assert.equal(analysis.eligible, false)
-  assert.deepEqual([analysis.actions, analysis.notDirectlyConfirmed], [[], []])
+  assert.equal(downtime.classification, 'DOWNTIME')
+  assert.equal(analysis.eligible, true)
+  assert.match(analysis.reason, /every selected physical stop/i)
+  assert.ok(analysis.actions.some(({ actionCode }) => actionCode === 'INK_PUMP_ACTIVITY'))
+  assert.ok(analysis.notDirectlyConfirmed.some(({ actionCode }) => actionCode === 'WASH_ACTIVITY'))
+})
+
+test('raw and unmapped action discovery also runs for downtime predictions', () => {
+  const fixture = actionFixture()
+  const downtime = { ...fixture.stop, classification: 'DOWNTIME' as const, confidence: 'HIGH' as const }
+  const actions = buildUncanonicalizedRawActions({ stop: downtime, allStops: [downtime], histories: [rawHistory('P15.review.raw', 'Review-only unmapped signal', [[10, 0], [12, 1], [14, 2]])] })
+  assert.ok(actions.some(({ displayName }) => displayName === 'Review-only unmapped signal'))
 })
 
 test('action comparison remains bounded descriptive support, never statistical certainty', () => {
@@ -904,4 +1138,33 @@ test('action comparison remains bounded descriptive support, never statistical c
   const comparison = analysis.actions.find(({ actionCode }) => actionCode === 'REGISTRATION_ADJUSTMENT')?.comparison
   assert.deepEqual(comparison && [comparison.changeoverStopsObserved, comparison.changeoverStopsTotal, comparison.downtimeStopsObserved, comparison.downtimeStopsTotal], [1, 1, 1, 1])
   assert.match(comparison?.interpretation ?? '', /descriptive only/)
+})
+
+test('finds one preferred machine-level web, film, and plate value without collapsing per-deck repeat corrections', () => {
+  const source = (id: number, signalId: string, sourceUnit = ''): TelemetrySourceSignal => ({ id, sourceId: 34, signalId, displayName: signalId.split('.').at(-1)!, sourceUnit, valueKind: 'numeric', enabled: true })
+  const selected = productionAttributeRawCandidates([
+    source(1, 'Ruby.Press15.Line15.ProcessData.Unwind.Web width [mm]', 'mm'),
+    source(2, 'Ruby.Press15.Line15.ProcessData.Unwind.Web width [inch]', 'inch'),
+    source(3, 'Ruby.Press15.Line15.ProcessData.Unwind.thickness [um]', 'um'),
+    source(4, 'Ruby.Press15.Line15.ProcessData.Unwind.thickness [mil]', 'mil'),
+    source(5, 'Ruby.Press15.Line15.ProcessData.Unwind.Density [lb/in3]', 'lb/in3'),
+    source(6, 'Ruby.Press15.Line15.ProcessData.PrintUnit.Print repeat [inch]', 'inch'),
+    source(7, 'Ruby.Press15.Line15.ProcessData.Color deck 1.Repeat length correct_ [inch]', 'inch'),
+  ])
+  assert.deepEqual(selected.map(({ definition, signal }) => [definition.attribute, signal.id]), [
+    ['WEB_WIDTH', 2], ['FILM_THICKNESS', 4], ['FILM_DENSITY', 5], ['PLATE_REPEAT', 6],
+  ])
+  assert.equal(productionAttributeDisplayUnit('FILM_DENSITY', 'g/cm�'), 'g/cm³')
+  assert.equal(productionAttributeDisplayUnit('FILM_DENSITY', 'lb/in3'), 'lb/in³')
+})
+
+test('splits production-attribute raw history into mergeable windows through the full 72-hour range', () => {
+  assert.deepEqual(productionAttributeHistoryRanges('2026-08-01T00:00:00.000Z', '2026-08-04T00:00:00.000Z'), [
+    { fromUtc: '2026-08-01T00:00:00.000Z', toUtc: '2026-08-02T00:00:00.000Z' },
+    { fromUtc: '2026-08-02T00:00:00.000Z', toUtc: '2026-08-03T00:00:00.000Z' },
+    { fromUtc: '2026-08-03T00:00:00.000Z', toUtc: '2026-08-04T00:00:00.000Z' },
+  ])
+  assert.deepEqual(productionAttributeHistoryRanges('2026-08-01T00:00:00.000Z', '2026-08-03T02:00:00.000Z').at(-1), {
+    fromUtc: '2026-08-03T00:00:00.000Z', toUtc: '2026-08-03T02:00:00.000Z',
+  })
 })

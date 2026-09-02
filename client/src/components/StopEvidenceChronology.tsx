@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react'
 import { formatPlantDateTimeCt } from '../time-ranges'
 import type { ChangeoverAction, StopIntelligenceDetail } from '../types/stop-intelligence'
 import { actionBandColor, physicalBehaviorIntervals, stopActionKey } from './StopIntelligenceTimeline'
@@ -11,6 +12,8 @@ export type EvidenceChronologyRow = {
   mapped: EvidenceItem[]
   raw: EvidenceItem[]
 }
+
+export type EvidenceChronologyMarker = EvidenceItem & { atUtc: string; position: number; lane: number }
 
 const FIVE_SECONDS = 5_000
 const physicalKind = (className?: string): EvidenceChronologyRow['physical'] => className?.includes('testing') ? 'testing' : className?.includes('stopped') ? 'stopped' : className?.includes('running') ? 'running' : 'unknown'
@@ -41,25 +44,65 @@ export function evidenceChronologyRows(detail: StopIntelligenceDetail): Evidence
   })
 }
 
+function markerLayout(items: EvidenceItem[], from: number, to: number, canvasWidth: number): EvidenceChronologyMarker[] {
+  const span = Math.max(1, to - from)
+  // Pack by rendered distance instead of a fixed percentage. A fixed 11% gap
+  // wastes lanes as the scrollable canvas grows, leaving markers far from the
+  // shared rail even though they no longer overlap visually.
+  const minimumSeparation = Math.min(11, 110 / canvasWidth * 100)
+  const laneEnds: number[] = []
+  return [...items].sort((left, right) => Date.parse(left.action.startAt!) - Date.parse(right.action.startAt!)).map((item) => {
+    const at = Date.parse(item.action.startAt!)
+    const position = Math.max(1, Math.min(99, (at - from) / span * 100))
+    let lane = laneEnds.findIndex((lastPosition) => position - lastPosition >= minimumSeparation)
+    if (lane < 0) lane = laneEnds.length
+    laneEnds[lane] = position
+    return { ...item, atUtc: item.action.startAt!, position, lane }
+  })
+}
+
+export function evidenceChronologyMarkers(detail: StopIntelligenceDetail) {
+  const from = Date.parse(detail.speedContext.fromUtc); const to = Date.parse(detail.speedContext.toUtc)
+  const rows = evidenceChronologyRows(detail)
+  const mapped = rows.flatMap(({ mapped }) => mapped); const raw = rows.flatMap(({ raw }) => raw)
+  const canvasWidth = Math.max(900, (mapped.length + raw.length) * 76)
+  return {
+    mapped: markerLayout(mapped, from, to, canvasWidth),
+    raw: markerLayout(raw, from, to, canvasWidth),
+    canvasWidth,
+  }
+}
+
 const decks = (action: ChangeoverAction) => [...new Set(action.evidence.flatMap((item) => item.deckNumber === null ? [] : [item.deckNumber]))].sort((left, right) => left - right)
 
-function EvidenceButtons({ items, selectedKeys, onSelect, raw }: { items: EvidenceItem[]; selectedKeys: string[]; onSelect(keys: string[]): void; raw?: boolean }) {
-  return <div className="si-evidence-chronology__events">{items.map(({ action, key }) => { const changedDecks = decks(action); const selected = selectedKeys.length === 1 && selectedKeys[0] === key; return <button type="button" key={key} className={selected ? 'selected' : ''} aria-pressed={selected} style={raw ? undefined : { '--action-color': actionBandColor(action.actionCode) } as React.CSSProperties} title={`${action.displayName}\n${formatPlantDateTimeCt(action.startAt!)}${action.endAt && action.endAt !== action.startAt ? ` → ${formatPlantDateTimeCt(action.endAt)}` : ''}\n${action.explanation}`} onClick={() => onSelect([key])}><strong>{action.displayName}</strong>{changedDecks.length > 0 && <small>Deck{changedDecks.length === 1 ? '' : 's'} {changedDecks.join(', ')}</small>}</button> })}</div>
+function EvidenceMarker({ marker, raw, selected, onSelect }: { marker: EvidenceChronologyMarker; raw?: boolean; selected: boolean; onSelect(): void }) {
+  const { action, position, lane } = marker
+  const changedDecks = decks(action)
+  const style = { '--marker-position': `${position}%`, '--marker-lane': lane, '--action-color': raw ? '#657981' : actionBandColor(action.actionCode) } as CSSProperties
+  return <button type="button" className={`si-evidence-horizontal__marker ${raw ? 'raw' : 'mapped'} ${selected ? 'selected' : ''}`} aria-pressed={selected} style={style} title={`${action.displayName}\n${formatPlantDateTimeCt(action.startAt!)}${action.endAt && action.endAt !== action.startAt ? ` → ${formatPlantDateTimeCt(action.endAt)}` : ''}\n${action.explanation}`} onClick={onSelect}><strong>{action.displayName}</strong>{changedDecks.length > 0 && <small>Deck{changedDecks.length === 1 ? '' : 's'} {changedDecks.join(', ')}</small>}<time>{formatPlantDateTimeCt(action.startAt!)}</time></button>
 }
+
+const tickTimes = (from: number, to: number) => [0, .25, .5, .75, 1].map((fraction) => ({ fraction, atUtc: new Date(from + (to - from) * fraction).toISOString() }))
 
 export function StopEvidenceChronology({ detail, selectedKeys, onSelect }: { detail: StopIntelligenceDetail; selectedKeys: string[]; onSelect(keys: string[]): void }) {
   if (!detail.changeoverActions.eligible) return <section className="si-action-summary si-action-summary--ineligible"><strong>Changeover actions not evaluated</strong><span>{detail.changeoverActions.reason}</span></section>
-  const rows = evidenceChronologyRows(detail)
-  const mappedCount = rows.reduce((sum, row) => sum + row.mapped.length, 0); const rawCount = rows.reduce((sum, row) => sum + row.raw.length, 0)
-  return <section className="si-evidence-chronology" aria-label="Mapped and raw evidence on synchronized vertical timelines">
-    <header><div><span className="eyebrow">Synchronized evidence chronology</span><h3>Mapped actions beside raw changes</h3></div><small>Both lanes share one scroll position and the same physical-behavior sequence.</small></header>
-    <div className="si-evidence-chronology__head"><strong>Mapped actions · {mappedCount}</strong><span>Plant time</span><strong>Raw / unmapped · {rawCount}</strong></div>
-    <div className="si-evidence-chronology__scroll">
-      {rows.map((row) => <div className={`si-evidence-chronology__row state-${row.physical}`} key={row.atUtc}>
-        <div className="si-evidence-chronology__lane mapped"><i/><EvidenceButtons items={row.mapped} selectedKeys={selectedKeys} onSelect={onSelect}/>{!row.mapped.length && <span className="si-evidence-chronology__quiet">{row.physicalLabel}</span>}</div>
-        <time title={`${formatPlantDateTimeCt(row.atUtc)} → ${formatPlantDateTimeCt(row.toUtc)}`}>{formatPlantDateTimeCt(row.atUtc)}<small>{row.physicalLabel.replace(/ #\d+$/, '')}</small></time>
-        <div className="si-evidence-chronology__lane raw"><i/><EvidenceButtons items={row.raw} selectedKeys={selectedKeys} onSelect={onSelect} raw/>{!row.raw.length && <span className="si-evidence-chronology__quiet">{row.physicalLabel}</span>}</div>
-      </div>)}
+  const from = Date.parse(detail.speedContext.fromUtc); const to = Date.parse(detail.speedContext.toUtc); const span = Math.max(1, to - from)
+  const markers = evidenceChronologyMarkers(detail)
+  const mappedLanes = Math.max(1, ...markers.mapped.map(({ lane }) => lane + 1)); const rawLanes = Math.max(1, ...markers.raw.map(({ lane }) => lane + 1))
+  const physical = physicalBehaviorIntervals(detail)
+  const canvasWidth = markers.canvasWidth
+  return <section className="si-evidence-chronology" aria-label="Mapped and raw evidence on one synchronized horizontal timeline">
+    <header><div><span className="eyebrow">Synchronized evidence chronology</span><h3>Mapped actions above · raw / unmapped below</h3></div><small>Select any labeled marker to plot its evidence. Every marker uses the same physical-behavior time rail.</small></header>
+    <div className="si-evidence-horizontal__summary"><strong>Mapped actions · {markers.mapped.length}</strong><span>One shared wall-clock timeline · CT</span><strong>Raw / unmapped · {markers.raw.length}</strong></div>
+    <div className="si-evidence-horizontal__viewport" tabIndex={0} aria-label="Horizontally scrollable evidence timeline">
+      <div className="si-evidence-horizontal__canvas" style={{ '--evidence-canvas-width': `${canvasWidth}px`, '--mapped-lanes': mappedLanes, '--raw-lanes': rawLanes } as CSSProperties}>
+        <div className="si-evidence-horizontal__lane si-evidence-horizontal__lane--mapped" aria-label="Mapped actions above timeline">{markers.mapped.map((marker) => <EvidenceMarker key={marker.key} marker={marker} selected={selectedKeys.length === 1 && selectedKeys[0] === marker.key} onSelect={() => onSelect([marker.key])}/>)}</div>
+        <div className="si-evidence-horizontal__rail" aria-label="Physical behavior timeline">
+          {physical.map((interval) => { const left = Math.max(0, (Date.parse(interval.startUtc) - from) / span * 100); const right = Math.min(100, (Date.parse(interval.endUtc) - from) / span * 100); return <span key={`${interval.startUtc}:${interval.endUtc}`} className={`state-${physicalKind(interval.className)}`} style={{ left: `${left}%`, width: `${Math.max(.12, right - left)}%` }} title={`${interval.label}\n${formatPlantDateTimeCt(interval.startUtc)} → ${formatPlantDateTimeCt(interval.endUtc)}`}>{right - left >= 8 ? interval.label.replace(/ #\d+$/, '') : ''}</span> })}
+        </div>
+        <div className="si-evidence-horizontal__lane si-evidence-horizontal__lane--raw" aria-label="Raw and unmapped observations below timeline">{markers.raw.length ? markers.raw.map((marker) => <EvidenceMarker key={marker.key} marker={marker} raw selected={selectedKeys.length === 1 && selectedKeys[0] === marker.key} onSelect={() => onSelect([marker.key])}/>) : <div className="si-evidence-horizontal__empty"><strong>Raw / unmapped</strong><span>{detail.rawUnmappedContext.reason}</span></div>}</div>
+        <div className="si-evidence-horizontal__axis">{tickTimes(from, to).map(({ fraction, atUtc }) => <time key={fraction} style={{ left: `${fraction * 100}%` }}>{formatPlantDateTimeCt(atUtc)}</time>)}</div>
+      </div>
     </div>
     <div className="si-timeline-legend"><span className="running">Running</span><span className="stopped">Stopped</span><span className="testing">Testing</span><span className="unknown">Unknown</span></div>
   </section>

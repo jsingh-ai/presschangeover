@@ -22,6 +22,32 @@ function baseClient(overrides: Partial<TelemetryClient> = {}): TelemetryClient {
   }
 }
 
+function semanticResponse(query: Parameters<NonNullable<TelemetryClient['querySemanticHistory']>>[1]): TelemetrySemanticHistoryResponse {
+  const template = mixedHistoryFixture.signals.find(({ canonicalId }) => canonicalId === 'ink.temperature.actual')!
+  return {
+    ...mixedHistoryFixture,
+    fromUtc: query.fromUtc,
+    toUtc: query.toUtc,
+    includeSeed: query.includeSeed,
+    signals: query.signals.map(({ canonicalId, deckNumber = null, representation }, index) => ({
+      ...template,
+      canonicalId,
+      deckNumber,
+      representation,
+      historianSignalId: 10_000 + index,
+      rawSignalId: `sanitized.${canonicalId}.${deckNumber ?? 'press'}`,
+    })),
+  }
+}
+
+async function waitUntil(predicate: () => boolean) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (predicate()) return
+    await new Promise<void>((resolve) => setImmediate(resolve))
+  }
+  assert.fail('condition was not reached')
+}
+
 test('source registry resolves press keys from source metadata without encoded IDs and caches metadata', async () => {
   let calls = 0
   const registry = new TelemetrySourceRegistry(baseClient({ getSources: async () => { calls += 1; return [{ id: 9876, sourceKey: 'press5', displayName: 'Press 5', enabled: true }] } }), 300_000)
@@ -167,6 +193,180 @@ test('analysis cache reuses exact, selector-subset, contained-range, and combine
   assert.equal(combined.signals[0]?.samples.find(({ observedAtUtc }) => observedAtUtc === at(12))?.qualityState, 'BAD')
   assert.equal(combined.readDiagnostics?.gaps.length, 1); assert.deepEqual(combined.readDiagnostics?.gaps[0], { canonicalId: 'ink.temperature.actual', deckNumber: null, startUtc: at(12), endUtc: at(30), durationMs: 18 * 60_000 })
   assert.equal(combined.readDiagnostics?.telemetryRequests, 0); assert.equal(combined.readDiagnostics?.chunkCount, 0); assert.equal(combined.readDiagnostics?.pointsReturned, 0)
+})
+
+test('analysis cache preserves same-request in-flight and completed reuse', async () => {
+  let calls = 0; let release!: () => void
+  const blocked = new Promise<void>((resolve) => { release = resolve })
+  const service = new TelemetryFoundationService(baseClient({ querySemanticHistory: async (_sourceId, query) => { calls += 1; await blocked; return semanticResponse(query) } }))
+  const query = { fromUtc: mixedHistoryFixture.fromUtc, toUtc: mixedHistoryFixture.toUtc, includeSeed: true, signals: [{ canonicalId: 'ink.temperature.actual', deckNumber: 3, representation: 'samples' as const }] }
+  const first = service.semanticHistory('press5', query, 'same-request')
+  await waitUntil(() => calls === 1)
+  const inFlightReuse = service.semanticHistory('press5', query, 'same-request')
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.equal(calls, 1)
+  release()
+  await Promise.all([first, inFlightReuse])
+  const completedReuse = await service.semanticHistory('press5', query, 'same-request')
+  assert.equal(calls, 1)
+  assert.equal(completedReuse.readDiagnostics?.cacheHitScope, 'SAME_REQUEST')
+})
+
+test('analysis cache reuses a completed exact result across request IDs within TTL', async () => {
+  let calls = 0; let now = 1_000
+  const service = new TelemetryFoundationService(baseClient({ querySemanticHistory: async (_sourceId, query) => { calls += 1; return semanticResponse(query) } }), { completedSemanticHistoryCacheTtlMs: 5_000, now: () => now })
+  const query = { fromUtc: mixedHistoryFixture.fromUtc, toUtc: mixedHistoryFixture.toUtc, includeSeed: true, signals: [{ canonicalId: 'ink.temperature.actual', deckNumber: 3, representation: 'samples' as const }] }
+  await service.semanticHistory('press5', query, 'request-a')
+  now += 250
+  const result = await service.semanticHistory('press5', query, 'request-b')
+  assert.equal(calls, 1)
+  assert.equal(result.readDiagnostics?.cacheHitType, 'EXACT')
+  assert.equal(result.readDiagnostics?.cacheHitScope, 'CROSS_REQUEST_COMPLETED')
+  assert.equal(result.readDiagnostics?.crossRequestCacheAgeMs, 250)
+  assert.equal(result.readDiagnostics?.actualUpstreamRequests, 0)
+})
+
+test('analysis cache reuses a completed contained range across request IDs and reconstructs its seed', async () => {
+  let calls = 0
+  const service = new TelemetryFoundationService(baseClient({ querySemanticHistory: async (_sourceId, query) => { calls += 1; return semanticResponse(query) } }))
+  const broad = { fromUtc: mixedHistoryFixture.fromUtc, toUtc: mixedHistoryFixture.toUtc, includeSeed: true, signals: [{ canonicalId: 'ink.temperature.actual', deckNumber: 3, representation: 'samples' as const }] }
+  await service.semanticHistory('press5', broad, 'request-a')
+  const contained = await service.semanticHistory('press5', { ...broad, fromUtc: '2026-08-12T03:32:00.000Z', toUtc: '2026-08-12T03:34:00.000Z' }, 'request-b')
+  assert.equal(calls, 1)
+  assert.equal(contained.readDiagnostics?.cacheHitType, 'CONTAINED_RANGE')
+  assert.equal(contained.readDiagnostics?.cacheHitScope, 'CROSS_REQUEST_COMPLETED')
+  assert.equal(contained.signals[0]?.samples.length, 0)
+  assert.equal(contained.signals[0]?.seed?.value, 22.25)
+  assert.equal(contained.signals[0]?.seed?.observedAtUtc, '2026-08-12T03:31:00.000Z')
+})
+
+test('analysis cache reuses a completed selector superset across request IDs', async () => {
+  let calls = 0
+  const service = new TelemetryFoundationService(baseClient({ querySemanticHistory: async (_sourceId, query) => { calls += 1; return semanticResponse(query) } }))
+  const selectors = [{ canonicalId: 'ink.temperature.actual', representation: 'samples' as const }, { canonicalId: 'dryer.tunnel.temperature.actual', representation: 'samples' as const }]
+  const broad = { fromUtc: mixedHistoryFixture.fromUtc, toUtc: mixedHistoryFixture.toUtc, includeSeed: true, signals: selectors }
+  await service.semanticHistory('press5', broad, 'request-a')
+  const subset = await service.semanticHistory('press5', { ...broad, signals: selectors.slice(0, 1) }, 'request-b')
+  assert.equal(calls, 1)
+  assert.equal(subset.signals.length, 1)
+  assert.equal(subset.readDiagnostics?.cacheHitType, 'SELECTOR_SUBSET')
+  assert.equal(subset.readDiagnostics?.cacheHitScope, 'CROSS_REQUEST_COMPLETED')
+})
+
+test('analysis cache does not share an in-flight operation across request IDs', async () => {
+  let calls = 0; const releases: Array<() => void> = []
+  const service = new TelemetryFoundationService(baseClient({ querySemanticHistory: async (_sourceId, query) => {
+    calls += 1
+    await new Promise<void>((resolve) => releases.push(resolve))
+    return semanticResponse(query)
+  } }))
+  const query = { fromUtc: mixedHistoryFixture.fromUtc, toUtc: mixedHistoryFixture.toUtc, includeSeed: true, signals: [{ canonicalId: 'ink.temperature.actual', representation: 'samples' as const }] }
+  const first = service.semanticHistory('press5', query, 'request-a')
+  await waitUntil(() => calls === 1)
+  const second = service.semanticHistory('press5', query, 'request-b')
+  await waitUntil(() => calls === 2)
+  assert.equal(calls, 2)
+  releases.splice(0).forEach((resolve) => resolve())
+  const results = await Promise.all([first, second])
+  assert.ok(results.every((result) => result.readDiagnostics?.cacheMiss))
+})
+
+test('analysis cache rereads a completed cross-request entry after TTL expiry', async () => {
+  let calls = 0; let now = 10_000
+  const service = new TelemetryFoundationService(baseClient({ querySemanticHistory: async (_sourceId, query) => { calls += 1; return semanticResponse(query) } }), { completedSemanticHistoryCacheTtlMs: 100, now: () => now })
+  const query = { fromUtc: mixedHistoryFixture.fromUtc, toUtc: mixedHistoryFixture.toUtc, includeSeed: true, signals: [{ canonicalId: 'ink.temperature.actual', representation: 'samples' as const }] }
+  await service.semanticHistory('press5', query, 'request-a')
+  now += 101
+  const result = await service.semanticHistory('press5', query, 'request-b')
+  assert.equal(calls, 2)
+  assert.equal(result.readDiagnostics?.cacheMiss, true)
+})
+
+test('analysis cache removes failed operations and retries instead of returning a poisoned result', async () => {
+  let calls = 0
+  const service = new TelemetryFoundationService(baseClient({ querySemanticHistory: async (_sourceId, query) => {
+    calls += 1
+    if (calls === 1) throw new TelemetryApiError('unavailable')
+    return semanticResponse(query)
+  } }))
+  const query = { fromUtc: mixedHistoryFixture.fromUtc, toUtc: mixedHistoryFixture.toUtc, includeSeed: true, signals: [{ canonicalId: 'ink.temperature.actual', representation: 'samples' as const }] }
+  await assert.rejects(service.semanticHistory('press5', query, 'request-a'), (error: unknown) => error instanceof TelemetryApiError && error.kind === 'unavailable')
+  const retry = await service.semanticHistory('press5', query, 'request-b')
+  assert.equal(calls, 2)
+  assert.equal(retry.readDiagnostics?.cacheMiss, true)
+})
+
+test('semantic-history semaphore limits concurrent physical requests across logical reads', async () => {
+  let calls = 0; let active = 0; let maximumActive = 0
+  const service = new TelemetryFoundationService(baseClient({ querySemanticHistory: async (_sourceId, query) => {
+    calls += 1; active += 1; maximumActive = Math.max(maximumActive, active)
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    active -= 1
+    return semanticResponse(query)
+  } }), { semanticHistoryConcurrency: 2 })
+  const start = Date.parse('2026-08-12T00:00:00.000Z')
+  const query = (offsetMinutes: number) => ({ fromUtc: new Date(start + offsetMinutes * 60_000).toISOString(), toUtc: new Date(start + (offsetMinutes + 5 * 60) * 60_000).toISOString(), includeSeed: false, signals: [{ canonicalId: 'ink.temperature.actual', representation: 'samples' as const }] })
+  await Promise.all([service.semanticHistory('press5', query(0), 'request-a'), service.semanticHistory('press5', query(1), 'request-b'), service.semanticHistory('press5', query(2), 'request-c')])
+  assert.equal(calls, 9)
+  assert.ok(maximumActive <= 2)
+})
+
+test('semantic-history semaphore removes a cancelled queued waiter without issuing upstream work', async () => {
+  let calls = 0; let releaseFirst!: () => void
+  const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve })
+  const service = new TelemetryFoundationService(baseClient({ querySemanticHistory: async (_sourceId, query) => {
+    calls += 1
+    if (calls === 1) await firstBlocked
+    return semanticResponse(query)
+  } }), { semanticHistoryConcurrency: 1 })
+  const query = { fromUtc: mixedHistoryFixture.fromUtc, toUtc: mixedHistoryFixture.toUtc, includeSeed: false, signals: [{ canonicalId: 'ink.temperature.actual', representation: 'samples' as const }] }
+  const first = service.semanticHistory('press5', query, 'request-a')
+  await waitUntil(() => calls === 1)
+  const controller = new AbortController()
+  const cancelled = service.semanticHistory('press5', query, 'request-b', controller.signal)
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  controller.abort()
+  await assert.rejects(cancelled, (error: unknown) => error instanceof TelemetryApiError && error.kind === 'cancelled')
+  assert.equal(calls, 1)
+  releaseFirst()
+  await first
+  await service.semanticHistory('press5', { ...query, toUtc: '2026-08-12T03:36:00.000Z' }, 'request-c')
+  assert.equal(calls, 2)
+})
+
+test('semantic-history semaphore wait does not consume the downstream transport timeout window', async () => {
+  let calls = 0; let releaseFirst!: () => void
+  const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve })
+  const service = new TelemetryFoundationService(baseClient({ querySemanticHistory: async (_sourceId, query) => {
+    calls += 1
+    if (calls === 1) await firstBlocked
+    return semanticResponse(query)
+  } }), { semanticHistoryConcurrency: 1 })
+  const query = { fromUtc: mixedHistoryFixture.fromUtc, toUtc: mixedHistoryFixture.toUtc, includeSeed: false, signals: [{ canonicalId: 'ink.temperature.actual', representation: 'samples' as const }] }
+  const first = service.semanticHistory('press5', query, 'request-a')
+  await waitUntil(() => calls === 1)
+  const second = service.semanticHistory('press5', query, 'request-b')
+  await new Promise<void>((resolve) => setTimeout(resolve, 20))
+  assert.equal(calls, 1)
+  releaseFirst()
+  await first
+  const result = await second
+  assert.equal(calls, 2)
+  assert.ok((result.readDiagnostics?.semaphoreWaitMs ?? 0) >= 10)
+  assert.equal(result.readDiagnostics?.failureCount, 0)
+})
+
+test('semantic-history diagnostics capture timeout and failure counts for a rejected logical read', async () => {
+  const diagnostics: Array<{ timeoutCount: number; failureCount: number; actualUpstreamRequests: number }> = []
+  const service = new TelemetryFoundationService(baseClient({ querySemanticHistory: async () => { throw new TelemetryApiError('timeout') } }), {
+    onSemanticHistoryDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+  })
+  const query = { fromUtc: mixedHistoryFixture.fromUtc, toUtc: mixedHistoryFixture.toUtc, includeSeed: false, signals: [{ canonicalId: 'ink.temperature.actual', representation: 'samples' as const }] }
+  await assert.rejects(service.semanticHistory('press5', query, 'timeout-request'), (error: unknown) => error instanceof TelemetryApiError && error.kind === 'timeout')
+  assert.equal(diagnostics.length, 1)
+  assert.equal(diagnostics[0]?.timeoutCount, 1)
+  assert.equal(diagnostics[0]?.failureCount, 1)
+  assert.equal(diagnostics[0]?.actualUpstreamRequests, 1)
 })
 
 function contextFixture(): TelemetrySemanticHistoryResponse {

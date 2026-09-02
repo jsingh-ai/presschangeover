@@ -184,7 +184,6 @@ function rawHistoryPoints(histories: RawTelemetryHistoryResponse[]): ActionPoint
 
 /** Adds observed, explicitly uncanonicalized evidence without changing the physical stop or its classification. */
 export function buildUncanonicalizedRawActions(input: { stop: ClassifiedStop; allStops: ClassifiedStop[]; histories: RawTelemetryHistoryResponse[] }): ChangeoverAction[] {
-  if (input.stop.classification !== 'CHANGEOVER' || !['HIGH', 'MEDIUM'].includes(input.stop.confidence)) return []
   const points = rawHistoryPoints(input.histories)
   const stopStart = Date.parse(input.stop.physicalSegment.startAt)
   const stopEnd = Date.parse(input.stop.physicalSegment.endAt ?? '9999-12-31T23:59:59.999Z')
@@ -195,11 +194,10 @@ export function buildUncanonicalizedRawActions(input: { stop: ClassifiedStop; al
     byRawIdentity.set(rawIdentity, [...(byRawIdentity.get(rawIdentity) ?? []), point])
   }
   return [...byRawIdentity.entries()].flatMap(([rawIdentity, signalPoints]) => {
-    const contextualPoints = contextualBehaviorPoints(signalPoints, stopStart, stopEnd)
     const phases = [
-      contextualPoints.filter((point) => point.at < stopStart),
-      contextualPoints.filter((point) => point.at >= stopStart && point.at < stopEnd),
-      contextualPoints.filter((point) => point.at >= stopEnd),
+      signalPoints.filter((point) => point.at < stopStart),
+      signalPoints.filter((point) => point.at >= stopStart && point.at < stopEnd),
+      signalPoints.filter((point) => point.at >= stopEnd),
     ]
     const tagName = signalPoints[0]?.evidence.component ?? rawIdentity
     const definition = { ...RAW_DEFINITION, displayName: tagName, explanation: `${RAW_DEFINITION.explanation} The displayed name is the observed raw telemetry tag.` }
@@ -235,6 +233,35 @@ function familySignals(signals: PressSemanticSignalWithIdentity[], key: keyof ty
   return signals.filter((signal) => isDirectAniloxActivitySignal(signal.canonicalId))
 }
 
+export interface RequiredChangeoverActivity {
+  washActivity: boolean
+  pumpInkActivity: boolean
+  impressionAdjustment: boolean
+}
+
+/**
+ * Uses the same contextual action detectors as the investigation, but counts
+ * only evidence whose timestamp falls inside the physical stop.
+ */
+export function detectRequiredChangeoverActivity(input: { segment: ClassifiedStop['physicalSegment']; signals: PressSemanticSignalWithIdentity[]; rangeEndUtc: string; evidenceCutoffUtc: string }): RequiredChangeoverActivity {
+  const stopStart = Date.parse(input.segment.startAt)
+  const stopEnd = Date.parse(input.segment.endAt ?? input.rangeEndUtc)
+  const windowFrom = stopStart - ACTION_CONTEXT_MS
+  const windowTo = Math.min(stopEnd + ACTION_CONTEXT_MS, Date.parse(input.evidenceCutoffUtc))
+  const observedDuringStop = (key: 'wash' | 'pump' | 'impression') => familySignals(input.signals, key).some((signal) => {
+    const definition = ACTION_DEFINITIONS[key]
+    const discovered = key === 'pump'
+      ? pumpSignalPoints(signal, windowFrom, windowTo, stopStart, stopEnd, definition.explanation)
+      : signalPoints(signal, windowFrom, windowTo, definition.explanation)
+    return contextualBehaviorPoints(discovered, stopStart, stopEnd).some((point) => point.at >= stopStart && point.at < stopEnd)
+  })
+  return {
+    washActivity: observedDuringStop('wash'),
+    pumpInkActivity: observedDuringStop('pump'),
+    impressionAdjustment: observedDuringStop('impression'),
+  }
+}
+
 function radiusColorAction(stop: ClassifiedStop, allStops: ClassifiedStop[]): ChangeoverAction | null {
   const states = stop.radius.states.filter((state) => state.kind === 'radius' && /color/i.test(`${state.eventType ?? ''} ${state.statusCode ?? ''} ${state.statusDescription ?? ''}`))
   if (!states.length) return null
@@ -246,15 +273,14 @@ function radiusColorAction(stop: ClassifiedStop, allStops: ClassifiedStop[]): Ch
 export function buildChangeoverActions(input: { stop: ClassifiedStop; allStops: ClassifiedStop[]; signals: PressSemanticSignalWithIdentity[]; speedSignal?: PressSemanticSignalWithIdentity; rangeEndUtc: string; evidenceCutoffUtc: string }): ChangeoverActionAnalysis {
   const segment = input.stop.physicalSegment; const endAt = segment.endAt ?? input.rangeEndUtc
   const windowFrom = Date.parse(segment.startAt) - ACTION_CONTEXT_MS; const windowTo = Math.max(windowFrom, Math.min(Date.parse(endAt) + ACTION_CONTEXT_MS, Date.parse(input.evidenceCutoffUtc)))
-  const base = { eligible: false, reason: 'Full action discovery runs only for CHANGEOVER stops with HIGH or MEDIUM confidence.', windowFromUtc: new Date(windowFrom).toISOString(), windowToUtc: new Date(windowTo).toISOString(), actions: [], notDirectlyConfirmed: [], detectorVersion: STOP_INTELLIGENCE_ACTION_VERSION } satisfies ChangeoverActionAnalysis
-  if (input.stop.classification !== 'CHANGEOVER' || !['HIGH', 'MEDIUM'].includes(input.stop.confidence)) return base
+  const base = { eligible: true, reason: 'Derived action discovery runs for every selected physical stop, independently of its predicted classification or confidence.', windowFromUtc: new Date(windowFrom).toISOString(), windowToUtc: new Date(windowTo).toISOString(), actions: [], notDirectlyConfirmed: [], detectorVersion: STOP_INTELLIGENCE_ACTION_VERSION } satisfies ChangeoverActionAnalysis
 
   const actions: ChangeoverAction[] = []; const unconfirmed: ChangeoverAction[] = []
   const identity = identityAction(input.stop, input.signals, input.allStops)
   const identityBefore = input.stop.identities.find((item) => item.changed && item.beforeValue)
   if (identityBefore) actions.push(action({ actionCode: 'PREVIOUS_JOB_FINISHED', displayName: 'Previous Job Finished', operatorConcept: null, explanation: 'Stable previous identity plus the physical stop supports this operator concept; no dedicated PLC action is mapped.', family: null }, 'INFERRED', [physicalEvidence(input.stop, input.speedSignal, segment.startAt, null, 0, `Physical stop began with previous ${identityBefore.field} ${identityBefore.beforeValue}.`)], input.allStops))
   else unconfirmed.push(unknown('PREVIOUS_JOB_FINISHED', 'Previous Job Finished', 'No stable previous identity was available to support this inference.'))
-  if (identity) actions.push(identity); else unconfirmed.push(unknown('JOB_IDENTITY_TRANSITION', 'Job / Identity Change', 'No usable identity transition was associated with this changeover stop.', 'Possible Job Out'))
+  if (identity) actions.push(identity); else unconfirmed.push(unknown('JOB_IDENTITY_TRANSITION', 'Job / Identity Change', 'No usable identity transition was associated with this physical stop.', 'Possible Job Out'))
   const rollPoints = input.signals.filter((signal) => signal.canonicalId === 'production.roll' && signal.deckNumber === null).flatMap((signal) => contextualBehaviorPoints(signalPoints(signal, windowFrom, windowTo, ROLL_DEFINITION.explanation), Date.parse(segment.startAt), Date.parse(endAt)))
   actions.push(...burstActions(ROLL_DEFINITION, rollPoints, input.allStops))
   if (!actions.some((item) => item.actionCode === 'ROLL_TRANSITION')) unconfirmed.push(unknown('ROLL_TRANSITION', 'Roll Change', 'No canonical Roll identity transition was observed in the bounded action window.', 'Roll identity transition'))
@@ -275,5 +301,5 @@ export function buildChangeoverActions(input: { stop: ClassifiedStop; allStops: 
     unknown('MASTER_IMAGE_RUN', 'Master Image / Speed Set', 'No direct canonical Master Image mapping exists, and speed alone cannot establish this operator stage.'),
   )
   actions.sort((left, right) => Date.parse(left.startAt ?? '9999-12-31') - Date.parse(right.startAt ?? '9999-12-31') || left.actionCode.localeCompare(right.actionCode))
-  return { ...base, eligible: true, reason: 'Derived action discovery is enabled for this medium/high-confidence changeover.', actions, notDirectlyConfirmed: unconfirmed }
+  return { ...base, actions, notDirectlyConfirmed: unconfirmed }
 }

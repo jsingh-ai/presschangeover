@@ -2,10 +2,10 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import { DateTime } from 'luxon'
-import { actionTimingPhase, adjacentStopPress, buildFleetBandSegments, buildFleetRollLengthTrack, buildFleetSpeedTrack, buildOperatorReviewedSegments, buildSelectedSignalTracks, buildStopSpeedChartModel, buildStopTimelineModel, confirmsPrediction, createStop72HourRange, extendStopRangeForward, extendStopRangeLookback, filterStopEpisodes, fleetHoverSnapshot, groupChangeoverActions, identityValueStyle, investigationSegmentForReviewedInterval, latestOperatorDecisionForSegment, operatorDecisionActionsVisible, operatorDecisionButtonLabel, predictedFleetState, radiusCodeStyle, selectedSignalSnapshots, shiftStopRange, shouldEmphasizeAvailability, STOP_CLASSIFICATION_FILTERS, stopDecisionSummary, stopFleetTotals, stopInspectionSnapshot, toggledActionSelection } from '../src/components/StopIntelligencePage'
+import { actionTimingPhase, adjacentStopPress, buildFleetBandSegments, buildFleetRollLengthTrack, buildFleetSpeedTrack, buildOperatorReviewedSegments, buildProductionAttributeTracks, buildSelectedSignalTracks, buildStopSpeedChartModel, buildStopTimelineModel, changeoverRequirementChecks, confirmsPrediction, createStop72HourRange, extendStopRangeForward, extendStopRangeLookback, filterStopEpisodes, fleetHoverSnapshot, groupChangeoverActions, identityValueStyle, investigationSegmentForReviewedInterval, latestOperatorDecisionForSegment, operatorDecisionActionsVisible, operatorDecisionButtonLabel, predictedFleetState, radiusCodeStyle, selectedSignalSnapshots, shiftStopRange, shouldEmphasizeAvailability, STOP_CLASSIFICATION_FILTERS, stopDecisionSummary, stopFleetTotals, stopInspectionSnapshot, toggledActionSelection } from '../src/components/StopIntelligencePage'
 import { actionBandColor, actionSignalTrackKey, investigationRadiusCodeStyle, selectedActionSignalContext } from '../src/components/StopIntelligenceTimeline'
-import { evidenceChronologyRows } from '../src/components/StopEvidenceChronology'
-import { deckStatusIntervalLabel } from '../src/components/StopDeckStatusGantt'
+import { evidenceChronologyMarkers, evidenceChronologyRows } from '../src/components/StopEvidenceChronology'
+import { buildDeckStatusTimelineTracks, deckStatusIntervalLabel } from '../src/components/StopDeckStatusGantt'
 import { numericPaths, numericValueAtCursor } from '../src/components/SynchronizedTimeline'
 import { areaFromPathname, areaPath } from '../src/navigation'
 import { formatPlantDateTimeCt } from '../src/time-ranges'
@@ -22,7 +22,7 @@ const types = readFileSync(new URL('../src/types/stop-intelligence.ts', import.m
 const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
 const fleetTimelineSource = page.slice(page.indexOf('function FleetTimeline'), page.indexOf('function FleetRow'))
 
-const episode = (classification: StopFleetEpisode['classification'], stopId: string): StopFleetEpisode => ({ stopId, pressKey: 'press14', startAt: '2026-08-25T20:00:00.000Z', endAt: '2026-08-25T20:10:00.000Z', physicalDurationSeconds: 600, classification, confidence: 'HIGH', movementAttemptCount: 2, failedRecoveryCount: 1, radiusAlignment: 'CONTRADICTORY', radiusStatusDescription: 'Run Production', primaryReasonCodes: ['RECIPE_CHANGED'], leftCensored: false, rightCensored: false, affectedByCollectionGap: false, affectedBySpeedQuality: false })
+const episode = (classification: StopFleetEpisode['classification'], stopId: string): StopFleetEpisode => ({ stopId, pressKey: 'press14', startAt: '2026-08-25T20:00:00.000Z', endAt: '2026-08-25T20:10:00.000Z', physicalDurationSeconds: 600, classification, confidence: 'HIGH', movementAttemptCount: 2, failedRecoveryCount: 1, radiusAlignment: 'CONTRADICTORY', radiusStatusDescription: 'Run Production', primaryReasonCodes: ['RECIPE_CHANGED'], leftCensored: false, rightCensored: false, affectedByCollectionGap: false, affectedBySpeedQuality: false, changeoverActivityWindows: [] })
 const press = (overrides: Partial<StopFleetPressSummary> = {}): StopFleetPressSummary => ({ pressKey: 'press14', displayName: 'Press 14', telemetryEvidenceState: 'AVAILABLE', stopCount: 4, totalPhysicalStopSeconds: 2_400, changeoverCount: 1, downtimeCount: 1, uncertainCount: 1, badDataCount: 1, changeoverPhysicalStopSeconds: 600, longestPhysicalStopSeconds: 900, dataAvailabilityWarning: false, warningReason: null, episodes: [episode('CHANGEOVER', 'c'), episode('DOWNTIME', 'd'), episode('UNCERTAIN', 'u'), episode('IGNORE_BAD_DATA', 'b')], speedContext: { fromUtc: '2026-08-25T19:45:00.000Z', toUtc: '2026-08-25T20:25:00.000Z', unit: 'ft/min', stopThreshold: 1, recoveryThreshold: 595, observations: [{ atUtc: '2026-08-25T19:50:00.000Z', speed: 800, qualityState: 'GOOD' }, { atUtc: '2026-08-25T20:00:00.000Z', speed: 0, qualityState: 'GOOD' }, { atUtc: '2026-08-25T20:10:00.000Z', speed: 700, qualityState: 'GOOD' }], unknownIntervals: [] }, radiusContext: { states: [{ kind: 'radius', startUtc: '2026-08-25T19:45:00.000Z', endUtc: '2026-08-25T20:25:00.000Z', eventType: 'G', statusCode: '150', statusDescription: 'Run Production', isProduction: true }], reason: 'Raw Radius available.' }, identityContext: [{ signalId: 20, canonicalId: 'production.order', rawIdentity: 'Order', observations: [{ atUtc: '2026-08-25T19:45:00.000Z', value: 'ORD-100', qualityState: 'GOOD' }] }, { signalId: 21, canonicalId: 'production.recipe', rawIdentity: 'Recipe', observations: [{ atUtc: '2026-08-25T19:45:00.000Z', value: 'REC-A', qualityState: 'GOOD' }] }], rollLengthContext: { signalId: 22, canonicalId: 'production.roll.length.actual', rawIdentity: 'RollLength', unit: 'ft', observations: [{ atUtc: '2026-08-25T19:45:00.000Z', value: 0, qualityState: 'GOOD' }, { atUtc: '2026-08-25T19:55:00.000Z', value: 500, qualityState: 'GOOD' }, { atUtc: '2026-08-25T20:00:00.000Z', value: 0, qualityState: 'GOOD' }, { atUtc: '2026-08-25T20:10:00.000Z', value: 400, qualityState: 'GOOD' }] }, ...overrides })
 
 const visualDetail = (): StopIntelligenceDetail => ({
@@ -39,6 +39,7 @@ const visualDetail = (): StopIntelligenceDetail => ({
     fromUtc: '2026-08-25T19:45:00.000Z', toUtc: '2026-08-25T20:25:00.000Z', availability: 'AVAILABLE', reason: 'Raw deck containers split into Decks 1–10.', sourceIdentities: [{ role: 'active', rawIdentity: 'P14.deck.active' }, { role: 'deck_out', rawIdentity: 'P14.deck.deck_out' }, { role: 'print_on', rawIdentity: 'P14.deck.print_on' }, { role: 'print_off', rawIdentity: 'P14.deck.print_off' }],
     decks: Array.from({ length: 10 }, (_, index) => ({ deckNumber: index + 1, intervals: [{ startUtc: '2026-08-25T19:45:00.000Z', endUtc: '2026-08-25T20:00:00.000Z', state: 'PRINTING' as const, active: true, printing: true, out: false }, { startUtc: '2026-08-25T20:00:00.000Z', endUtc: '2026-08-25T20:10:00.000Z', state: 'OUT' as const, active: true, printing: false, out: true }, { startUtc: '2026-08-25T20:10:00.000Z', endUtc: '2026-08-25T20:25:00.000Z', state: 'PRINTING' as const, active: true, printing: true, out: false }], events: index === 0 ? [{ atUtc: '2026-08-25T20:00:00.000Z', kind: 'PRINT_OFF_COMMAND' as const, label: 'Print-off command' }] : [] })),
   },
+  changeoverActivityWindows: [{ id: 'visual:job-out', kind: 'job-out', label: 'Job Out', startAt: '2026-08-25T20:00:00.000Z', endAt: '2026-08-25T20:03:00.000Z', source: 'TELEMETRY_INFERRED', explanation: 'Physical stop boundary.', evidenceDetails: ['Actual speed entered the stop.'] }, { id: 'visual:wash', kind: 'wash', label: 'Washing of Ink', startAt: '2026-08-25T20:01:00.000Z', endAt: '2026-08-25T20:07:00.000Z', source: 'TELEMETRY', explanation: 'First through last wash activity.', evidenceDetails: ['Wash activity window.'] }, { id: 'visual:register', kind: 'register', label: 'Registration Setup', startAt: '2026-08-25T20:03:00.000Z', endAt: '2026-08-25T20:08:00.000Z', source: 'TELEMETRY', explanation: 'First through last registration activity.', evidenceDetails: ['Registration activity window.'] }, { id: 'visual:impression', kind: 'impression', label: 'Impression Setup', startAt: '2026-08-25T20:04:00.000Z', endAt: '2026-08-25T20:09:00.000Z', source: 'TELEMETRY', explanation: 'First through last impression activity.', evidenceDetails: ['Impression activity window.'] }, { id: 'visual:color', kind: 'color-check', label: 'Color Check', startAt: '2026-08-25T20:08:00.000Z', endAt: '2026-08-25T20:10:00.000Z', source: 'TELEMETRY', explanation: 'Stopped speed and pump activity.', evidenceDetails: ['Pump changed while speed was stopped.'] }],
   stop: {
     physicalSegment: { pressKey: 'press14', sourceId: 1, speedSignalId: 2, startAt: '2026-08-25T20:00:00.000Z', endAt: '2026-08-25T20:10:00.000Z', leftCensored: false, rightCensored: false, leftCensorReason: null, rightCensorReason: null, physicalDurationSeconds: 600, zeroSpeedSeconds: 500, lowMovementSeconds: 100, movementAttempts: [{ startAt: '2026-08-25T20:03:00.000Z', endAt: '2026-08-25T20:04:00.000Z', durationSeconds: 60, averageSpeed: 45, peakSpeed: 90, reachedRecoveryThreshold: false, failedRecoveryCount: 1, sequenceNumber: 1 }], failedRecoveryCount: 1, failedRecoveryStreaks: [{ startAt: '2026-08-25T20:03:30.000Z', endAt: '2026-08-25T20:03:45.000Z', durationSeconds: 15, reason: 'DROPPED_BELOW_RECOVERY', movementAttemptSequenceNumber: 1 }], algorithmVersion: 'physical-v1', configVersion: 'config-v1' },
     classification: 'CHANGEOVER', confidence: 'HIGH', classificationVersion: 'classification-v1',
@@ -79,6 +80,10 @@ describe('Stop Intelligence fleet overview', () => {
     assert.match(page, /onSelectSegment={openSegmentReview}/)
     assert.match(page, /id="stop-investigation"/)
     assert.match(page, /Close investigation/)
+    assert.match(api, /if \(input\.includeRaw\) parameters\.set\('includeRaw', 'true'\)/)
+    assert.match(page, /Load raw evidence/)
+    assert.match(page, /includeRaw: true/)
+    assert.match(types, /'NOT_LOADED'.*'PARTIAL'/)
   })
 
   it('uses one press at a time and shifts bounded windows by their exact duration', () => {
@@ -158,6 +163,38 @@ describe('fleet timeline as the primary stop navigator', () => {
     assert.equal(segments.find(({ episode }) => episode?.stopId === 'down')?.className?.includes('is-filter-muted'), true)
   })
 
+  it('keeps physical running visible until two over-9k rolls qualify with the second starting within one hour', () => {
+    const value = navigationPress()
+    value.episodes = value.episodes.map((item) => item.stopId === 'uncertain' ? { ...item, operationalClassification: 'CHANGEOVER', changeoverStabilizationId: 'phase-1' } : item)
+    value.changeoverStabilizationPhases = [{
+      stabilizationId: 'phase-1', triggerStopId: 'change', startAt: '2026-08-25T20:05:00.000Z', endAt: range.toUtc,
+      status: 'STABILIZING', stabilizedAt: null, goodProductionStartAt: null, minimumRollLength: 9_000, requiredConsecutiveRolls: 2, completionWindowSeconds: 3_600,
+      qualifyingRolls: [{ rollId: 'ROLL-A', startAt: '2026-08-25T20:08:00.000Z', productionStartAt: '2026-08-25T20:10:00.000Z', completedAt: '2026-08-25T20:14:00.000Z', completedLength: 17_135, unit: 'ft' }],
+      continuationStopIds: ['uncertain'], reason: 'Awaiting a second qualifying roll.',
+    }]
+    const segments = buildFleetBandSegments(value, range, 'ALL')
+    const trialRun = segments.find((item) => item.kind === 'running' && item.stabilizationPhase)
+    const continuation = segments.find((item) => item.episode?.stopId === 'uncertain')
+    assert.equal(trialRun?.label, 'Changeover · trial run')
+    assert.equal(predictedFleetState(trialRun!), 'CHANGEOVER')
+    assert.equal(continuation?.label, 'Changeover continuation')
+    assert.equal(continuation?.episode?.classification, 'UNCERTAIN')
+    assert.equal(predictedFleetState(continuation!), 'CHANGEOVER')
+    assert.deepEqual(filterStopEpisodes(value.episodes, 'CHANGEOVER').map(({ stopId }) => stopId), ['change', 'uncertain'])
+  })
+
+  it('renders a stabilized sequence as one selectable Changeover event instead of separate stop and run blocks', () => {
+    const value = navigationPress()
+    value.episodes = [{ ...value.episodes[1]!, startAt: '2026-08-25T20:05:00.000Z', endAt: range.toUtc, classification: 'CHANGEOVER', operationalClassification: 'CHANGEOVER', mergedChangeover: true, constituentStopIds: ['change', 'uncertain'], eventDurationSeconds: 1_200, physicalDurationSeconds: 480, trialRunSeconds: 720, changeoverStabilizationId: 'phase-merged' }]
+    value.changeoverStabilizationPhases = [{ stabilizationId: 'phase-merged', triggerStopId: 'change', startAt: '2026-08-25T20:05:00.000Z', endAt: range.toUtc, status: 'STABILIZING', stabilizedAt: null, goodProductionStartAt: null, minimumRollLength: 9_000, requiredConsecutiveRolls: 2, completionWindowSeconds: 3_600, qualifyingRolls: [], continuationStopIds: ['uncertain'], reason: 'Awaiting proof.' }]
+    const segments = buildFleetBandSegments(value, range, 'ALL')
+    const merged = segments.filter(({ episode }) => episode)
+    assert.equal(merged.length, 1)
+    assert.deepEqual([merged[0]!.startUtc, merged[0]!.endUtc, merged[0]!.label], ['2026-08-25T20:05:00.000Z', range.toUtc, 'CHANGEOVER'])
+    assert.match(merged[0]!.details ?? '', /One merged Changeover event/)
+    assert.match(merged[0]!.details ?? '', /physically stopped 8m 0s · trial running 12m 0s/)
+  })
+
   it('aligns the speed trace to the same range and breaks it across UNKNOWN', () => {
     const track = buildFleetSpeedTrack(navigationPress())
     assert.equal(track.id, 'fleet-speed:press14')
@@ -201,6 +238,21 @@ describe('fleet timeline as the primary stop navigator', () => {
     assert.match(styles, /aria-label\^="Roll length \(actual\)"/)
   })
 
+  it('adds discovered material and plate values below roll length only when the operator opens the toggle', () => {
+    const value = press({ productionAttributeContext: [
+      { attribute: 'WEB_WIDTH', label: 'Web width', rawIdentity: 'production_material_width', unit: 'inch', observations: [{ atUtc: '2026-08-25T19:45:00.000Z', value: 38, qualityState: 'GOOD' }, { atUtc: '2026-08-25T20:00:00.000Z', value: 40, qualityState: 'GOOD' }] },
+      { attribute: 'FILM_THICKNESS', label: 'Film thickness', rawIdentity: 'production_material_thickness', unit: 'mil', observations: [{ atUtc: '2026-08-25T19:45:00.000Z', value: 2.5, qualityState: 'GOOD' }] },
+    ] })
+    const tracks = buildProductionAttributeTracks(value)
+    assert.deepEqual(tracks.map(({ label }) => label), ['Web width', 'Film thickness'])
+    assert.equal(tracks[0]?.showCursorValue, true)
+    assert.equal(tracks[0]?.markers?.[0]?.label, '→ 40 inch')
+    assert.match(fleetTimelineSource, /showProductionAttributes/)
+    assert.match(fleetTimelineSource, /numeric:`\$\{rollLengthTrack\.id\}`|`numeric:\$\{rollLengthTrack\.id\}`/)
+    assert.match(fleetTimelineSource, /visibleProductionAttributeTracks\.map[\s\S]*interval:fleet-radius/)
+    assert.match(page, /Show'\} material &amp; plate values/)
+  })
+
   it('keeps known Press 14 offline context quiet and emphasizes Press 15 data-quality warnings', () => {
     const press14 = navigationPress()
     press14.telemetryEvidenceState = 'SOURCE_TELEMETRY_UNAVAILABLE'
@@ -242,7 +294,7 @@ describe('fleet timeline as the primary stop navigator', () => {
     assert.match(page, /formatPlantDateTimeCt\(value\)/)
     assert.match(timeline, /formatPlantDateTimeCt\(value\)/)
     assert.match(chronology, /formatPlantDateTimeCt\(action\.startAt!\)/)
-    assert.match(deckStatus, /formatPlantDateTimeCt\(interval\.startUtc\)/)
+    assert.match(deckStatus, /formatPlantDateTimeCt\(startUtc\)/)
     assert.match(synchronizedTimeline, /Wall clock · CT/)
   })
 
@@ -347,9 +399,10 @@ describe('fleet timeline as the primary stop navigator', () => {
     assert.match(page, /Investigate the bounded evidence/)
     assert.match(page, /Open the synchronized speed, Radius, identity, restart, and action evidence/)
     assert.match(page, /const intervalTracks = \[\.\.\.baseTracks, reviewedTrack\]/)
-    assert.match(page, /`numeric:\$\{speedTrack\.id\}`, `interval:\$\{reviewedTrack\.id\}`/)
-    assert.match(styles, /aria-label\^="Actual speed"\]\) \{ order: 5 !important/)
-    assert.match(styles, /si-fleet-track--reviewed \{ order: 6 !important/)
+    assert.match(page, /`interval:fleet-state:\$\{press\.pressKey\}`, `numeric:\$\{speedTrack\.id\}`, `interval:\$\{reviewedTrack\.id\}`/)
+    assert.doesNotMatch(styles, /si-fleet-track--changeover-stages/)
+    assert.match(styles, /aria-label\^="Actual speed"\]\) \{ order: 9 !important/)
+    assert.match(styles, /si-fleet-track--reviewed \{ order: 10 !important/)
     assert.match(styles, /si-correction-dialog/)
     assert.match(styles, /:root:not\(\[data-theme="dark"\]\) \.si-decision/)
   })
@@ -418,7 +471,7 @@ describe('selected physical-stop investigation', () => {
     assert.doesNotMatch(page, /EASY-REG|EASY-SET/i)
   })
 
-  it('shows the action timeline only for eligible changeovers and exposes confidence semantics', () => {
+  it('shows action evidence for every evaluated physical stop and retains a defensive unavailable fallback', () => {
     assert.match(page, /if \(!analysis\.eligible\)/)
     assert.match(page, /Changeover actions and raw evidence by confidence and stop phase/)
     assert.match(timeline, /detail\.changeoverActions\.actions/)
@@ -453,10 +506,35 @@ describe('selected physical-stop investigation', () => {
 })
 
 describe('visual-first synchronized investigation model', () => {
-  it('uses one ordered axis for speed, physical behavior, Radius, identity, and actions without an availability row', () => {
+  it('keeps the activity breakdown out of the fleet timeline and collapsed by default in Visual Investigation', () => {
+    const report = press()
+    assert.equal(report.episodes.every(({ changeoverActivityWindows }) => changeoverActivityWindows.length === 0), true)
+    assert.doesNotMatch(fleetTimelineSource, /predictedChangeoverStages|stageTrack|Predicted changeover stages/)
+    assert.match(timeline, /detail\.changeoverActivityWindows\?\.length/)
+    assert.match(timeline, /showStageBreakdown.*useState\(false\)/)
+    assert.match(timeline, /Stage breakdown/)
+    assert.match(timeline, /includeStageBreakdown/)
+    assert.match(timeline, /id: `changeover-stage-/)
+    assert.doesNotMatch(fleetTimelineSource, /Changeover stages · selected stop|detailLoading|detail\.stopId/)
+    assert.doesNotMatch(fleetTimelineSource, /fleet-changeover-stages/)
+  })
+
+  it('keeps Visual Investigation capable of distinguishing fallback stage evidence', () => {
+    assert.match(timeline, /stage\.source === 'RADIUS_FALLBACK'/)
+    assert.match(timeline, /is-radius-fallback/)
+    assert.match(styles, /si-changeover-stage\.is-radius-fallback/)
+  })
+
+  it('uses one ordered axis and separate aligned rows for overlapping changeover activity windows', () => {
     const model = buildStopTimelineModel(visualDetail())
-    assert.deepEqual(model.trackOrder.slice(0, 5), ['numeric:actual-speed', 'interval:physical', 'interval:radius', 'interval:identity', 'interval:actions'])
-    assert.deepEqual(model.intervalTracks.map(({ id }) => id), ['physical', 'radius', 'identity', 'actions'])
+    const stageRows = [...new Set(visualDetail().changeoverActivityWindows.map(({ kind }) => `changeover-stage-${kind}`))]
+    assert.deepEqual(model.trackOrder, [...Array.from({ length: 10 }, (_, index) => `interval:deck-status-${index + 1}`), 'numeric:actual-speed', 'interval:physical', 'interval:radius', ...stageRows.map((id) => `interval:${id}`), 'interval:identity', 'interval:actions'])
+    assert.deepEqual(model.intervalTracks.map(({ id }) => id), [...Array.from({ length: 10 }, (_, index) => `deck-status-${index + 1}`), 'physical', 'radius', ...stageRows, 'identity', 'actions'])
+    assert.equal(model.intervalTracks.filter(({ className }) => className === 'si-changeover-stage-row').every(({ intervals }) => intervals.length >= 1), true)
+    assert.match(styles, /si-changeover-stage-row \{ min-height: \.9rem/)
+    assert.match(styles, /si-changeover-stage-row \.synchronized-timeline__track \{ min-height: \.72rem; height: \.72rem/)
+    assert.match(styles, /si-changeover-stage-row \.synchronized-timeline__interval > span \{ display: none/)
+    assert.equal(buildStopTimelineModel(visualDetail(), [], undefined, false).intervalTracks.some(({ id }) => id.startsWith('changeover-stage-')), false)
     assert.deepEqual(model.numericTracks.map(({ id }) => id), ['actual-speed'])
     assert.deepEqual([model.numericTracks[0]?.connectObservedGaps, model.numericTracks[0]?.interpolation, model.numericTracks[0]?.holdLastObservation], [true, 'step', true])
     assert.equal(model.eventTracks.length, 0)
@@ -465,6 +543,9 @@ describe('visual-first synchronized investigation model', () => {
     assert.equal(model.intervalTracks.some(({ id }) => id === 'availability'), false)
     const radius = model.intervalTracks.find(({ id }) => id === 'radius')?.intervals[0]
     assert.deepEqual([radius?.label, radius?.compactLabel], ['Run Production', 'RUN100'])
+    assert.deepEqual(model.intervalTracks.filter(({ id }) => id.startsWith('changeover-stage-')).flatMap(({ intervals }) => intervals.map(({ label }) => label)), ['Job Out', 'Washing of Ink', 'Registration Setup', 'Impression Setup', 'Color Check'])
+    assert.equal(model.intervalTracks.filter(({ id }) => id.startsWith('changeover-stage-')).flatMap(({ intervals }) => intervals).every(({ startUtc, endUtc }) => Date.parse(startUtc) >= Date.parse(visualDetail().speedContext.fromUtc) && Date.parse(endUtc) <= Date.parse(visualDetail().speedContext.toUtc)), true)
+    assert.match(timeline, /hoveredStage\.evidenceDetails\.map/)
     assert.deepEqual(model.intervalTracks.find(({ id }) => id === 'identity')?.intervals.map(({ style }) => style?.background), [identityValueStyle('production.order', 0)?.background, identityValueStyle('production.order', 1)?.background])
     assert.notEqual(investigationRadiusCodeStyle('M', '47')?.background, investigationRadiusCodeStyle('M', '48')?.background)
   })
@@ -552,8 +633,12 @@ describe('visual-first synchronized investigation model', () => {
     assert.equal(rows.some(({ physical }) => physical === 'stopped'), true)
     assert.equal(rows.some(({ physical }) => physical === 'testing'), true)
     assert.equal(rows.flatMap(({ mapped }) => mapped).some(({ action }) => action.displayName === 'Deck movement'), true)
-    assert.match(chronology, /Mapped actions beside raw changes/)
-    assert.match(chronology, /si-evidence-chronology__scroll/)
+    const markers = evidenceChronologyMarkers(visualDetail())
+    assert.equal(markers.mapped.some(({ action }) => action.displayName === 'Deck movement'), true)
+    assert.match(chronology, /Mapped actions above · raw \/ unmapped below/)
+    assert.match(chronology, /si-evidence-horizontal__rail/)
+    assert.match(chronology, /si-evidence-horizontal__lane--mapped/)
+    assert.match(chronology, /si-evidence-horizontal__lane--raw/)
   })
 
   it('uses one replaceable action selection and toggles the same action or group off', () => {
@@ -582,7 +667,7 @@ describe('visual-first synchronized investigation model', () => {
     assert.equal(geometry.paths.length, 2)
   })
 
-  it('puts overlapping detected actions in aligned lanes and omits action clutter for downtime', () => {
+  it('puts overlapping detected actions in aligned lanes and retains them for downtime review', () => {
     const detail = visualDetail()
     detail.changeoverActions.actions.push({ ...detail.changeoverActions.actions[0]!, actionCode: 'WASH_ACTIVITY', displayName: 'Wash activity', startAt: '2026-08-25T20:03:30.000Z', endAt: '2026-08-25T20:04:30.000Z' })
     const overlapTracks = buildStopTimelineModel(detail).intervalTracks.filter(({ id }) => id.startsWith('actions'))
@@ -591,10 +676,10 @@ describe('visual-first synchronized investigation model', () => {
     assert.equal(new Set(actionIntervals.map(({ style }) => style?.background)).size, 2)
     assert.equal(actionIntervals[0]?.details, 'Deck movement')
     assert.notEqual(actionBandColor('DECK_MOVEMENT'), actionBandColor('WASH_ACTIVITY'))
-    detail.stop.classification = 'DOWNTIME'; detail.changeoverActions.eligible = false; detail.changeoverActions.reason = 'Only changeovers receive action analysis.'; detail.changeoverActions.actions = []
+    detail.stop.classification = 'DOWNTIME'; detail.changeoverActions.eligible = true; detail.changeoverActions.reason = 'Derived action discovery runs for every selected physical stop.'
     const downtimeActions = buildStopTimelineModel(detail).intervalTracks.find(({ id }) => id === 'actions')!
-    assert.equal(downtimeActions.intervals.length, 0)
-    assert.equal(downtimeActions.unavailableLabel, 'Only changeovers receive action analysis.')
+    assert.ok(downtimeActions.intervals.length > 0)
+    assert.equal(downtimeActions.unavailableLabel, undefined)
   })
 
   it('keeps raw/unmapped tags out of action bands and presents them as the final evidence-matrix category', () => {
@@ -623,12 +708,16 @@ describe('visual-first synchronized investigation model', () => {
     assert.deepEqual(selectedActionSignalContext(detail.actionSignalContext, action).map(({ deckNumber }) => deckNumber), [1])
   })
 
-  it('renders one compact Decks 1-10 status Gantt above the investigation chronology', () => {
+  it('integrates compact Decks 1-10 tracks immediately above Actual Speed', () => {
     const detail = visualDetail()
     assert.deepEqual(detail.deckStatusContext.decks.map(({ deckNumber }) => deckNumber), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
     assert.equal(deckStatusIntervalLabel(detail.deckStatusContext.decks[0]!.intervals[0]!.state), 'Printing')
+    const tracks = buildDeckStatusTimelineTracks(detail)
+    assert.deepEqual(tracks.map(({ id }) => id), Array.from({ length: 10 }, (_, index) => `deck-status-${index + 1}`))
+    assert.equal(tracks[0]?.className, 'si-deck-timeline-row')
     assert.match(deckStatus, /deckNumber >= 1 && deckNumber <= 10/)
-    assert.match(timeline, /<StopDeckStatusGantt detail=\{detail\}\/>/)
+    assert.match(timeline, /buildDeckStatusTimelineTracks\(detail\)/)
+    assert.doesNotMatch(timeline, /<StopDeckStatusGantt/)
     for (const state of ['state-printing', 'state-out', 'state-ready']) assert.match(styles, new RegExp(state))
   })
 
@@ -639,6 +728,7 @@ describe('visual-first synchronized investigation model', () => {
     assert.equal(failed.radius?.statusDescription, 'Run Production')
     assert.equal(failed.identityValue, 'R-100')
     assert.deepEqual(failed.actions.map(({ displayName }) => displayName), ['Deck movement'])
+    assert.doesNotMatch(timeline, /<dt>Actions<\/dt>/)
     const unknown = stopInspectionSnapshot(detail, '2026-08-25T20:06:30.000Z')
     assert.equal(unknown.availability, 'SOURCE_TELEMETRY_UNAVAILABLE')
     assert.equal(unknown.identityValue, 'R-200')
@@ -663,6 +753,10 @@ describe('visual-first synchronized investigation model', () => {
     assert.match(page, /signals plotted automatically/)
     assert.match(page, />All</)
     assert.match(page, /si-decision-evidence-chips/)
+    assert.match(page, /Changeover requirement checks/)
+    assert.match(page, /Every condition must pass before the prediction can be Changeover/)
+    assert.match(styles, /\.si-changeover-requirements \.is-met/)
+    assert.match(styles, /\.si-changeover-requirements \.is-missing/)
     assert.match(page, /<details className="panel si-technical-details"/)
     assert.match(styles, /@media \(max-width: 1000px\)[^{]*\{[^}]*\.si-action-summary/)
   })
@@ -688,5 +782,18 @@ describe('accepted plant regression presentation shapes', () => {
     assert.equal(stopDecisionSummary(decision('UNCERTAIN')).classification, 'UNCERTAIN')
     assert.match(timeline, /breakIntervals: detail\.speedContext\.unknownIntervals/)
     assert.match(timeline, /availability: unavailable\?\.state \?\? 'AVAILABLE'/)
+  })
+
+  it('shows each mandatory changeover condition as passed or missing independently of the prediction', () => {
+    const detail = visualDetail()
+    const evidence = (code: string) => ({ code, category: 'SETUP_FAMILY' as const, strength: 'STRONG' as const, explanation: code, canonicalIds: [], fromUtc: null, toUtc: null })
+    detail.stop.supportingEvidence = [evidence('WASH_ACTIVITY_DURING_STOP'), evidence('SPEED_TEST_RETURNED_TO_ZERO')]
+    detail.stop.conflictingEvidence = [evidence('CHANGEOVER_REQUIRES_PUMP_INK_ACTIVITY'), evidence('CHANGEOVER_REQUIRES_IMPRESSION_ADJUSTMENT')]
+    assert.deepEqual(changeoverRequirementChecks(detail).map(({ label, met }) => [label, met]), [
+      ['Wash activity', true],
+      ['Pump / ink activity', false],
+      ['Impression adjustment', false],
+      ['Speed test returned to zero', true],
+    ])
   })
 })

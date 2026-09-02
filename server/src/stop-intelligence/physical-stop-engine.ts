@@ -84,6 +84,52 @@ function normalizeAvailability(intervals: TelemetryAvailabilityInterval[], from:
   return result
 }
 
+type BridgeableSpeedState = 'STOPPED' | 'RUNNING'
+
+function bridgeableSpeedState(observation: CanonicalSpeedObservation, input: PhysicalStopAnalysisInput): BridgeableSpeedState | null {
+  if (!validObservation(observation)) return null
+  if (observation.speed < input.configuration.stopThreshold) return 'STOPPED'
+  if (observation.speed >= input.configuration.recoveryThreshold) return 'RUNNING'
+  return null
+}
+
+function speedQualityAvailability(observations: CanonicalSpeedObservation[], from: number, to: number): TelemetryAvailabilityInterval[] {
+  const ordered = observations.filter((item) => parsedTime(item.atUtc) !== undefined).sort((left, right) => Date.parse(left.atUtc) - Date.parse(right.atUtc))
+  const intervals: TelemetryAvailabilityInterval[] = []
+  for (let index = 0; index < ordered.length; index += 1) {
+    const observation = ordered[index]!
+    if (validObservation(observation)) continue
+    const nextGood = ordered.slice(index + 1).find(validObservation)
+    const start = Math.max(from, Date.parse(observation.atUtc)); const end = Math.min(to, nextGood ? Date.parse(nextGood.atUtc) : to)
+    if (end > start) intervals.push({ fromUtc: iso(start), toUtc: iso(end), state: 'UNKNOWN_SPEED_QUALITY' })
+  }
+  return intervals
+}
+
+export function bridgeMatchingSpeedStateEvidence(input: PhysicalStopAnalysisInput): { observations: CanonicalSpeedObservation[]; availabilityIntervals: TelemetryAvailabilityInterval[]; bridgedIntervals: TelemetryAvailabilityInterval[] } {
+  const from = parsedTime(input.fromUtc); const to = parsedTime(input.toUtc)
+  if (from === undefined || to === undefined || to <= from) throw new Error('invalid_stop_intelligence_range')
+  const observations = input.observations.filter((item) => parsedTime(item.atUtc) !== undefined).sort((left, right) => Date.parse(left.atUtc) - Date.parse(right.atUtc))
+  const good = observations.filter(validObservation)
+  const unavailable = normalizeAvailability([...(input.availabilityIntervals ?? []), ...speedQualityAvailability(observations, from, to)], from, to)
+  const maximumGapMs = input.configuration.matchingStateGapBridgeSeconds * millisecondsPerSecond
+  const bridgedIntervals = unavailable.filter((interval) => {
+    const start = Date.parse(interval.fromUtc); const end = Date.parse(interval.toUtc)
+    if (end - start >= maximumGapMs) return false
+    const before = good.filter((item) => Date.parse(item.atUtc) < start).at(-1)
+    const after = good.find((item) => Date.parse(item.atUtc) >= end)
+    if (!before || !after) return false
+    const beforeState = bridgeableSpeedState(before, input)
+    return beforeState !== null && beforeState === bridgeableSpeedState(after, input)
+  })
+  const retainedIntervals = unavailable.filter((interval) => !bridgedIntervals.includes(interval))
+  const retainedObservations = observations.filter((observation) => validObservation(observation) || !bridgedIntervals.some((interval) => {
+    const at = Date.parse(observation.atUtc)
+    return at >= Date.parse(interval.fromUtc) && at < Date.parse(interval.toUtc)
+  }))
+  return { observations: retainedObservations, availabilityIntervals: retainedIntervals, bridgedIntervals }
+}
+
 function unavailableReason(state: TelemetryAvailabilityInterval['state']): UnavailableState {
   return state
 }
@@ -225,7 +271,8 @@ function retainUnconfirmedRecoveryTime(segment: SegmentAccumulator, configuratio
 export function analyzePhysicalStops(input: PhysicalStopAnalysisInput): PhysicalStopAnalysis {
   const from = parsedTime(input.fromUtc); const to = parsedTime(input.toUtc)
   if (from === undefined || to === undefined || to <= from) throw new Error('invalid_stop_intelligence_range')
-  const events = createEvents(input, from, to)
+  const bridged = bridgeMatchingSpeedStateEvidence(input)
+  const events = createEvents({ ...input, observations: bridged.observations, availabilityIntervals: bridged.availabilityIntervals }, from, to)
   const segments: PhysicalStopSegment[] = []
   let state: SpeedState
   let stateAt = from

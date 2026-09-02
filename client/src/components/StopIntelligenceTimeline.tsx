@@ -1,9 +1,9 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { formatPlantDateTimeCt } from '../time-ranges'
 import type { TimedNumericSample } from '../types/evidence'
 import type { ChangeoverAction, ChangeoverActionCode, ChangeoverActionEvidence, StopIdentityEvidence, StopIntelligenceDetail } from '../types/stop-intelligence'
 import { SynchronizedTimeline, type TimelineEventTrack, type TimelineIntervalItem, type TimelineIntervalTrack, type TimelineNumericTrack } from './SynchronizedTimeline'
-import { StopDeckStatusGantt } from './StopDeckStatusGantt'
+import { buildDeckStatusTimelineTracks } from './StopDeckStatusGantt'
 
 const usefulnessOrder: StopIdentityEvidence['usefulness'][] = ['STRONG', 'MEDIUM', 'WEAK', 'UNUSABLE', 'UNAVAILABLE']
 
@@ -264,7 +264,7 @@ export interface StopTimelineModel {
   trackOrder: string[]
 }
 
-export function buildStopTimelineModel(detail: StopIntelligenceDetail, selectedActions: ChangeoverAction | ChangeoverAction[] = [], visibleSignalKeys?: string[]): StopTimelineModel {
+export function buildStopTimelineModel(detail: StopIntelligenceDetail, selectedActions: ChangeoverAction | ChangeoverAction[] = [], visibleSignalKeys?: string[], includeStageBreakdown = true): StopTimelineModel {
   const from = Date.parse(detail.speedContext.fromUtc)
   const to = Date.parse(detail.speedContext.toUtc)
   const span = Math.max(1, to - from)
@@ -282,9 +282,19 @@ export function buildStopTimelineModel(detail: StopIntelligenceDetail, selectedA
     else actionLanes.push([interval])
   }
   const actionTracks: TimelineIntervalTrack[] = actionLanes.length ? actionLanes.map((intervals, index) => ({ id: index ? `actions-${index + 1}` : 'actions', label: index ? `Actions · overlap ${index + 1}` : 'Actions', intervals })) : [{ id: 'actions', label: 'Actions', intervals: [], unavailableLabel: detail.changeoverActions.eligible ? 'No action established' : detail.changeoverActions.reason }]
+  const deckStatusTracks = buildDeckStatusTimelineTracks(detail)
+  const stageBreakdownTracks: TimelineIntervalTrack[] = includeStageBreakdown ? Array.from((detail.changeoverActivityWindows ?? []).reduce((tracks, stage, index) => {
+    const existing = tracks.get(stage.kind)
+    const interval = { id: `changeover-stage:${index}`, startUtc: stage.startAt, endUtc: stage.endAt, label: stage.label, compactLabel: stage.label.replace(/ (?:-|·) Radius fallback$/i, ''), className: `si-changeover-stage si-changeover-stage--${stage.kind} ${stage.source === 'RADIUS_FALLBACK' ? 'is-radius-fallback' : ''}`.trim(), details: `${stage.label}\n${formatUtc(stage.startAt)} → ${formatUtc(stage.endAt)}\n${stage.explanation}${stage.evidenceDetails?.length ? `\n${stage.evidenceDetails.join('\n')}` : ''}` }
+    if (existing) existing.intervals.push(interval)
+    else tracks.set(stage.kind, { id: `changeover-stage-${stage.kind}`, label: stage.label, className: 'si-changeover-stage-row', intervals: [interval] })
+    return tracks
+  }, new Map<string, TimelineIntervalTrack>()).values()) : []
   const intervalTracks: TimelineIntervalTrack[] = [
+    ...deckStatusTracks,
     { id: 'physical', label: 'Physical behavior', intervals: physicalBehaviorIntervals(detail) },
     { id: 'radius', label: 'Radius', alwaysShowLabels: true, intervals: (detail.radiusContext?.states ?? detail.stop.radius.states).map((state, index) => { const code = state.kind === 'offline' ? 'OFFLINE' : `${state.eventType ?? '—'}${state.statusCode ?? '—'}`; return { id: `radius:${index}`, startUtc: clampUtc(state.startUtc, from, to), endUtc: clampUtc(state.endUtc, from, to), label: state.kind === 'offline' ? 'Offline' : state.statusDescription ?? code, compactLabel: code, className: state.kind === 'offline' ? 'si-radius-offline' : state.isProduction ? detail.stop.radiusAlignment === 'CONTRADICTORY' ? 'si-radius-production si-radius-conflict' : 'si-radius-production' : 'si-radius-nonproduction', style: state.kind === 'offline' || state.isProduction ? undefined : investigationRadiusCodeStyle(state.eventType, state.statusCode), unavailable: state.kind === 'offline', details: `Code ${code}\n${state.statusDescription ?? 'Radius unavailable'}\n${formatUtc(state.startUtc)} → ${formatUtc(state.endUtc)}` } }), unavailableLabel: detail.radiusContext?.reason ?? 'Radius evidence unavailable' },
+    ...stageBreakdownTracks,
     { id: 'identity', label: 'Job / identity', intervals: identityIntervals(detail), unavailableLabel: 'No usable press identity in this range' },
     ...actionTracks,
   ]
@@ -296,7 +306,7 @@ export function buildStopTimelineModel(detail: StopIntelligenceDetail, selectedA
     intervalTracks,
     numericTracks,
     eventTracks: signalTracks.events,
-    trackOrder: ['numeric:actual-speed', 'interval:physical', 'interval:radius', 'interval:identity', ...actionTracks.map((track) => `interval:${track.id}`), ...signalTracks.intervals.map((track) => `interval:${track.id}`), ...signalTracks.numeric.map((track) => `numeric:${track.id}`), ...signalTracks.events.map((track) => `event:${track.id}`)],
+    trackOrder: [...deckStatusTracks.map((track) => `interval:${track.id}`), 'numeric:actual-speed', 'interval:physical', 'interval:radius', ...stageBreakdownTracks.map((track) => `interval:${track.id}`), 'interval:identity', ...actionTracks.map((track) => `interval:${track.id}`), ...signalTracks.intervals.map((track) => `interval:${track.id}`), ...signalTracks.numeric.map((track) => `numeric:${track.id}`), ...signalTracks.events.map((track) => `event:${track.id}`)],
   }
 }
 
@@ -340,11 +350,18 @@ function ActionSignalTooltipRows({ signals }: { signals: ReturnType<typeof selec
 
 function InspectionTooltip({ detail, selectedActions, atUtc, numericTrackId, numericTrackLabel, intervalItem, intervalTrackId, visibleSignalKeys }: { detail: StopIntelligenceDetail; selectedActions: ChangeoverAction[]; atUtc: string; numericTrackId?: string; numericTrackLabel?: string; intervalItem?: TimelineIntervalItem; intervalTrackId?: string; visibleSignalKeys?: string[] }) {
   const snapshot = stopInspectionSnapshot(detail, atUtc)
+  if (intervalTrackId?.startsWith('deck-status-') && intervalItem) {
+    const deckNumber = intervalTrackId.slice('deck-status-'.length)
+    const isEvent = intervalItem.id.includes(':event:')
+    return <div className="si-inspection-tooltip si-deck-inspection-tooltip"><header><div><b>Deck {deckNumber}</b><strong>{formatUtc(atUtc)}</strong></div><span>At inspection time</span></header><section className="si-deck-inspection-summary"><h3>{intervalItem.label}</h3><small>{isEvent ? formatUtc(atUtc) : `${formatUtc(intervalItem.startUtc)} → ${formatUtc(intervalItem.endUtc)} · ${duration((Date.parse(intervalItem.endUtc) - Date.parse(intervalItem.startUtc)) / 1_000)}`}</small></section></div>
+  }
   const hoveredRadius = intervalTrackId === 'radius' && intervalItem ? (detail.radiusContext?.states ?? detail.stop.radius.states)[Number(intervalItem.id.split(':')[1])] : undefined
   if (hoveredRadius) {
     const code = hoveredRadius.kind === 'offline' ? 'OFFLINE' : `${hoveredRadius.eventType ?? '—'}${hoveredRadius.statusCode ?? '—'}`
     return <div className="si-inspection-tooltip si-radius-inspection-tooltip"><header><div><b>Radius</b><strong>{formatUtc(atUtc)}</strong></div><span>At inspection time</span></header><section className="si-radius-inspection-summary"><strong>{code}</strong><h3>{hoveredRadius.statusDescription ?? 'Radius unavailable'}</h3><small>{formatUtc(hoveredRadius.startUtc)} → {formatUtc(hoveredRadius.endUtc)}</small></section></div>
   }
+  const hoveredStage = intervalTrackId?.startsWith('changeover-stage-') && intervalItem ? detail.changeoverActivityWindows?.[Number(intervalItem.id.split(':')[1])] : undefined
+  if (hoveredStage) return <div className="si-inspection-tooltip si-stage-inspection-tooltip"><header><div><b>Changeover activity window</b><strong>{formatUtc(atUtc)}</strong></div><span>Observed breakdown · windows may overlap</span></header><section className="si-action-inspection-summary"><h3>{hoveredStage.label}</h3><small>{formatUtc(hoveredStage.startAt)} → {formatUtc(hoveredStage.endAt)} · {duration((Date.parse(hoveredStage.endAt) - Date.parse(hoveredStage.startAt)) / 1_000)}</small><p>{hoveredStage.explanation}</p>{hoveredStage.evidenceDetails.map((detailLine, index) => <small key={index}>{detailLine}</small>)}</section></div>
   const hoveredAction = intervalTrackId?.startsWith('actions') && intervalItem
     ? detail.changeoverActions.actions.find((action, index) => stopActionKey(action, index) === intervalItem.id)
     : undefined
@@ -358,12 +375,13 @@ function InspectionTooltip({ detail, selectedActions, atUtc, numericTrackId, num
     <div><dt>Physical</dt><dd>{snapshot.physical}{snapshot.physical.startsWith('Testing') && snapshot.attempt ? ` · ${duration(snapshot.attempt.durationSeconds)} · avg ${snapshot.attempt.averageSpeed === null ? 'Unknown' : Math.round(snapshot.attempt.averageSpeed)} · peak ${snapshot.attempt.peakSpeed === null ? 'Unknown' : Math.round(snapshot.attempt.peakSpeed)} ft/min` : ''}</dd></div>
     <div><dt>Radius</dt><dd>{snapshot.radius?.kind === 'offline' ? 'Offline' : snapshot.radius?.statusDescription ?? 'Unavailable'}</dd></div>
     <div><dt>Job / identity</dt><dd>{snapshot.identity ? `${words(snapshot.identity.field)} · ${snapshot.identityValue ?? 'Unknown'}` : 'Unavailable'}</dd></div>
-    <div><dt>Actions</dt><dd>{snapshot.actions.length ? snapshot.actions.map((action) => action.displayName).join(', ') : 'None at this time'}</dd></div>
   </dl><ActionSignalTooltipRows signals={selectedSignals}/></div>
 }
 
 export function StopSynchronizedTimeline({ detail, selectedActions, selectedActionKey, visibleSignalKeys, hiddenSignalKeys = [], pinnedSignalKeys = [], onToggleHiddenSignal, onTogglePinnedSignal, onSelectAction }: { detail: StopIntelligenceDetail; selectedActions: ChangeoverAction[]; selectedActionKey?: string; visibleSignalKeys?: string[]; hiddenSignalKeys?: string[]; pinnedSignalKeys?: string[]; onToggleHiddenSignal?(key: string): void; onTogglePinnedSignal?(key: string): void; onSelectAction(key: string): void }) {
-  const model = useMemo(() => buildStopTimelineModel(detail, selectedActions, visibleSignalKeys), [detail, selectedActions, visibleSignalKeys])
+  const [showStageBreakdown, setShowStageBreakdown] = useState(false)
+  useEffect(() => setShowStageBreakdown(false), [detail.stopId])
+  const model = useMemo(() => buildStopTimelineModel(detail, selectedActions, visibleSignalKeys, showStageBreakdown), [detail, selectedActions, visibleSignalKeys, showStageBreakdown])
   const renderSignalControls = (track: TimelineIntervalTrack | TimelineNumericTrack | TimelineEventTrack) => {
     const signal = actionSignalForTrack(track.id, detail.actionSignalContext)
     if (!signal || !onToggleHiddenSignal || !onTogglePinnedSignal) return null
@@ -371,7 +389,8 @@ export function StopSynchronizedTimeline({ detail, selectedActions, selectedActi
     return <span className="si-signal-row-controls"><button type="button" className="si-signal-visibility" aria-label={`${hidden ? 'Show' : 'Hide'} ${label} trend`} aria-pressed={!hidden} title={`${hidden ? 'Show' : 'Hide'} trend`} onClick={() => onToggleHiddenSignal(key)}><span aria-hidden="true">👁</span></button><button type="button" className="si-signal-pin" aria-label={`${pinned ? 'Unpin' : 'Pin'} ${label} trend`} aria-pressed={pinned} title={`${pinned ? 'Unpin' : 'Pin'} trend`} onClick={() => onTogglePinnedSignal(key)}><span aria-hidden="true">📌</span></button></span>
   }
   return <div className="si-investigation-timeline">
+    {detail.deckStatusContext.availability !== 'UNAVAILABLE' && <div className="si-deck-timeline-legend" aria-label="Deck status colors"><strong>Deck status · Decks 1–10</strong><span className="printing">Printing</span><span className="out">Deck out</span><span className="ready">Active / ready</span><span className="inactive">Inactive</span><span className="command">Print-off command</span><span className="unknown">Unknown</span></div>}
+    {detail.changeoverActivityWindows?.length ? <details className="si-stage-breakdown-toggle" open={showStageBreakdown} onToggle={(event) => setShowStageBreakdown(event.currentTarget.open)}><summary><span><strong>Stage breakdown</strong><small>Show overlapping changeover activity windows on the shared timeline</small></span><b>{detail.changeoverActivityWindows.length}</b></summary></details> : null}
     <SynchronizedTimeline fromUtc={detail.speedContext.fromUtc} toUtc={detail.speedContext.toUtc} intervalTracks={model.intervalTracks} numericTracks={model.numericTracks} eventTracks={model.eventTracks} trackOrder={model.trackOrder} selectedId={selectedActionKey} onSelect={(item, track) => { if (track.id.startsWith('actions')) onSelectAction(item.id) }} highlightedRange={{ fromUtc: detail.stop.physicalSegment.startAt, toUtc: detail.stop.physicalSegment.endAt ?? detail.speedContext.toUtc, label: 'Measured physical stop' }} renderTrackLabelControls={(track) => renderSignalControls(track)} renderInspectionTooltip={(atUtc, context) => <InspectionTooltip detail={detail} selectedActions={selectedActions} atUtc={atUtc} numericTrackId={context.numericTrackId} numericTrackLabel={context.numericTrackLabel} intervalItem={context.intervalItem} intervalTrackId={context.intervalTrackId} visibleSignalKeys={visibleSignalKeys}/>} minimumCanvasWidth={900} ariaLabel={`${detail.displayName} synchronized stop investigation timeline`} />
-    <StopDeckStatusGantt detail={detail}/>
   </div>
 }

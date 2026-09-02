@@ -303,7 +303,13 @@ export interface TelemetrySourceEvidenceGap {
 }
 
 export interface BoundedTelemetryReadDiagnostics {
+  pressKey?: string
+  sourceKey?: string | null
   requestedRange: { start: string; end: string }
+  requestedDurationMs?: number
+  selectorCount?: number
+  plannedPhysicalRequests?: number
+  actualUpstreamRequests?: number
   chunkCount: number
   telemetryRequests: number
   cacheHits: number
@@ -312,7 +318,15 @@ export interface BoundedTelemetryReadDiagnostics {
   containedRangeCacheHits?: number
   containedRangeSelectorSubsetCacheHits?: number
   cacheHitType?: 'EXACT' | 'SELECTOR_SUBSET' | 'CONTAINED_RANGE' | 'CONTAINED_RANGE_SELECTOR_SUBSET' | null
+  cacheHitScope?: 'SAME_REQUEST' | 'CROSS_REQUEST_COMPLETED' | null
+  crossRequestCacheAgeMs?: number | null
+  cacheMiss?: boolean
   cacheSourceRange?: { start: string; end: string } | null
+  semaphoreWaitMs?: number
+  upstreamDurationMs?: number
+  totalDurationMs?: number
+  timeoutCount?: number
+  failureCount?: number
   pointsReturned: number
   pointsRetained: number
   boundaryDuplicatesRemoved: number
@@ -329,6 +343,25 @@ export interface BoundedTelemetryReadDiagnostics {
     durationMs: number
     pointsReturned: number
   }>
+}
+
+export interface SemanticHistoryReadPerformanceDiagnostic {
+  requestId: string | null
+  pressKey: string
+  sourceKey: string | null
+  requestedDurationMs: number
+  selectorCount: number
+  plannedPhysicalRequests: number
+  actualUpstreamRequests: number
+  cacheHitType: 'EXACT' | 'SELECTOR_SUBSET' | 'CONTAINED_RANGE' | 'CONTAINED_RANGE_SELECTOR_SUBSET' | null
+  cacheHitScope: 'SAME_REQUEST' | 'CROSS_REQUEST_COMPLETED' | null
+  crossRequestCacheAgeMs: number | null
+  cacheMiss: boolean
+  semaphoreWaitMs: number
+  upstreamDurationMs: number
+  totalDurationMs: number
+  timeoutCount: number
+  failureCount: number
 }
 
 export const PRODUCTION_CONTEXT_FIELDS = ['job', 'order', 'recipe', 'customer', 'material', 'roll'] as const

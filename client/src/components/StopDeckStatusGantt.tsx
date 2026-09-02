@@ -1,5 +1,6 @@
 import { formatPlantDateTimeCt } from '../time-ranges'
 import type { StopIntelligenceDetail } from '../types/stop-intelligence'
+import type { TimelineIntervalItem, TimelineIntervalTrack } from './SynchronizedTimeline'
 
 type DeckStatusState = StopIntelligenceDetail['deckStatusContext']['decks'][number]['intervals'][number]['state']
 
@@ -18,28 +19,60 @@ const duration = (fromUtc: string, toUtc: string) => {
   return `${minutes}m${remainder ? ` ${remainder}s` : ''}`
 }
 
+const clampedIso = (at: number, from: number, to: number) => new Date(Math.max(from, Math.min(to, at))).toISOString()
+
 export function deckStatusIntervalLabel(state: DeckStatusState) { return STATE_LABELS[state] }
 
-export function StopDeckStatusGantt({ detail }: { detail: StopIntelligenceDetail }) {
+/** Deck state is rendered as ten compact native rows on the investigation's shared time axis. */
+export function buildDeckStatusTimelineTracks(detail: StopIntelligenceDetail): TimelineIntervalTrack[] {
   const context = detail.deckStatusContext
-  const from = Date.parse(context.fromUtc); const to = Date.parse(context.toUtc); const span = Math.max(1, to - from)
-  const position = (atUtc: string) => Math.max(0, Math.min(100, (Date.parse(atUtc) - from) / span * 100))
-  const stopStart = position(detail.stop.physicalSegment.startAt)
-  const stopEnd = position(detail.stop.physicalSegment.endAt ?? context.toUtc)
-  if (context.availability === 'UNAVAILABLE') return <details className="si-deck-status si-deck-status--unavailable"><summary><span><strong>Deck status · Decks 1–10</strong><small>Raw deck-position and print engagement were unavailable.</small></span><b>Unavailable</b></summary><p>{context.reason}</p></details>
-  return <details className="si-deck-status" open>
-    <summary><span><strong>Deck status · Decks 1–10</strong><small>One compact view of print engagement, out position, active/ready time, and print-off commands.</small></span><b>{context.availability === 'AVAILABLE' ? 'Observed' : 'Partial'}</b></summary>
-    <div className="si-deck-status__body">
-      <div className="si-deck-status__legend"><span className="printing">Printing</span><span className="out">Deck out</span><span className="ready">Active / ready</span><span className="inactive">Inactive</span><span className="command">Print-off command</span><span className="unknown">Unknown</span></div>
-      <div className="si-deck-status__axis"><span style={{ left: '0%' }}>{formatPlantDateTimeCt(context.fromUtc)}</span><span className="stop-start" style={{ left: `${stopStart}%` }}>Stop</span><span className="stop-end" style={{ left: `${stopEnd}%` }}>Recovery</span><span style={{ left: '100%' }}>{formatPlantDateTimeCt(context.toUtc)}</span></div>
-      <div className="si-deck-status__rows">
-        {context.decks.filter(({ deckNumber }) => deckNumber >= 1 && deckNumber <= 10).map((deck) => <div className="si-deck-status__row" key={deck.deckNumber}><strong>Deck {deck.deckNumber}</strong><div className="si-deck-status__track">
-          <i className="si-deck-status__stop-window" style={{ left: `${stopStart}%`, width: `${Math.max(0, stopEnd - stopStart)}%` }}/>
-          {deck.intervals.map((interval, index) => { const left = position(interval.startUtc); const right = position(interval.endUtc); const label = deckStatusIntervalLabel(interval.state); return <span key={`${interval.startUtc}:${index}`} className={`si-deck-status__interval state-${interval.state.toLowerCase()}`} style={{ left: `${left}%`, width: `${Math.max(.12, right - left)}%` }} title={`Deck ${deck.deckNumber} · ${label}\n${formatPlantDateTimeCt(interval.startUtc)} → ${formatPlantDateTimeCt(interval.endUtc)}\n${duration(interval.startUtc, interval.endUtc)}`} aria-label={`Deck ${deck.deckNumber}, ${label}, ${formatPlantDateTimeCt(interval.startUtc)} to ${formatPlantDateTimeCt(interval.endUtc)}`}/> })}
-          {deck.events.map((event, index) => <span key={`${event.atUtc}:${index}`} className="si-deck-status__event" style={{ left: `${position(event.atUtc)}%` }} title={`Deck ${deck.deckNumber} · ${event.label}\n${formatPlantDateTimeCt(event.atUtc)}`} aria-label={`Deck ${deck.deckNumber}, ${event.label}, ${formatPlantDateTimeCt(event.atUtc)}`}/>)}
-        </div></div>)}
-      </div>
-      <p>{context.reason} Hover a segment for its exact time range.</p>
-    </div>
-  </details>
+  if (context.availability === 'UNAVAILABLE') return [{ id: 'deck-status-availability', label: 'Deck status', intervals: [], unavailableLabel: context.reason }]
+  const from = Date.parse(detail.speedContext.fromUtc)
+  const to = Date.parse(detail.speedContext.toUtc)
+  const span = Math.max(1, to - from)
+  const markerDuration = Math.max(1_000, span * .0012)
+  const unavailableLabel = context.availability === 'PARTIAL' ? context.reason : 'No observed deck state in this context window'
+
+  return context.decks
+    .filter(({ deckNumber }) => deckNumber >= 1 && deckNumber <= 10)
+    .sort((left, right) => left.deckNumber - right.deckNumber)
+    .map((deck) => {
+      const states: TimelineIntervalItem[] = deck.intervals.flatMap((interval, index) => {
+        const start = Math.max(from, Date.parse(interval.startUtc))
+        const end = Math.min(to, Date.parse(interval.endUtc))
+        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return []
+        const label = deckStatusIntervalLabel(interval.state)
+        const startUtc = new Date(start).toISOString(); const endUtc = new Date(end).toISOString()
+        return [{
+          id: `deck-status:${deck.deckNumber}:state:${index}`,
+          startUtc,
+          endUtc,
+          label,
+          className: `si-deck-timeline-state state-${interval.state.toLowerCase()}`,
+          details: `Deck ${deck.deckNumber} · ${label}\n${formatPlantDateTimeCt(startUtc)} → ${formatPlantDateTimeCt(endUtc)}\n${duration(startUtc, endUtc)}`,
+        }]
+      })
+      const events: TimelineIntervalItem[] = deck.events.flatMap((event, index) => {
+        const at = Date.parse(event.atUtc)
+        if (!Number.isFinite(at) || at < from || at > to) return []
+        const start = Math.max(from, at - markerDuration / 2)
+        const end = Math.min(to, Math.max(start + 1_000, at + markerDuration / 2))
+        return [{
+          id: `deck-status:${deck.deckNumber}:event:${index}`,
+          startUtc: clampedIso(start, from, to),
+          endUtc: clampedIso(end, from, to),
+          label: event.label,
+          compactLabel: '',
+          className: 'si-deck-timeline-event',
+          details: `Deck ${deck.deckNumber} · ${event.label}\n${formatPlantDateTimeCt(event.atUtc)}`,
+        }]
+      })
+      return {
+        id: `deck-status-${deck.deckNumber}`,
+        label: `Deck ${deck.deckNumber}`,
+        className: 'si-deck-timeline-row',
+        intervals: [...states, ...events],
+        unavailableLabel,
+      }
+    })
 }

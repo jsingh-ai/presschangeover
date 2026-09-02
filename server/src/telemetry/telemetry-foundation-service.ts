@@ -19,6 +19,7 @@ import {
   type ProductionContextFieldEvidence,
   type RawTelemetryChangesResponse,
   type RawTelemetryHistoryResponse,
+  type SemanticHistoryReadPerformanceDiagnostic,
   type TelemetrySemanticHistoryQuery,
   type TelemetrySemanticSelector,
   type TelemetrySample,
@@ -34,6 +35,7 @@ const MAX_SEMANTIC_SELECTORS_PER_REQUEST = 50
 export const MAX_TELEMETRY_HISTORY_CHUNK_MS = 2 * 60 * 60_000
 const BOUNDED_READ_CONCURRENCY = 3
 const MAX_ANALYSIS_CACHE_ENTRIES = 128
+export const DEFAULT_COMPLETED_SEMANTIC_HISTORY_CACHE_TTL_MS = 60_000
 
 function observationState(signal: TelemetrySemanticSignalHistory): EvidenceObservationState {
   if (!signal.supported) return 'UNSUPPORTED'
@@ -76,6 +78,66 @@ interface BoundedReadCacheEntry {
   includeSeed: boolean
   selectorKeys: Set<string>
   operation: Promise<PressSemanticHistoryWithIdentity>
+  completedAt: number | null
+}
+
+interface SemanticHistorySemaphoreWaiter {
+  signal?: AbortSignal
+  abortListener?: () => void
+  resolve: (release: () => void) => void
+  reject: (error: TelemetryApiError) => void
+}
+
+class CancellableSemaphore {
+  private active = 0
+  private readonly waiters: SemanticHistorySemaphoreWaiter[] = []
+
+  constructor(private readonly limit: number) {}
+
+  acquire(signal?: AbortSignal): Promise<() => void> {
+    if (signal?.aborted) return Promise.reject(new TelemetryApiError('cancelled'))
+    return new Promise((resolve, reject) => {
+      const waiter: SemanticHistorySemaphoreWaiter = { signal, resolve, reject }
+      if (signal) {
+        waiter.abortListener = () => {
+          const index = this.waiters.indexOf(waiter)
+          if (index < 0) return
+          this.waiters.splice(index, 1)
+          reject(new TelemetryApiError('cancelled'))
+        }
+        signal.addEventListener('abort', waiter.abortListener, { once: true })
+      }
+      this.waiters.push(waiter)
+      this.admit()
+    })
+  }
+
+  private admit() {
+    while (this.active < this.limit && this.waiters.length) {
+      const waiter = this.waiters.shift()!
+      if (waiter.abortListener) waiter.signal!.removeEventListener('abort', waiter.abortListener)
+      if (waiter.signal?.aborted) {
+        waiter.reject(new TelemetryApiError('cancelled'))
+        continue
+      }
+      this.active += 1
+      let released = false
+      waiter.resolve(() => {
+        if (released) return
+        released = true
+        this.active -= 1
+        this.admit()
+      })
+    }
+  }
+}
+
+export interface TelemetryFoundationServiceOptions {
+  metadataTtlMs?: number
+  completedSemanticHistoryCacheTtlMs?: number
+  semanticHistoryConcurrency?: number
+  now?: () => number
+  onSemanticHistoryDiagnostic?: (diagnostic: SemanticHistoryReadPerformanceDiagnostic) => void
 }
 
 function signalKey(signal: { canonicalId: string; deckNumber?: number | null }) { return `${signal.canonicalId}\u0000${signal.deckNumber ?? ''}` }
@@ -138,79 +200,148 @@ export class TelemetryFoundationService {
   readonly capabilities: TelemetryCapabilityRegistry
   private readonly boundedReadCache = new Map<string, BoundedReadCacheEntry>()
   private readonly now: () => number
+  private readonly completedSemanticHistoryCacheTtlMs: number
+  private readonly semanticHistorySemaphore: CancellableSemaphore
+  private readonly onSemanticHistoryDiagnostic?: (diagnostic: SemanticHistoryReadPerformanceDiagnostic) => void
 
-  constructor(private readonly client: TelemetryClient, options: { metadataTtlMs?: number; now?: () => number } = {}) {
+  constructor(private readonly client: TelemetryClient, options: TelemetryFoundationServiceOptions = {}) {
     this.now = options.now ?? (() => Date.now())
+    this.completedSemanticHistoryCacheTtlMs = options.completedSemanticHistoryCacheTtlMs ?? DEFAULT_COMPLETED_SEMANTIC_HISTORY_CACHE_TTL_MS
+    const semanticHistoryConcurrency = options.semanticHistoryConcurrency ?? BOUNDED_READ_CONCURRENCY
+    if (!Number.isSafeInteger(semanticHistoryConcurrency) || semanticHistoryConcurrency <= 0) throw new Error('semanticHistoryConcurrency must be a positive integer')
+    if (!Number.isFinite(this.completedSemanticHistoryCacheTtlMs) || this.completedSemanticHistoryCacheTtlMs < 0) throw new Error('completedSemanticHistoryCacheTtlMs must be non-negative')
+    this.semanticHistorySemaphore = new CancellableSemaphore(semanticHistoryConcurrency)
+    this.onSemanticHistoryDiagnostic = options.onSemanticHistoryDiagnostic
     this.sources = new TelemetrySourceRegistry(client, options.metadataTtlMs, options.now)
     this.capabilities = new TelemetryCapabilityRegistry(client, this.sources, options.metadataTtlMs, options.now)
+  }
+
+  private emitSemanticHistoryDiagnostic(diagnostic: SemanticHistoryReadPerformanceDiagnostic) {
+    try { this.onSemanticHistoryDiagnostic?.(diagnostic) } catch { /* Diagnostics must never affect telemetry reads. */ }
   }
 
   private async readBoundedSemanticHistory(pressKey: RadiusPressKey, query: TelemetrySemanticHistoryQuery, requestId?: string, signal?: AbortSignal): Promise<PressSemanticHistoryWithIdentity> {
     if (!this.client.querySemanticHistory) throw new TelemetryApiError('unavailable')
     const rangeMs = Date.parse(query.toUtc) - Date.parse(query.fromUtc)
     if (!Number.isFinite(rangeMs) || rangeMs <= 0 || !query.signals.length) throw new TelemetryApiError('request_invalid', 400)
+    const logicalBegan = Date.now()
+    const plannedPhysicalRequests = Math.ceil(rangeMs / MAX_TELEMETRY_HISTORY_CHUNK_MS) * Math.ceil(query.signals.length / MAX_SEMANTIC_SELECTORS_PER_REQUEST)
     const requestedSelectorKeys = new Set(query.signals.map(selectorKey)); const fromMs = Date.parse(query.fromUtc); const toMs = Date.parse(query.toUtc)
-    const cached = requestId ? [...this.boundedReadCache.values()].filter((entry) => entry.requestId === requestId && entry.pressKey === pressKey && entry.fromMs <= fromMs && entry.toMs >= toMs && (entry.includeSeed || !query.includeSeed) && [...requestedSelectorKeys].every((key) => entry.selectorKeys.has(key))).sort((left, right) => (left.toMs - left.fromMs) - (right.toMs - right.fromMs) || left.selectorKeys.size - right.selectorKeys.size)[0] : undefined
+    const matches = (entry: BoundedReadCacheEntry) => entry.pressKey === pressKey && entry.fromMs <= fromMs && entry.toMs >= toMs && (entry.includeSeed || !query.includeSeed) && [...requestedSelectorKeys].every((key) => entry.selectorKeys.has(key))
+    const smallestMatch = (entries: BoundedReadCacheEntry[]) => entries.sort((left, right) => (left.toMs - left.fromMs) - (right.toMs - right.fromMs) || left.selectorKeys.size - right.selectorKeys.size)[0]
+    const entries = requestId ? [...this.boundedReadCache.values()] : []
+    const sameRequestCached = requestId ? smallestMatch(entries.filter((entry) => entry.requestId === requestId && matches(entry))) : undefined
+    const crossRequestCached = requestId && !sameRequestCached ? smallestMatch(entries.filter((entry) => entry.requestId !== requestId && entry.completedAt !== null && this.now() - entry.completedAt <= this.completedSemanticHistoryCacheTtlMs && matches(entry))) : undefined
+    const cached = sameRequestCached ?? crossRequestCached
     if (cached) {
-      const source = await cached.operation; const type = cacheHitType(cached, query)
-      const signals = query.signals.flatMap((selector) => { const signal = source.signals.find((item) => selectorKey({ canonicalId: item.canonicalId, ...(item.deckNumber === null ? {} : { deckNumber: item.deckNumber }), representation: item.representation }) === selectorKey(selector)); return signal ? [sliceCachedSignal(signal, query)] : [] })
-      const pointsRetained = signals.reduce((sum, item) => sum + item.samples.length + item.changes.length, 0)
-      const sourceGaps = sourceWideEvidenceGaps(signals, { start: query.fromUtc, end: query.toUtc })
-      const readDiagnostics: BoundedTelemetryReadDiagnostics = {
-        requestedRange: { start: query.fromUtc, end: query.toUtc }, chunkCount: 0, telemetryRequests: 0, cacheHits: 1,
-        exactCacheHits: type === 'EXACT' ? 1 : 0, selectorSubsetCacheHits: type === 'SELECTOR_SUBSET' ? 1 : 0,
-        containedRangeCacheHits: type === 'CONTAINED_RANGE' ? 1 : 0, containedRangeSelectorSubsetCacheHits: type === 'CONTAINED_RANGE_SELECTOR_SUBSET' ? 1 : 0,
-        cacheHitType: type, cacheSourceRange: { start: new Date(cached.fromMs).toISOString(), end: new Date(cached.toMs).toISOString() },
-        pointsReturned: 0, pointsRetained, boundaryDuplicatesRemoved: 0, gaps: evidenceGaps(signals, { start: query.fromUtc, end: query.toUtc }), sourceGaps, historicalAvailability: assessDetailedHistory(signals, sourceGaps), requests: [],
+      const type = cacheHitType(cached, query)
+      const cacheHitScope = sameRequestCached ? 'SAME_REQUEST' as const : 'CROSS_REQUEST_COMPLETED' as const
+      const crossRequestCacheAgeMs = cacheHitScope === 'CROSS_REQUEST_COMPLETED' ? Math.max(0, this.now() - cached.completedAt!) : null
+      try {
+        const source = await cached.operation
+        const signals = query.signals.flatMap((selector) => { const signal = source.signals.find((item) => selectorKey({ canonicalId: item.canonicalId, ...(item.deckNumber === null ? {} : { deckNumber: item.deckNumber }), representation: item.representation }) === selectorKey(selector)); return signal ? [sliceCachedSignal(signal, query)] : [] })
+        const pointsRetained = signals.reduce((sum, item) => sum + item.samples.length + item.changes.length, 0)
+        const sourceGaps = sourceWideEvidenceGaps(signals, { start: query.fromUtc, end: query.toUtc })
+        const totalDurationMs = Date.now() - logicalBegan
+        const readDiagnostics: BoundedTelemetryReadDiagnostics = {
+          pressKey, sourceKey: source.sourceKey, requestedRange: { start: query.fromUtc, end: query.toUtc }, requestedDurationMs: rangeMs, selectorCount: query.signals.length, plannedPhysicalRequests, actualUpstreamRequests: 0,
+          chunkCount: 0, telemetryRequests: 0, cacheHits: 1,
+          exactCacheHits: type === 'EXACT' ? 1 : 0, selectorSubsetCacheHits: type === 'SELECTOR_SUBSET' ? 1 : 0,
+          containedRangeCacheHits: type === 'CONTAINED_RANGE' ? 1 : 0, containedRangeSelectorSubsetCacheHits: type === 'CONTAINED_RANGE_SELECTOR_SUBSET' ? 1 : 0,
+          cacheHitType: type, cacheHitScope, crossRequestCacheAgeMs, cacheMiss: false, cacheSourceRange: { start: new Date(cached.fromMs).toISOString(), end: new Date(cached.toMs).toISOString() },
+          semaphoreWaitMs: 0, upstreamDurationMs: 0, totalDurationMs, timeoutCount: 0, failureCount: 0,
+          pointsReturned: 0, pointsRetained, boundaryDuplicatesRemoved: 0, gaps: evidenceGaps(signals, { start: query.fromUtc, end: query.toUtc }), sourceGaps, historicalAvailability: assessDetailedHistory(signals, sourceGaps), requests: [],
+        }
+        this.emitSemanticHistoryDiagnostic({ requestId: requestId ?? null, pressKey, sourceKey: source.sourceKey, requestedDurationMs: rangeMs, selectorCount: query.signals.length, plannedPhysicalRequests, actualUpstreamRequests: 0, cacheHitType: type, cacheHitScope, crossRequestCacheAgeMs, cacheMiss: false, semaphoreWaitMs: 0, upstreamDurationMs: 0, totalDurationMs, timeoutCount: 0, failureCount: 0 })
+        return { ...source, fromUtc: query.fromUtc, toUtc: query.toUtc, includeSeed: query.includeSeed, signals, readDiagnostics }
+      } catch (error) {
+        this.emitSemanticHistoryDiagnostic({ requestId: requestId ?? null, pressKey, sourceKey: null, requestedDurationMs: rangeMs, selectorCount: query.signals.length, plannedPhysicalRequests, actualUpstreamRequests: 0, cacheHitType: type, cacheHitScope, crossRequestCacheAgeMs, cacheMiss: false, semaphoreWaitMs: 0, upstreamDurationMs: 0, totalDurationMs: Date.now() - logicalBegan, timeoutCount: error instanceof TelemetryApiError && error.kind === 'timeout' ? 1 : 0, failureCount: 1 })
+        throw error
       }
-      return { ...source, fromUtc: query.fromUtc, toUtc: query.toUtc, includeSeed: query.includeSeed, signals, readDiagnostics }
     }
     const cacheKey = requestId ? JSON.stringify([requestId, pressKey, query.fromUtc, query.toUtc, query.includeSeed, [...requestedSelectorKeys].sort()]) : null
+    let actualUpstreamRequests = 0; let semaphoreWaitMs = 0; let upstreamDurationMs = 0; let timeoutCount = 0; let failureCount = 0; let sourceKey: string | null = null
     const operation = (async () => {
-      const resolved = await this.sources.resolve(pressKey, requestId, signal)
-      const capabilitySet = await this.capabilities.get(pressKey, requestId, signal).catch(() => undefined)
-      const chunks: Array<{ fromUtc: string; toUtc: string }> = []
-      for (let cursor = Date.parse(query.fromUtc); cursor < Date.parse(query.toUtc); cursor += MAX_TELEMETRY_HISTORY_CHUNK_MS) chunks.push({ fromUtc: new Date(cursor).toISOString(), toUtc: new Date(Math.min(Date.parse(query.toUtc), cursor + MAX_TELEMETRY_HISTORY_CHUNK_MS)).toISOString() })
-      const selectorBatches = Array.from({ length: Math.ceil(query.signals.length / MAX_SEMANTIC_SELECTORS_PER_REQUEST) }, (_item, index) => query.signals.slice(index * MAX_SEMANTIC_SELECTORS_PER_REQUEST, (index + 1) * MAX_SEMANTIC_SELECTORS_PER_REQUEST))
-      const requests = chunks.flatMap((chunk) => selectorBatches.map((signals) => ({ ...chunk, signals })))
-      const responseEntries: Array<{ response: Awaited<ReturnType<NonNullable<TelemetryClient['querySemanticHistory']>>>; diagnostic: NonNullable<BoundedTelemetryReadDiagnostics['requests']>[number] }> = []
-      for (let offset = 0; offset < requests.length; offset += BOUNDED_READ_CONCURRENCY) {
-        responseEntries.push(...await Promise.all(requests.slice(offset, offset + BOUNDED_READ_CONCURRENCY).map(async (item, localIndex) => {
-          const began = Date.now(); const response = await this.client.querySemanticHistory!(resolved.source.id, { fromUtc: item.fromUtc, toUtc: item.toUtc, includeSeed: query.includeSeed, signals: item.signals }, requestId, signal)
-          return { response, diagnostic: { pressKey, selectorCount: item.signals.length, selectors: item.signals.map(selectorKey), range: { start: item.fromUtc, end: item.toUtc }, chunkIndex: Math.floor((offset + localIndex) / selectorBatches.length), durationMs: Date.now() - began, pointsReturned: response.signals.reduce((sum, candidate) => sum + candidate.samples.length + candidate.changes.length, 0) } }
-        })))
-      }
-      const responses = responseEntries.map(({ response }) => response)
-      if (!responses.length || responses.some((item) => item.sourceId !== resolved.source.id || item.sourceKey.toLowerCase() !== pressKey)) throw new TelemetryApiError('invalid_response')
-      const merged = new Map<string, PressSemanticSignalWithIdentity>()
-      let pointsReturned = 0; let duplicates = 0
-      for (const response of responses) {
-        for (const raw of response.signals) {
-          const capability = capabilitySet?.capabilities.find(({ canonicalId }) => canonicalId === raw.canonicalId)
-          const projected = { ...signalEvidence(raw, capability), valueKind: raw.valueKind, historianSignalId: raw.historianSignalId, rawSignalId: raw.rawSignalId, sourceSelector: raw.sourceSelector, selectedVariant: raw.selectedVariant }
-          const key = signalKey(projected); const existing = merged.get(key)
-          pointsReturned += raw.samples.length + raw.changes.length
-          if (!existing) merged.set(key, projected)
-          else {
-            const samples = deduplicateBoundaryPoints([...existing.samples, ...projected.samples]); const changes = deduplicateBoundaryPoints([...existing.changes, ...projected.changes])
-            duplicates += samples.removed + changes.removed
-            merged.set(key, { ...existing, seed: existing.seed ?? projected.seed, samples: samples.values, changes: changes.values, observationState: samples.values.length || changes.values.length ? 'SUPPORTED_WITH_OBSERVATIONS' : existing.seed ?? projected.seed ? 'SUPPORTED_WITH_SEED_ONLY' : existing.observationState })
+      try {
+        const resolved = await this.sources.resolve(pressKey, requestId, signal)
+        sourceKey = resolved.source.sourceKey
+        const capabilitySet = await this.capabilities.get(pressKey, requestId, signal).catch(() => undefined)
+        const chunks: Array<{ fromUtc: string; toUtc: string }> = []
+        for (let cursor = Date.parse(query.fromUtc); cursor < Date.parse(query.toUtc); cursor += MAX_TELEMETRY_HISTORY_CHUNK_MS) chunks.push({ fromUtc: new Date(cursor).toISOString(), toUtc: new Date(Math.min(Date.parse(query.toUtc), cursor + MAX_TELEMETRY_HISTORY_CHUNK_MS)).toISOString() })
+        const selectorBatches = Array.from({ length: Math.ceil(query.signals.length / MAX_SEMANTIC_SELECTORS_PER_REQUEST) }, (_item, index) => query.signals.slice(index * MAX_SEMANTIC_SELECTORS_PER_REQUEST, (index + 1) * MAX_SEMANTIC_SELECTORS_PER_REQUEST))
+        const requests = chunks.flatMap((chunk) => selectorBatches.map((signals) => ({ ...chunk, signals })))
+        const responseEntries: Array<{ response: Awaited<ReturnType<NonNullable<TelemetryClient['querySemanticHistory']>>>; diagnostic: NonNullable<BoundedTelemetryReadDiagnostics['requests']>[number] }> = []
+        for (let offset = 0; offset < requests.length; offset += BOUNDED_READ_CONCURRENCY) {
+          responseEntries.push(...await Promise.all(requests.slice(offset, offset + BOUNDED_READ_CONCURRENCY).map(async (item, localIndex) => {
+            const queuedAt = Date.now()
+            let release: (() => void) | undefined
+            try {
+              release = await this.semanticHistorySemaphore.acquire(signal)
+              semaphoreWaitMs += Date.now() - queuedAt
+              const began = Date.now()
+              actualUpstreamRequests += 1
+              try {
+                const response = await this.client.querySemanticHistory!(resolved.source.id, { fromUtc: item.fromUtc, toUtc: item.toUtc, includeSeed: query.includeSeed, signals: item.signals }, requestId, signal)
+                const durationMs = Date.now() - began
+                upstreamDurationMs += durationMs
+                return { response, diagnostic: { pressKey, selectorCount: item.signals.length, selectors: item.signals.map(selectorKey), range: { start: item.fromUtc, end: item.toUtc }, chunkIndex: Math.floor((offset + localIndex) / selectorBatches.length), durationMs, pointsReturned: response.signals.reduce((sum, candidate) => sum + candidate.samples.length + candidate.changes.length, 0) } }
+              } catch (error) {
+                upstreamDurationMs += Date.now() - began
+                failureCount += 1
+                if (error instanceof TelemetryApiError && error.kind === 'timeout') timeoutCount += 1
+                throw error
+              }
+            } catch (error) {
+              if (!release) {
+                semaphoreWaitMs += Date.now() - queuedAt
+                failureCount += 1
+                if (error instanceof TelemetryApiError && error.kind === 'timeout') timeoutCount += 1
+              }
+              throw error
+            } finally {
+              release?.()
+            }
+          })))
+        }
+        const responses = responseEntries.map(({ response }) => response)
+        if (!responses.length || responses.some((item) => item.sourceId !== resolved.source.id || item.sourceKey.toLowerCase() !== pressKey)) throw new TelemetryApiError('invalid_response')
+        const merged = new Map<string, PressSemanticSignalWithIdentity>()
+        let pointsReturned = 0; let duplicates = 0
+        for (const response of responses) {
+          for (const raw of response.signals) {
+            const capability = capabilitySet?.capabilities.find(({ canonicalId }) => canonicalId === raw.canonicalId)
+            const projected = { ...signalEvidence(raw, capability), valueKind: raw.valueKind, historianSignalId: raw.historianSignalId, rawSignalId: raw.rawSignalId, sourceSelector: raw.sourceSelector, selectedVariant: raw.selectedVariant }
+            const key = signalKey(projected); const existing = merged.get(key)
+            pointsReturned += raw.samples.length + raw.changes.length
+            if (!existing) merged.set(key, projected)
+            else {
+              const samples = deduplicateBoundaryPoints([...existing.samples, ...projected.samples]); const changes = deduplicateBoundaryPoints([...existing.changes, ...projected.changes])
+              duplicates += samples.removed + changes.removed
+              merged.set(key, { ...existing, seed: existing.seed ?? projected.seed, samples: samples.values, changes: changes.values, observationState: samples.values.length || changes.values.length ? 'SUPPORTED_WITH_OBSERVATIONS' : existing.seed ?? projected.seed ? 'SUPPORTED_WITH_SEED_ONLY' : existing.observationState })
+            }
           }
         }
+        const signals = query.signals.flatMap((selector) => {
+          const value = merged.get(signalKey(selector)); return value ? [value] : []
+        })
+        const gaps = evidenceGaps(signals, { start: query.fromUtc, end: query.toUtc })
+        const sourceGaps = sourceWideEvidenceGaps(signals, { start: query.fromUtc, end: query.toUtc })
+        const totalDurationMs = Date.now() - logicalBegan
+        const readDiagnostics: BoundedTelemetryReadDiagnostics = { pressKey, sourceKey, requestedRange: { start: query.fromUtc, end: query.toUtc }, requestedDurationMs: rangeMs, selectorCount: query.signals.length, plannedPhysicalRequests, actualUpstreamRequests, chunkCount: chunks.length, telemetryRequests: actualUpstreamRequests, cacheHits: 0, exactCacheHits: 0, selectorSubsetCacheHits: 0, containedRangeCacheHits: 0, containedRangeSelectorSubsetCacheHits: 0, cacheHitType: null, cacheHitScope: null, crossRequestCacheAgeMs: null, cacheMiss: true, cacheSourceRange: null, semaphoreWaitMs, upstreamDurationMs, totalDurationMs, timeoutCount, failureCount, pointsReturned, pointsRetained: signals.reduce((sum, item) => sum + item.samples.length + item.changes.length, 0), boundaryDuplicatesRemoved: duplicates, gaps, sourceGaps, historicalAvailability: assessDetailedHistory(signals, sourceGaps), requests: responseEntries.map(({ diagnostic }) => diagnostic) }
+        const first = responses[0]!
+        this.emitSemanticHistoryDiagnostic({ requestId: requestId ?? null, pressKey, sourceKey, requestedDurationMs: rangeMs, selectorCount: query.signals.length, plannedPhysicalRequests, actualUpstreamRequests, cacheHitType: null, cacheHitScope: null, crossRequestCacheAgeMs: null, cacheMiss: true, semaphoreWaitMs, upstreamDurationMs, totalDurationMs, timeoutCount, failureCount })
+        return { pressKey, sourceKey: first.sourceKey, displayName: first.displayName, fromUtc: query.fromUtc, toUtc: query.toUtc, includeSeed: query.includeSeed, signals, readDiagnostics }
+      } catch (error) {
+        failureCount = Math.max(1, failureCount)
+        this.emitSemanticHistoryDiagnostic({ requestId: requestId ?? null, pressKey, sourceKey, requestedDurationMs: rangeMs, selectorCount: query.signals.length, plannedPhysicalRequests, actualUpstreamRequests, cacheHitType: null, cacheHitScope: null, crossRequestCacheAgeMs: null, cacheMiss: true, semaphoreWaitMs, upstreamDurationMs, totalDurationMs: Date.now() - logicalBegan, timeoutCount, failureCount })
+        throw error
       }
-      const signals = query.signals.flatMap((selector) => {
-        const value = merged.get(signalKey(selector)); return value ? [value] : []
-      })
-      const gaps = evidenceGaps(signals, { start: query.fromUtc, end: query.toUtc })
-      const sourceGaps = sourceWideEvidenceGaps(signals, { start: query.fromUtc, end: query.toUtc })
-      const readDiagnostics: BoundedTelemetryReadDiagnostics = { requestedRange: { start: query.fromUtc, end: query.toUtc }, chunkCount: chunks.length, telemetryRequests: requests.length, cacheHits: 0, exactCacheHits: 0, selectorSubsetCacheHits: 0, containedRangeCacheHits: 0, containedRangeSelectorSubsetCacheHits: 0, cacheHitType: null, cacheSourceRange: null, pointsReturned, pointsRetained: signals.reduce((sum, item) => sum + item.samples.length + item.changes.length, 0), boundaryDuplicatesRemoved: duplicates, gaps, sourceGaps, historicalAvailability: assessDetailedHistory(signals, sourceGaps), requests: responseEntries.map(({ diagnostic }) => diagnostic) }
-      const first = responses[0]!
-      return { pressKey, sourceKey: first.sourceKey, displayName: first.displayName, fromUtc: query.fromUtc, toUtc: query.toUtc, includeSeed: query.includeSeed, signals, readDiagnostics }
     })()
     if (cacheKey) {
-      this.boundedReadCache.set(cacheKey, { requestId: requestId!, pressKey, fromMs, toMs, includeSeed: query.includeSeed, selectorKeys: requestedSelectorKeys, operation })
+      const entry: BoundedReadCacheEntry = { requestId: requestId!, pressKey, fromMs, toMs, includeSeed: query.includeSeed, selectorKeys: requestedSelectorKeys, operation, completedAt: null }
+      this.boundedReadCache.set(cacheKey, entry)
       if (this.boundedReadCache.size > MAX_ANALYSIS_CACHE_ENTRIES) this.boundedReadCache.delete(this.boundedReadCache.keys().next().value!)
-      operation.catch(() => this.boundedReadCache.delete(cacheKey))
+      operation.then(() => { entry.completedAt = this.now() }).catch(() => { if (this.boundedReadCache.get(cacheKey) === entry) this.boundedReadCache.delete(cacheKey) })
     }
     return operation
   }

@@ -1,6 +1,6 @@
 import type { RadiusPressKey } from './types/api'
 
-export type AnalyticsArea = 'overview' | 'job-intelligence' | 'stop-intelligence' | 'operational-analysis' | 'raw-radius-explorer' | 'telemetry-event-explorer' | 'patterns-episodes' | 'intelligent-search' | 'state-classification'
+export type AnalyticsArea = 'overview' | 'machine-intelligence' | 'stop-intelligence' | 'press-downtime' | 'operational-analysis' | 'raw-radius-explorer' | 'telemetry-event-explorer' | 'patterns-episodes' | 'intelligent-search' | 'state-classification'
 export type OperationalSection = 'state' | 'drivers' | 'recovery'
 
 const pressKeys = new Set<RadiusPressKey>([
@@ -10,8 +10,9 @@ const pressKeys = new Set<RadiusPressKey>([
 
 export function areaFromPathname(pathname: string): AnalyticsArea {
   if (/^\/operational-analysis\/?$/.test(pathname)) return 'operational-analysis'
-  if (/^\/job-intelligence\/?$/.test(pathname)) return 'job-intelligence'
+  if (/^\/(?:machine-intelligence|job-intelligence)\/?$/.test(pathname)) return 'machine-intelligence'
   if (/^\/stop-intelligence\/?$/.test(pathname)) return 'stop-intelligence'
+  if (/^\/press-downtime\/?$/.test(pathname)) return 'press-downtime'
   if (/^\/raw-radius-explorer\/?$/.test(pathname)) return 'raw-radius-explorer'
   if (/^\/telemetry-event-explorer\/?$/.test(pathname)) return 'telemetry-event-explorer'
   if (/^\/patterns-episodes\/?$/.test(pathname)) return 'patterns-episodes'
@@ -22,8 +23,9 @@ export function areaFromPathname(pathname: string): AnalyticsArea {
 
 export function areaPath(area: AnalyticsArea): string {
   if (area === 'operational-analysis') return '/operational-analysis'
-  if (area === 'job-intelligence') return '/job-intelligence'
+  if (area === 'machine-intelligence') return '/machine-intelligence'
   if (area === 'stop-intelligence') return '/stop-intelligence'
+  if (area === 'press-downtime') return '/press-downtime'
   if (area === 'raw-radius-explorer') return '/raw-radius-explorer'
   if (area === 'telemetry-event-explorer') return '/telemetry-event-explorer'
   if (area === 'patterns-episodes') return '/patterns-episodes'

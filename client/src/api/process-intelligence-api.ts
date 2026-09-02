@@ -64,6 +64,7 @@ import type {
 } from '../types/evidence'
 import type { ChangeoverInspector, ChangeoverReport, ChangeoverRequest } from '../types/changeover'
 import type { StopIntelligenceCorrection, StopIntelligenceDetail, StopIntelligenceFleetReport, StopOperatorState, StopPredictedState } from '../types/stop-intelligence'
+import type { PressDowntimePressReport } from '../types/press-downtime'
 
 export class ApiRequestError extends Error {
   constructor(public readonly status: number) {
@@ -185,8 +186,14 @@ export function getStopIntelligenceFleet(pressKey: RadiusPressKey, fromUtc: stri
   return getJson<StopIntelligenceFleetReport>(`/api/stop-intelligence/fleet?pressKey=${encodeURIComponent(pressKey)}&${rangeQuery(fromUtc, toUtc)}`, signal)
 }
 
-export function getStopIntelligenceDetail(input: { pressKey: RadiusPressKey; stopId: string; fromUtc: string; toUtc: string }, signal?: AbortSignal) {
-  return getJson<StopIntelligenceDetail>(`/api/stop-intelligence/presses/${input.pressKey}/stops/${encodeURIComponent(input.stopId)}?${rangeQuery(input.fromUtc, input.toUtc)}`, signal)
+export function getPressDowntimePress(pressKey: RadiusPressKey, fromUtc: string, toUtc: string, signal?: AbortSignal) {
+  return getJson<PressDowntimePressReport>(`/api/press-downtime/presses/${encodeURIComponent(pressKey)}?${rangeQuery(fromUtc, toUtc)}`, signal)
+}
+
+export function getStopIntelligenceDetail(input: { pressKey: RadiusPressKey; stopId: string; fromUtc: string; toUtc: string; includeRaw?: boolean }, signal?: AbortSignal) {
+  const parameters = new URLSearchParams({ fromUtc: input.fromUtc, toUtc: input.toUtc })
+  if (input.includeRaw) parameters.set('includeRaw', 'true')
+  return getJson<StopIntelligenceDetail>(`/api/stop-intelligence/presses/${input.pressKey}/stops/${encodeURIComponent(input.stopId)}?${parameters}`, signal)
 }
 
 export function recordStopIntelligenceCorrection(input: { pressKey: RadiusPressKey; segmentKey: string; fromUtc: string; toUtc: string; predictedState: StopPredictedState; correctedState: StopOperatorState; comment?: string | null }, signal?: AbortSignal) {

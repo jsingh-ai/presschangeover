@@ -14,8 +14,9 @@ interface Props {
 
 const navigation: Array<{ area: AnalyticsArea; label: string; description: string; icon: ReactNode }> = [
   { area: 'overview', label: 'Overview', description: 'Signals and priorities', icon: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4v9Zm0 7h6v-4H4v4Zm10 0h6v-9h-6v9Zm0-16v4h6V4h-6Z" /></svg> },
-  { area: 'job-intelligence', label: 'Job Intelligence', description: 'Products, presses, and changeovers', icon: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v4H4V5Zm0 6h10v4H4v-4Zm0 6h7v3H4v-3Zm13-5 3 3-3 3m-3-3h6" /></svg> },
+  { area: 'machine-intelligence', label: 'Machine Intelligence', description: 'Fleet, recipes, and outcomes', icon: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v4H4V5Zm0 6h10v4H4v-4Zm0 6h7v3H4v-3Zm13-5 3 3-3 3m-3-3h6" /></svg> },
   { area: 'stop-intelligence', label: 'Stop Intelligence', description: 'Physical stop foundation', icon: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h11m-3-3 3 3-3 3m8 7H9m3-3-3 3 3 3M4 12h16" /></svg> },
+  { area: 'press-downtime', label: 'Press Downtime', description: 'Job time by press', icon: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v4H4V4Zm0 6h7v10H4V10Zm9 0h7v4h-7v-4Zm0 6h7v4h-7v-4Z" /></svg> },
   { area: 'operational-analysis', label: 'Operational Analysis', description: 'Time and drivers', icon: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3v18M5 17h15M8 14l3-4 3 2 5-7" /></svg> },
   { area: 'raw-radius-explorer', label: 'Raw Radius Explorer', description: 'Codes and telemetry', icon: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h7M4 18h16M15 9l3 3-3 3" /></svg> },
   { area: 'telemetry-event-explorer', label: 'Telemetry Event Explorer', description: 'Thresholds and changes', icon: <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17h3l2-9 3 12 3-15 2 12h5M4 4v16h16" /></svg> },

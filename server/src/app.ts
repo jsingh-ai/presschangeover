@@ -36,6 +36,7 @@ import { ChangeoverIntelligenceService } from './changeover-intelligence/service
 import { hasStopIntelligenceCanonicalPolicy } from './stop-intelligence/configuration.js'
 import { StopIntelligenceConfigurationError, StopIntelligenceService } from './stop-intelligence/service.js'
 import { InMemoryStopIntelligenceCorrectionRepository, STOP_OPERATOR_DECISION_STATES, STOP_PREDICTED_STATES, StopIntelligenceCorrectionService, type StopIntelligenceCorrectionInput, type StopOperatorDecisionState, type StopPredictedState } from './stop-intelligence/correction-service.js'
+import { PressDowntimeService } from './press-downtime/service.js'
 
 const MAX_PHYSICAL_STATE_RANGE_MS = 2 * 60 * 60 * 1_000
 const MAX_RADIUS_RANGE_MS = 31 * 24 * 60 * 60 * 1_000
@@ -534,7 +535,12 @@ export function createApp({
   stopIntelligenceCorrectionService = new StopIntelligenceCorrectionService(new InMemoryStopIntelligenceCorrectionRepository()),
 }: CreateAppOptions) {
   const app = express()
-  const telemetry = new TelemetryFoundationService(telemetryClient, { now })
+  const telemetry = new TelemetryFoundationService(telemetryClient, {
+    now,
+    onSemanticHistoryDiagnostic: (diagnostic) => {
+      if (logger) logger.info(JSON.stringify({ event: 'semantic_history_read', ...diagnostic }))
+    },
+  })
   const engineeringClues = new EngineeringClueAnalysisService(telemetry)
   const stopRestart = new StopRestartAnalysisService(telemetry)
   const rawRadiusExplorer = new RawRadiusExplorerService(radiusService, telemetry, rawTelemetryReviewService)
@@ -542,6 +548,7 @@ export function createApp({
   const jobIntelligence = new JobIntelligenceService(radiusService, telemetry)
   const changeoverIntelligence = new ChangeoverIntelligenceService(radiusService, telemetry)
   const stopIntelligence = new StopIntelligenceService(telemetry, radiusService, now, stopIntelligenceCorrectionService)
+  const pressDowntime = new PressDowntimeService(stopIntelligence, now)
   const observedIdentityCache = new ObservedIdentityCache(
     () => radiusService.getObservedIdentities?.() ?? Promise.resolve([]),
     { onRefreshError: () => { if (logger) logger.error('classification_observed_identity_refresh_unavailable') } },
@@ -718,11 +725,18 @@ export function createApp({
     response.status(200).json(await stopIntelligence.fleet(parseStopIntelligenceQuery(request.query), String(response.locals.requestId), cancellationSignal(request, response)))
   }))
 
+  app.get('/api/press-downtime/presses/:pressKey', asyncRoute(async (request, response) => {
+    const query = parseStopIntelligenceQuery({ ...request.query, pressKey: request.params.pressKey })
+    response.status(200).json(await pressDowntime.press(query, String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
   app.get('/api/stop-intelligence/presses/:pressKey/stops/:stopId', asyncRoute(async (request, response) => {
     const query = parseStopIntelligenceQuery({ ...request.query, pressKey: request.params.pressKey })
     const stopId = request.params.stopId
     if (Array.isArray(stopId) || !/^press(?:3|5|6|7|8|9|10|11|12|13|14|15)-\d{1,16}$/.test(stopId)) throw new RequestValidationError('invalid_stop_intelligence_stop_id')
-    const detail = await stopIntelligence.detail({ ...query, stopId }, String(response.locals.requestId), cancellationSignal(request, response))
+    const includeRawValue = request.query.includeRaw
+    if (Array.isArray(includeRawValue) || includeRawValue !== undefined && includeRawValue !== 'true' && includeRawValue !== 'false') throw new RequestValidationError('invalid_include_raw')
+    const detail = await stopIntelligence.detail({ ...query, stopId, includeRaw: includeRawValue === 'true' }, String(response.locals.requestId), cancellationSignal(request, response))
     if (!detail) { response.status(404).json({ error: 'stop_intelligence_stop_not_found' }); return }
     response.status(200).json(detail)
   }))

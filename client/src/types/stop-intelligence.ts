@@ -36,13 +36,31 @@ export interface ChangeoverAction {
   detectorVersion: string
 }
 
+export type ChangeoverActivityWindowKind = 'previous-job' | 'job-out' | 'deck-out' | 'wash' | 'ink-up' | 'deck-in' | 'register' | 'impression' | 'color-check' | 'good-run' | 'mixed'
+export interface ChangeoverActivityWindow {
+  id: string
+  kind: ChangeoverActivityWindowKind
+  label: string
+  startAt: string
+  endAt: string
+  source: 'TELEMETRY' | 'TELEMETRY_INFERRED' | 'RADIUS_FALLBACK'
+  explanation: string
+  evidenceDetails: string[]
+}
+
 export interface StopFleetEpisode {
   stopId: string
   pressKey: RadiusPressKey
   startAt: string
   endAt: string | null
   physicalDurationSeconds: number
+  eventDurationSeconds?: number
+  trialRunSeconds?: number
+  mergedChangeover?: boolean
+  constituentStopIds?: string[]
   classification: StopClassification
+  operationalClassification?: StopClassification
+  changeoverStabilizationId?: string | null
   confidence: StopConfidence
   movementAttemptCount: number
   failedRecoveryCount: number
@@ -53,6 +71,32 @@ export interface StopFleetEpisode {
   rightCensored: boolean
   affectedByCollectionGap: boolean
   affectedBySpeedQuality: boolean
+  changeoverActivityWindows: ChangeoverActivityWindow[]
+}
+
+export interface ChangeoverStabilizationRoll {
+  rollId: string
+  startAt: string
+  productionStartAt: string
+  completedAt: string
+  completedLength: number
+  unit: string | null
+}
+
+export interface ChangeoverStabilizationPhase {
+  stabilizationId: string
+  triggerStopId: string
+  startAt: string
+  endAt: string
+  status: 'STABILIZING' | 'STABILIZED'
+  stabilizedAt: string | null
+  goodProductionStartAt: string | null
+  minimumRollLength: number
+  requiredConsecutiveRolls: number
+  completionWindowSeconds: number
+  qualifyingRolls: ChangeoverStabilizationRoll[]
+  continuationStopIds: string[]
+  reason: string
 }
 
 export interface StopFleetPressSummary {
@@ -96,6 +140,14 @@ export interface StopFleetPressSummary {
     unit: string | null
     observations: Array<{ atUtc: string; value: number; qualityState: string }>
   } | null
+  productionAttributeContext?: Array<{
+    attribute: 'WEB_WIDTH' | 'FILM_THICKNESS' | 'FILM_DENSITY' | 'PLATE_REPEAT'
+    label: string
+    rawIdentity: string
+    unit: string | null
+    observations: Array<{ atUtc: string; value: number; qualityState: string }>
+  }>
+  changeoverStabilizationPhases?: ChangeoverStabilizationPhase[]
 }
 
 export interface StopIntelligenceFleetReport {
@@ -234,6 +286,8 @@ export interface StopIntelligenceDetail {
   telemetryEvidenceState: StopEvidenceState
   identityAssociationConfiguration: { pressKey: RadiusPressKey; identityContextBeforeSeconds: number; identityContextAfterSeconds: number; identitySettlingSeconds: number }
   stop: ClassifiedStopDetail
+  changeoverStabilizationPhase?: ChangeoverStabilizationPhase
+  mergedChangeoverEvent?: StopFleetEpisode
   speedContext: {
     fromUtc: string
     toUtc: string
@@ -270,6 +324,14 @@ export interface StopIntelligenceDetail {
       intervals: Array<{ startUtc: string; endUtc: string; state: 'PRINTING' | 'OUT' | 'READY' | 'INACTIVE' | 'UNKNOWN'; active: boolean | null; printing: boolean | null; out: boolean | null }>
       events: Array<{ atUtc: string; kind: 'PRINT_OFF_COMMAND'; label: string }>
     }>
+  }
+  changeoverActivityWindows: ChangeoverActivityWindow[]
+  rawUnmappedContext: {
+    availability: 'NOT_LOADED' | 'AVAILABLE' | 'PARTIAL' | 'NO_CHANGES' | 'RAW_HISTORY_EXPIRED' | 'UNAVAILABLE'
+    discoveredSignalCount: number
+    loadedSignalCount: number
+    plottedSignalCount: number
+    reason: string
   }
   changeoverActions: {
     eligible: boolean
