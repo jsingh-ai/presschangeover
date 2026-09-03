@@ -638,9 +638,9 @@ export class StopIntelligenceService {
     return (await this.analyzeWithReadData(input, requestId, signal)).report
   }
 
-  async fleet(input: StopIntelligenceRequest, requestId?: string, signal?: AbortSignal): Promise<StopIntelligenceFleetReport> {
+  async fleet(input: StopIntelligenceRequest, requestId?: string, signal?: AbortSignal, options: { cache?: 'default' | 'bypass' } = {}): Promise<StopIntelligenceFleetReport> {
     const [result, operatorCorrections] = await Promise.all([
-      this.analyzeWithReadData(input, requestId, signal),
+      this.analyzeWithReadData(input, requestId, signal, options.cache !== 'bypass'),
       this.corrections.list(input.pressKey, input.fromUtc, input.toUtc),
     ])
     const press = fleetPress(result.report, fleetSpeedContext(result, input.fromUtc, input.toUtc), result.signals, result.radiusTimeline, [])
@@ -773,9 +773,9 @@ export class StopIntelligenceService {
     }
   }
 
-  private async analyzeWithReadData(input: StopIntelligenceRequest, requestId?: string, signal?: AbortSignal): Promise<AnalysisReadResult> {
+  private async analyzeWithReadData(input: StopIntelligenceRequest, requestId?: string, signal?: AbortSignal, useCache = true): Promise<AnalysisReadResult> {
     const cacheKey = `${input.pressKey}|${input.fromUtc}|${input.toUtc}`
-    const cached = this.analysisCache.get(cacheKey)
+    const cached = useCache ? this.analysisCache.get(cacheKey) : undefined
     if (cached && this.now() - cached.completedAt <= STOP_ANALYSIS_CACHE_TTL_MS) return cached.result
     if (cached) this.analysisCache.delete(cacheKey)
 
@@ -913,7 +913,7 @@ export class StopIntelligenceService {
       identityEvidenceCutoffUtc,
       radiusTimeline,
     }
-    if (!signal?.aborted) {
+    if (useCache && !signal?.aborted) {
       this.analysisCache.set(cacheKey, { completedAt: this.now(), result })
       while (this.analysisCache.size > STOP_ANALYSIS_CACHE_LIMIT) this.analysisCache.delete(this.analysisCache.keys().next().value!)
     }

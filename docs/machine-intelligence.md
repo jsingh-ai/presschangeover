@@ -1,24 +1,19 @@
 # Machine Intelligence
 
-Machine Intelligence replaces the former Job Intelligence user interface with a compact fleet-relative view. The page remains read-only against Telemetry and Radius.
+Machine Intelligence is a read-only fleet comparison page. It shows Process Intelligence time, Radius time, comparable non-good time, and roll outcomes for all supported presses.
 
 ## Evidence model
 
-- Process Intelligence is telemetry-led. The current physical-stop classification is used, and the latest operator review overrides the prediction.
-- Radius G/M/B remains separate recorded operational context. It is aligned beside Process Intelligence rather than used to move physical stop boundaries.
-- Routine and predicted Uncertain time are accounted as Downtime. Bad or unavailable evidence remains Missing Data.
-- Temporary Order or Recipe gaps do not create a new occurrence. An unchanged identity that resumes after a bounded evidence gap remains one occurrence.
+- Process Intelligence remains telemetry-led, with the latest operator review overriding prediction.
+- Radius G/M/B remains separate recorded operational context and does not move physical stop boundaries.
+- Routine and predicted Uncertain time count as Downtime. Bad or unavailable evidence remains Missing Data.
 
-## Presentation hierarchy
+## Optimized overview
 
-The surface contains fleet-relative bar charts for all presses: Process Intelligence time, Radius time, and paired non-good time. It does not declare a single press to be the opportunity.
+The browser makes one request to `GET /api/machine-intelligence/overview` for the selected range. The server reads each press with bounded concurrency and returns only the totals consumed by the four overview charts.
 
-Press rows load progressively and retain a compact summary. Expansion reveals recipe families, exact recipe IDs, occurrences, individual time segments, rolls, and aligned Radius context. These are nested expansions so detailed evidence is not placed on the page until requested.
+The former per-press endpoints and their job, recipe, occurrence, timeline, daily grouping, and nested roll evidence payloads have been removed. Machine Intelligence no longer creates those structures, sends dozens of browser requests, or renders sticky expandable press rows.
 
-Recipe-family comparison currently removes a trailing `E` identifier. For example, `1600-GAP01-E459` is displayed as the exact recipe and compared under `1600-GAP01`. Recipes without that explicit suffix remain unchanged.
+The overview defaults to 24 hours and supports 72 hours, 14 days, and custom ranges up to 31 days. Each press is processed as one logical read so the telemetry foundation can batch its bounded upstream reads and preserve roll transitions across the entire selected range. Machine Intelligence explicitly bypasses the retained Stop Intelligence analysis cache; this optimization comes from doing less work and transferring less data, not from caching the result.
 
-## Range behavior
-
-The page supports 24 hours, 72 hours, 14 days, and custom ranges up to 31 days. The Machine Intelligence endpoint remains bounded to 72 hours, so longer ranges are composed from adjacent read-only windows. Adjacent windows with the same Order and Recipe are merged back into one occurrence.
-
-This is progressive client composition over the existing validated evidence contract, not a persisted leadership fact store. Cold 14–31-day fleet loads are therefore still dependent on historian performance; the shared completed-read cache and global semantic-history limiter reduce duplication and protect the upstream service but do not eliminate cold computation.
+All telemetry access remains server-side through the configured TelemetryQueryApi client. Machine Intelligence has no telemetry write path and does not connect directly to the historian.

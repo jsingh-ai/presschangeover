@@ -34,6 +34,7 @@ import { ChangeoverIntelligenceService } from './changeover-intelligence/service
 import { hasStopIntelligenceCanonicalPolicy } from './stop-intelligence/configuration.js'
 import { StopIntelligenceConfigurationError, StopIntelligenceService } from './stop-intelligence/service.js'
 import { InMemoryStopIntelligenceCorrectionRepository, STOP_OPERATOR_DECISION_STATES, STOP_PREDICTED_STATES, StopIntelligenceCorrectionService, type StopIntelligenceCorrectionInput, type StopOperatorDecisionState, type StopPredictedState } from './stop-intelligence/correction-service.js'
+import { MACHINE_INTELLIGENCE_MAX_RANGE_MS } from './machine-intelligence/contracts.js'
 import { MachineIntelligenceService } from './machine-intelligence/service.js'
 
 const MAX_PHYSICAL_STATE_RANGE_MS = 2 * 60 * 60 * 1_000
@@ -601,9 +602,10 @@ export function createApp({
     response.status(200).json(await stopIntelligence.productionAttributes(query, String(response.locals.requestId), cancellationSignal(request, response)))
   }))
 
-  app.get('/api/machine-intelligence/presses/:pressKey', asyncRoute(async (request, response) => {
-    const query = parseStopIntelligenceQuery({ ...request.query, pressKey: request.params.pressKey })
-    response.status(200).json(await machineIntelligence.press(query, String(response.locals.requestId), cancellationSignal(request, response)))
+  app.get('/api/machine-intelligence/overview', asyncRoute(async (request, response) => {
+    const query = validateRadiusRange(request.query)
+    if (Date.parse(query.toUtc) - Date.parse(query.fromUtc) > MACHINE_INTELLIGENCE_MAX_RANGE_MS) throw new RequestValidationError('machine_intelligence_range_too_large')
+    response.status(200).json(await machineIntelligence.overview(query, String(response.locals.requestId), cancellationSignal(request, response)))
   }))
 
   app.get('/api/stop-intelligence/presses/:pressKey/stops/:stopId', asyncRoute(async (request, response) => {

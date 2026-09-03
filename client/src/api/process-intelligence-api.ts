@@ -51,7 +51,7 @@ import type {
 } from '../types/evidence'
 import type { ChangeoverInspector, ChangeoverReport, ChangeoverRequest } from '../types/changeover'
 import type { StopFleetPressSummary, StopIntelligenceCorrection, StopIntelligenceDetail, StopIntelligenceFleetReport, StopOperatorState, StopPredictedState } from '../types/stop-intelligence'
-import type { MachineIntelligencePressReport } from '../types/machine-intelligence'
+import type { MachineIntelligenceFleetOverview } from '../types/machine-intelligence'
 
 export class ApiRequestError extends Error {
   constructor(public readonly status: number) {
@@ -156,8 +156,8 @@ export function getStopIntelligenceProductionAttributes(pressKey: RadiusPressKey
   return getJson<NonNullable<StopFleetPressSummary['productionAttributeContext']>>(`/api/stop-intelligence/presses/${encodeURIComponent(pressKey)}/production-attributes?${rangeQuery(fromUtc, toUtc)}`, signal)
 }
 
-export function getMachineIntelligencePress(pressKey: RadiusPressKey, fromUtc: string, toUtc: string, signal?: AbortSignal) {
-  return getJson<MachineIntelligencePressReport>(`/api/machine-intelligence/presses/${encodeURIComponent(pressKey)}?${rangeQuery(fromUtc, toUtc)}`, signal)
+export function getMachineIntelligenceOverview(fromUtc: string, toUtc: string, signal?: AbortSignal) {
+  return getJson<MachineIntelligenceFleetOverview>(`/api/machine-intelligence/overview?${rangeQuery(fromUtc, toUtc)}`, signal)
 }
 
 export function getStopIntelligenceDetail(input: { pressKey: RadiusPressKey; stopId: string; fromUtc: string; toUtc: string; includeRaw?: boolean }, signal?: AbortSignal) {
