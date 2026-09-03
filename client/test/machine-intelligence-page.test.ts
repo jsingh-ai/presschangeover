@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import { MACHINE_INTELLIGENCE_MAX_RANGE_MS, MACHINE_INTELLIGENCE_PRESS_KEYS, machineIntelligenceChunks, mergeMachineIntelligenceReports, recipeFamily } from '../src/machine-intelligence'
 import { areaFromPathname, areaPath } from '../src/navigation'
-import type { PressDowntimePressReport } from '../src/types/press-downtime'
+import type { MachineIntelligencePressReport } from '../src/types/machine-intelligence'
 
 const page = readFileSync(new URL('../src/components/MachineIntelligencePage.tsx', import.meta.url), 'utf8')
 const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
@@ -24,12 +24,12 @@ describe('Machine Intelligence client foundation', () => {
   })
 
   it('keeps one occurrence when the same identity crosses bounded read windows', () => {
-    const report = (fromUtc: string, toUtc: string, recipe: string, category: 'CHANGEOVER' | 'GOOD_RUN'): PressDowntimePressReport => {
+    const report = (fromUtc: string, toUtc: string, recipe: string, category: 'CHANGEOVER' | 'GOOD_RUN'): MachineIntelligencePressReport => {
       const durationSeconds = (Date.parse(toUtc) - Date.parse(fromUtc)) / 1000
       const totals = { CHANGEOVER: category === 'CHANGEOVER' ? durationSeconds : 0, GOOD_RUN: category === 'GOOD_RUN' ? durationSeconds : 0, DOWNTIME: 0, MISSING_DATA: 0 }
       const segment = { segmentId: fromUtc, occurrenceId: fromUtc, category, startUtc: fromUtc, endUtc: toUtc, durationSeconds, source: 'PREDICTION' as const, underlyingState: category, stopId: null }
       const occurrence = { occurrenceId: fromUtc, occurrenceNumber: 1, startUtc: fromUtc, endUtc: toUtc, durationSeconds, order: 'O1', recipe, identityComplete: true, boundaryFields: [] as Array<'order' | 'recipe'>, totals, segments: [segment], rollSummary: { total: 0, good: 0, changeover: 0, goodLength: 0, changeoverLength: 0 }, rolls: [] }
-      return { version: 'press-downtime-v1.3.0', generatedAtUtc: toUtc, fromUtc, toUtc, pressKey: 'press15', displayName: 'Press 15', availability: 'AVAILABLE', reason: null, totals, classificationTimeline: [segment], speedTrend: { unit: 'ft/min', observations: [] }, identityTimeline: [{ segmentId: fromUtc, startUtc: fromUtc, endUtc: toUtc, durationSeconds, order: 'O1', recipe, missingFields: [] }], radiusTimeline: [{ segmentId: fromUtc, category: 'G', startUtc: fromUtc, endUtc: toUtc, durationSeconds, eventType: 'G', statusCode: '150', statusDescription: 'Run Production' }], radiusTotals: { G: durationSeconds, B: 0, M: 0, MISSING_DATA: 0 }, rollSummary: occurrence.rollSummary, jobGroups: [{ groupId: fromUtc, order: 'O1', recipe, identityComplete: true, occurrenceCount: 1, firstStartUtc: fromUtc, lastEndUtc: toUtc, totals, rollSummary: occurrence.rollSummary, rolls: [], occurrences: [occurrence] }], correctionPersistence: 'memory', policy: { identityBoundary: 'ANY_OBSERVED_ORDER_OR_RECIPE_CHANGE', temporaryIdentityGaps: 'MISSING_TIME_WITHOUT_NEW_OCCURRENCE', repeatedIdentity: 'GROUPED_OCCURRENCES', operatorReview: 'LATEST_REVIEW_OVERRIDES_PREDICTION', routineAndUncertain: 'DOWNTIME', badOrUnavailableEvidence: 'MISSING_DATA' } }
+      return { version: 'machine-intelligence-v1.0.0', generatedAtUtc: toUtc, fromUtc, toUtc, pressKey: 'press15', displayName: 'Press 15', availability: 'AVAILABLE', reason: null, totals, classificationTimeline: [segment], speedTrend: { unit: 'ft/min', observations: [] }, identityTimeline: [{ segmentId: fromUtc, startUtc: fromUtc, endUtc: toUtc, durationSeconds, order: 'O1', recipe, missingFields: [] }], radiusTimeline: [{ segmentId: fromUtc, category: 'G', startUtc: fromUtc, endUtc: toUtc, durationSeconds, eventType: 'G', statusCode: '150', statusDescription: 'Run Production' }], radiusTotals: { G: durationSeconds, B: 0, M: 0, MISSING_DATA: 0 }, rollSummary: occurrence.rollSummary, jobGroups: [{ groupId: fromUtc, order: 'O1', recipe, identityComplete: true, occurrenceCount: 1, firstStartUtc: fromUtc, lastEndUtc: toUtc, totals, rollSummary: occurrence.rollSummary, rolls: [], occurrences: [occurrence] }], correctionPersistence: 'memory', policy: { identityBoundary: 'ANY_OBSERVED_ORDER_OR_RECIPE_CHANGE', temporaryIdentityGaps: 'MISSING_TIME_WITHOUT_NEW_OCCURRENCE', repeatedIdentity: 'GROUPED_OCCURRENCES', operatorReview: 'LATEST_REVIEW_OVERRIDES_PREDICTION', routineAndUncertain: 'DOWNTIME', badOrUnavailableEvidence: 'MISSING_DATA' } }
     }
     const merged = mergeMachineIntelligenceReports([report('2026-08-01T00:00:00.000Z', '2026-08-04T00:00:00.000Z', '1600-GAP01-E459', 'CHANGEOVER'), report('2026-08-04T00:00:00.000Z', '2026-08-05T00:00:00.000Z', '1600-GAP01-E459', 'GOOD_RUN')])
     assert.equal(merged.jobGroups.length, 1)

@@ -1,13 +1,13 @@
 import type { RadiusPressKey } from './types/api'
-import type { PressDowntimeCategoryTotals, PressDowntimeJobOccurrence, PressDowntimePressReport, PressDowntimeRadiusCategory, PressDowntimeRoll, PressDowntimeSegment } from './types/press-downtime'
+import type { MachineIntelligenceCategoryTotals, MachineIntelligenceJobOccurrence, MachineIntelligencePressReport, MachineIntelligenceRadiusCategory, MachineIntelligenceRoll, MachineIntelligenceSegment } from './types/machine-intelligence'
 
 export const MACHINE_INTELLIGENCE_PRESS_KEYS: RadiusPressKey[] = ['press3', 'press5', 'press6', 'press7', 'press8', 'press9', 'press10', 'press11', 'press12', 'press13', 'press14', 'press15']
 export const MACHINE_INTELLIGENCE_MAX_RANGE_MS = 31 * 24 * 60 * 60_000
 export const MACHINE_INTELLIGENCE_CHUNK_MS = 72 * 60 * 60_000
 
-const emptyTotals = (): PressDowntimeCategoryTotals => ({ CHANGEOVER: 0, GOOD_RUN: 0, DOWNTIME: 0, MISSING_DATA: 0 })
-const sameIdentity = (left: Pick<PressDowntimeJobOccurrence, 'order' | 'recipe'>, right: Pick<PressDowntimeJobOccurrence, 'order' | 'recipe'>) => left.order === right.order && left.recipe === right.recipe
-const identityKey = (value: Pick<PressDowntimeJobOccurrence, 'order' | 'recipe'>) => `${value.order ?? ''}\u0000${value.recipe ?? ''}`
+const emptyTotals = (): MachineIntelligenceCategoryTotals => ({ CHANGEOVER: 0, GOOD_RUN: 0, DOWNTIME: 0, MISSING_DATA: 0 })
+const sameIdentity = (left: Pick<MachineIntelligenceJobOccurrence, 'order' | 'recipe'>, right: Pick<MachineIntelligenceJobOccurrence, 'order' | 'recipe'>) => left.order === right.order && left.recipe === right.recipe
+const identityKey = (value: Pick<MachineIntelligenceJobOccurrence, 'order' | 'recipe'>) => `${value.order ?? ''}\u0000${value.recipe ?? ''}`
 
 export function recipeFamily(recipe: string | null): string | null {
   if (!recipe) return null
@@ -20,11 +20,11 @@ export function machineIntelligenceChunks(fromUtc: string, toUtc: string) {
   return chunks
 }
 
-function combineTotals(segments: PressDowntimeSegment[]) {
+function combineTotals(segments: MachineIntelligenceSegment[]) {
   return segments.reduce((result, segment) => { result[segment.category] += segment.durationSeconds; return result }, emptyTotals())
 }
 
-function combineRolls(rolls: PressDowntimeRoll[]) {
+function combineRolls(rolls: MachineIntelligenceRoll[]) {
   const unique = [...new Map(rolls.map((roll) => [roll.rollId, roll])).values()]
   return unique.reduce((summary, roll) => {
     summary.total += 1
@@ -34,9 +34,9 @@ function combineRolls(rolls: PressDowntimeRoll[]) {
   }, { total: 0, good: 0, changeover: 0, goodLength: 0, changeoverLength: 0 })
 }
 
-function mergeOccurrences(reports: PressDowntimePressReport[]): PressDowntimeJobOccurrence[] {
+function mergeOccurrences(reports: MachineIntelligencePressReport[]): MachineIntelligenceJobOccurrence[] {
   const ordered = reports.flatMap((report) => report.jobGroups.flatMap((group) => group.occurrences)).sort((left, right) => Date.parse(left.startUtc) - Date.parse(right.startUtc))
-  const merged: PressDowntimeJobOccurrence[] = []
+  const merged: MachineIntelligenceJobOccurrence[] = []
   for (const occurrence of ordered) {
     const previous = merged.at(-1)
     if (previous && previous.endUtc === occurrence.startUtc && sameIdentity(previous, occurrence)) {
@@ -71,11 +71,11 @@ function mergeAdjacent<T extends { startUtc: string; endUtc: string; durationSec
   return result
 }
 
-export function mergeMachineIntelligenceReports(reports: PressDowntimePressReport[]): PressDowntimePressReport {
+export function mergeMachineIntelligenceReports(reports: MachineIntelligencePressReport[]): MachineIntelligencePressReport {
   if (!reports.length) throw new Error('machine_intelligence_report_missing')
   const ordered = [...reports].sort((left, right) => Date.parse(left.fromUtc) - Date.parse(right.fromUtc)); const first = ordered[0]!; const last = ordered.at(-1)!
   const occurrences = mergeOccurrences(ordered)
-  const grouped = new Map<string, PressDowntimeJobOccurrence[]>()
+  const grouped = new Map<string, MachineIntelligenceJobOccurrence[]>()
   for (const occurrence of occurrences) grouped.set(identityKey(occurrence), [...(grouped.get(identityKey(occurrence)) ?? []), occurrence])
   const jobGroups = [...grouped].map(([key, items]) => {
     const segments = items.flatMap((item) => item.segments); const rolls = items.flatMap((item) => item.rolls)
@@ -84,13 +84,13 @@ export function mergeMachineIntelligenceReports(reports: PressDowntimePressRepor
   const classificationTimeline = mergeAdjacent(ordered.flatMap((report) => report.classificationTimeline), (left, right) => left.category === right.category && left.source === right.source && left.underlyingState === right.underlyingState)
   const identityTimeline = mergeAdjacent(ordered.flatMap((report) => report.identityTimeline), (left, right) => left.order === right.order && left.recipe === right.recipe && left.missingFields.join() === right.missingFields.join())
   const radiusTimeline = mergeAdjacent(ordered.flatMap((report) => report.radiusTimeline), (left, right) => left.category === right.category && left.eventType === right.eventType && left.statusCode === right.statusCode && left.statusDescription === right.statusDescription)
-  const radiusTotals = radiusTimeline.reduce<Record<PressDowntimeRadiusCategory, number>>((result, segment) => { result[segment.category] += segment.durationSeconds; return result }, { G: 0, B: 0, M: 0, MISSING_DATA: 0 })
+  const radiusTotals = radiusTimeline.reduce<Record<MachineIntelligenceRadiusCategory, number>>((result, segment) => { result[segment.category] += segment.durationSeconds; return result }, { G: 0, B: 0, M: 0, MISSING_DATA: 0 })
   const allRolls = jobGroups.flatMap((group) => group.rolls); const totals = combineTotals(classificationTimeline); const rangeSeconds = (Date.parse(last.toUtc) - Date.parse(first.fromUtc)) / 1000
   const availability = totals.MISSING_DATA >= rangeSeconds - .1 ? 'UNAVAILABLE' : totals.MISSING_DATA > 0 ? 'PARTIAL' : 'AVAILABLE'
   const speed = [...new Map(ordered.flatMap((report) => report.speedTrend.observations).map((item) => [`${item.atUtc}\u0000${item.value}`, item])).values()].sort((left, right) => Date.parse(left.atUtc) - Date.parse(right.atUtc))
   return { ...first, generatedAtUtc: last.generatedAtUtc, fromUtc: first.fromUtc, toUtc: last.toUtc, availability, reason: availability === 'UNAVAILABLE' ? 'No trustworthy Process Intelligence evidence was available in this range.' : availability === 'PARTIAL' ? 'Missing Data is excluded from production and loss comparisons.' : null, totals, classificationTimeline, speedTrend: { unit: ordered.find((report) => report.speedTrend.unit)?.speedTrend.unit ?? null, observations: speed }, identityTimeline, radiusTimeline, radiusTotals, rollSummary: combineRolls(allRolls), jobGroups }
 }
 
-export function machineOpportunitySeconds(report: PressDowntimePressReport) {
+export function machineOpportunitySeconds(report: MachineIntelligencePressReport) {
   return report.totals.CHANGEOVER + report.totals.DOWNTIME
 }

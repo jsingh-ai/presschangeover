@@ -3,12 +3,11 @@ import { readFileSync } from 'node:fs'
 import { describe, it } from 'node:test'
 import React, { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { runLayerIntervals } from '../src/components/RunEvidenceDrawer'
 import { radiusRawCodeTrack, timelineFamilyLabel } from '../src/components/RadiusOverview'
 import { clusterTimelineEvents, groupTimelineEvents, numericPaths, SynchronizedTimeline } from '../src/components/SynchronizedTimeline'
 import { actualSpeedTrack, contextDisplayValue, contextEventTrack, contextIntervalStyle, contextIntervalTracks, curatedCategoriesForCapabilities, mergeTelemetryEvidenceChunks, physicalChangeLabel, physicalEventTrack, telemetryEvidenceChunks, type PressTelemetryEvidenceState } from '../src/components/TelemetryEvidenceTimeline'
 import { UnifiedProcessTimeline } from '../src/components/UnifiedProcessTimeline'
-import type { OperationalRun, OverviewTimelineInterval } from '../src/types/api'
+import type { OverviewTimelineInterval } from '../src/types/api'
 import type { CuratedPhysicalEvidence, PressSpeedEvidence, ProductionContextEvidence, SemanticSignalEvidence, SignalCapability, TelemetryChange } from '../src/types/evidence'
 
 Object.assign(globalThis, { React })
@@ -130,7 +129,6 @@ describe('primary telemetry visual integration', () => {
     assert.match(overviewSource, /Focused telemetry for the selected interval/)
     assert.match(overviewSource, /radiusRawTrack=\{radiusRawTrack\}/)
     assert.doesNotMatch(overviewSource, /Open exact evidence/)
-    assert.match(appSource, /!\(area === 'overview' && investigation\.mode === 'segment'\)/)
     assert.doesNotMatch(appSource, /window\.setInterval\(refreshLiveRange, 60_000\)/)
     assert.doesNotMatch(appSource, /visibilitychange/)
   })
@@ -175,57 +173,12 @@ describe('primary telemetry visual integration', () => {
     assert.equal(timelineFamilyLabel({ ...interval, classificationStatus: 'needs_classification' }), 'Needs Classification')
   })
 
-  it('merges contiguous Run family intervals but never bridges an unavailable gap', () => {
-    const segment = (segmentId: string, startUtc: string, endUtc: string, unavailable = false) => ({ segmentId, exactIdentity: unavailable ? null : 'B\u001f1\u001fState', eventType: unavailable ? null : 'B', statusCode: unavailable ? null : '1', statusDescription: unavailable ? null : 'State', startUtc, endUtc, durationSeconds: 60, phase: 'pre-production' as const, isUnavailable: unavailable, isShortRunAttempt: false, operationalGroupKey: unavailable ? null : 'ROUTINE_PROCESS', operationalGroupName: unavailable ? null : 'Routine Process', processFamilyKey: unavailable ? null : 'CLEANING_WASH', processFamilyName: unavailable ? null : 'Cleaning / Wash' })
-    const run = { startUtc: fromUtc, endUtc: '2026-08-11T12:04:00.000Z', segments: [segment('1', fromUtc, '2026-08-11T12:01:00.000Z'), segment('2', '2026-08-11T12:01:00.000Z', '2026-08-11T12:02:00.000Z'), segment('3', '2026-08-11T12:02:00.000Z', '2026-08-11T12:03:00.000Z', true), segment('4', '2026-08-11T12:03:00.000Z', '2026-08-11T12:04:00.000Z')] } as OperationalRun
-    const intervals = runLayerIntervals(run, 'family')
-    assert.equal(intervals.length, 3)
-    assert.equal(intervals[0]?.endUtc, '2026-08-11T12:02:00.000Z')
-    assert.equal(intervals[1]?.unavailable, true)
-  })
 
-  it('keeps one unified normal-Run timeline and an explicit long-Run exception', () => {
-    const runSource = readFileSync(new URL('../src/components/RunEvidenceDrawer.tsx', import.meta.url), 'utf8')
-    assert.match(runSource, /Unified synchronized Run evidence/)
-    assert.match(runSource, /Context, Radius, Operational Group, Process Family, Physical Motion, Actual Speed/)
-    assert.match(runSource, /This Run exceeds two hours/)
-    assert.match(runSource, /Focused two-hour telemetry window/)
-    assert.match(runSource, /showTimeline=\{false\}/)
-  })
 
-  it('keeps Operational evidence on the full selected range and keeps telemetry failure independent of Radius/PI tracks', () => {
-    const source = readFileSync(new URL('../src/components/OperationalActivityExplorer.tsx', import.meta.url), 'utf8')
-    assert.match(source, /sort\(\(left, right\) => Date\.parse\(left\.startUtc\) - Date\.parse\(right\.startUtc\)/)
-    assert.match(source, /setFocusedOccurrenceId\(item\.occurrenceId\)/)
-    assert.match(source, /Complete selected range/)
-    assert.match(source, /full selected-range activity and physical signature/)
-    assert.match(source, /Motion and speed are not replaced with an unrelated two-hour event window/)
-    const emptyEvidence: PressTelemetryEvidenceState = { range: { fromUtc, toUtc, focused: false }, loading: false, error: true }
-    const track = (id: string, label: string) => ({ id, label, intervals: [{ id, startUtc: fromUtc, endUtc: toUtc, label }] })
-    const html = renderToStaticMarkup(createElement(UnifiedProcessTimeline, { fromUtc, toUtc, ariaLabel: 'Degraded', radiusTrack: track('radius', 'Radius recorded'), groupTrack: track('group', 'Operational Group'), familyTrack: track('family', 'Process Family'), telemetry: emptyEvidence }))
-    assert.match(html, /Radius recorded/)
-    assert.match(html, /Operational Group/)
-    assert.match(html, /Process Family/)
-  })
 
-  it('keeps mounted dashboard evidence stable during explicit range refreshes', () => {
-    const telemetrySource = readFileSync(new URL('../src/components/TelemetryEvidenceTimeline.tsx', import.meta.url), 'utf8')
-    const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
-    const operationalSource = readFileSync(new URL('../src/components/OperationalActivityExplorer.tsx', import.meta.url), 'utf8')
-    const patternSource = readFileSync(new URL('../src/components/PatternExplorer.tsx', import.meta.url), 'utf8')
-
-    assert.match(telemetrySource, /current\.pressKey === pressKey/)
-    assert.match(telemetrySource, /stored\.pressKey === pressKey/)
-    assert.match(telemetrySource, /capabilities: stored\.capabilities/)
-    assert.match(appSource, /pressAnalyticsReady = Boolean\(selectedPress && pressDetail\?\.press\.pressKey === selectedPress\)/)
-    assert.doesNotMatch(appSource, /pressAnalyticsReady[^\n]+!pressLoading/)
-    assert.match(appSource, /loading && overview && <span className="background-refresh-status"/)
-    assert.match(operationalSource, /loading && data && <span className="background-refresh-status"/)
-    assert.match(patternSource, /loading && data && <span className="background-refresh-status"/)
-  })
 
   it('contains no S\/400\/Sort Safety assumption in production visualization source', () => {
-    for (const component of ['TelemetryEvidenceTimeline.tsx', 'UnifiedProcessTimeline.tsx', 'RunEvidenceDrawer.tsx', 'OperationalActivityExplorer.tsx', 'RadiusOverview.tsx']) {
+    for (const component of ['TelemetryEvidenceTimeline.tsx', 'UnifiedProcessTimeline.tsx', 'RadiusOverview.tsx']) {
       const source = readFileSync(new URL(`../src/components/${component}`, import.meta.url), 'utf8')
       assert.doesNotMatch(source, /S\s*\/\s*400[\s\S]{0,60}Safety/i)
     }

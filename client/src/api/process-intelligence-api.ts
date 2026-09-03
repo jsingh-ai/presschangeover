@@ -1,10 +1,8 @@
 import type {
   PhysicalStateResponse,
   ProcessIntelligenceHealth,
-  OperationalEpisode,
   RadiusHealth,
   RadiusOverview,
-  RadiusPressEpisodes,
   RadiusPressKey,
   TelemetryHealth,
   TelemetrySource,
@@ -14,13 +12,8 @@ import type {
   OperationalGroupKey,
   ProcessFamilyKey,
   MappingConfidence,
-  ClassificationSearchResponse,
   OperationalGroup,
   ProcessFamily,
-  ActivityAnalysis,
-  ActivitySelection,
-  PatternAnalysis,
-  PatternMatchMode,
   RawExplorerDetail,
   RawExplorerIdentity,
   RawExplorerOccurrence,
@@ -48,23 +41,17 @@ import type {
 } from '../types/api'
 import type {
   CuratedPhysicalEvidence,
-  EngineeringClueResponse,
-  EngineeringSignalType,
   PhysicalEvidenceCategory,
   PressMotionEvidence,
   PressSpeedEvidence,
   PressTelemetryCapabilities,
   PressTelemetrySource,
-  PressSemanticHistoryEvidence,
   ProductionContextEvidence,
-  StopRestartResponse,
-  RadiusTimingAnalysisResponse,
-  FleetSpeedContextResponse,
   TelemetryRepresentation,
 } from '../types/evidence'
 import type { ChangeoverInspector, ChangeoverReport, ChangeoverRequest } from '../types/changeover'
 import type { StopFleetPressSummary, StopIntelligenceCorrection, StopIntelligenceDetail, StopIntelligenceFleetReport, StopOperatorState, StopPredictedState } from '../types/stop-intelligence'
-import type { PressDowntimePressReport } from '../types/press-downtime'
+import type { MachineIntelligencePressReport } from '../types/machine-intelligence'
 
 export class ApiRequestError extends Error {
   constructor(public readonly status: number) {
@@ -128,27 +115,6 @@ export function getCuratedPhysicalEvidence(pressKey: RadiusPressKey, input: { fr
   return sendJson<CuratedPhysicalEvidence>(`/api/telemetry/presses/${pressKey}/evidence`, 'POST', { ...input, includeSeed: input.includeSeed ?? true, representation: input.representation ?? 'changes' }, signal)
 }
 
-export function getEngineeringClues(pressKey: RadiusPressKey, occurrence: { occurrenceId: string; displayName: string; startUtc: string; endUtc: string; exactIdentities: Array<{ eventType: string; statusCode: string | null; statusDescription: string }> }, signal?: AbortSignal) {
-  return sendJson<EngineeringClueResponse>(`/api/telemetry/presses/${pressKey}/clues`, 'POST', occurrence, signal)
-}
-
-export function getStopRestartAnalysis(pressKey: RadiusPressKey, occurrence: ActivityAnalysis['occurrences'][number], candidates: Array<{ canonicalId: string; deckNumber?: number; friendlyName?: string; signalType?: EngineeringSignalType; category?: string; source: 'clue' | 'pin' | 'priority' }>, signal?: AbortSignal) {
-  return sendJson<StopRestartResponse>(`/api/telemetry/presses/${pressKey}/stop-restart-analysis`, 'POST', { occurrence: { occurrenceId: occurrence.occurrenceId, displayName: occurrence.displayName, startUtc: occurrence.startUtc, endUtc: occurrence.endUtc, operationalGroupKey: occurrence.operationalGroupKey, operationalGroupName: occurrence.operationalGroupName, processFamilyKey: occurrence.processFamilyKey, processFamilyName: occurrence.processFamilyName, exactIdentities: occurrence.exactIdentities.map(({ eventType, statusCode, statusDescription }) => ({ eventType, statusCode, statusDescription })) }, candidates }, signal)
-}
-
-export function getRadiusTimingAnalysis(exactIdentity: { eventType: string; statusCode: string | null; statusDescription: string }, occurrences: ActivityAnalysis['occurrences'], signal?: AbortSignal) {
-  return sendJson<RadiusTimingAnalysisResponse>('/api/telemetry/radius-timing-analysis', 'POST', { exactIdentity, occurrences: occurrences.slice(0, 30).map(({ occurrenceId, pressKey, displayName, startUtc }) => ({ occurrenceId, pressKey, displayName, startUtc })) }, signal)
-}
-
-export function getFleetSpeedContext(fromUtc: string, toUtc: string, pressKeys: RadiusPressKey[], signal?: AbortSignal) {
-  return sendJson<FleetSpeedContextResponse>('/api/telemetry/fleet-speed-context', 'POST', { fromUtc, toUtc, pressKeys: pressKeys.slice(0, 6) }, signal)
-}
-
-export function getPressSemanticHistory(pressKey: RadiusPressKey, input: { fromUtc: string; toUtc: string; includeSeed: boolean; signals: Array<{ canonicalId: string; deckNumber?: number; representation: TelemetryRepresentation; signalType?: EngineeringSignalType }> }, signal?: AbortSignal) {
-  const signals = input.signals.map(({ canonicalId, deckNumber, representation }) => ({ canonicalId, ...(deckNumber === undefined ? {} : { deckNumber }), representation }))
-  return sendJson<PressSemanticHistoryEvidence>(`/api/telemetry/presses/${pressKey}/semantic-history`, 'POST', { ...input, signals }, signal)
-}
-
 export function getRecentPhysicalState(sourceId: number) {
   const toUtc = new Date()
   const fromUtc = new Date(toUtc.getTime() - 30 * 60 * 1_000)
@@ -190,8 +156,8 @@ export function getStopIntelligenceProductionAttributes(pressKey: RadiusPressKey
   return getJson<NonNullable<StopFleetPressSummary['productionAttributeContext']>>(`/api/stop-intelligence/presses/${encodeURIComponent(pressKey)}/production-attributes?${rangeQuery(fromUtc, toUtc)}`, signal)
 }
 
-export function getPressDowntimePress(pressKey: RadiusPressKey, fromUtc: string, toUtc: string, signal?: AbortSignal) {
-  return getJson<PressDowntimePressReport>(`/api/press-downtime/presses/${encodeURIComponent(pressKey)}?${rangeQuery(fromUtc, toUtc)}`, signal)
+export function getMachineIntelligencePress(pressKey: RadiusPressKey, fromUtc: string, toUtc: string, signal?: AbortSignal) {
+  return getJson<MachineIntelligencePressReport>(`/api/machine-intelligence/presses/${encodeURIComponent(pressKey)}?${rangeQuery(fromUtc, toUtc)}`, signal)
 }
 
 export function getStopIntelligenceDetail(input: { pressKey: RadiusPressKey; stopId: string; fromUtc: string; toUtc: string; includeRaw?: boolean }, signal?: AbortSignal) {
@@ -304,58 +270,10 @@ export function plotTelemetryEventRawSignal(occurrence: TelemetryEventOccurrence
   return sendJson<RawUnmappedPlotResult>('/api/telemetry/event-explorer/raw-plot', 'POST', { occurrence, rawIdentity }, signal)
 }
 
-export function getActivityAnalysis(fromUtc: string, toUtc: string, selection?: ActivitySelection, pressKey?: RadiusPressKey, signal?: AbortSignal, evidenceOffset = 0) {
-  const parameters = new URLSearchParams({ fromUtc, toUtc })
-  if (selection) {
-    parameters.set('level', selection.level)
-    parameters.set('key', selection.key)
-    if (selection.operationalGroupKey) parameters.set('operationalGroupKey', selection.operationalGroupKey)
-  }
-  if (pressKey) parameters.set('pressKey', pressKey)
-  parameters.set('evidenceOffset', String(evidenceOffset))
-  return getJson<ActivityAnalysis>(`/api/radius/activity-analysis?${parameters.toString()}`, signal)
-}
-
-export function getPatternAnalysis(fromUtc: string, toUtc: string, input: { selectedPatternKey?: string; conditions?: ActivitySelection[]; matchMode?: PatternMatchMode; pressKey?: RadiusPressKey } = {}, signal?: AbortSignal) {
-  const parameters = new URLSearchParams({ fromUtc, toUtc })
-  if (input.selectedPatternKey) parameters.set('patternKey', input.selectedPatternKey)
-  if (input.conditions?.length) parameters.set('conditions', JSON.stringify(input.conditions.map(({ level, key, operationalGroupKey }) => ({ level, key, ...(operationalGroupKey ? { operationalGroupKey } : {}) }))))
-  if (input.matchMode) parameters.set('matchMode', input.matchMode)
-  if (input.pressKey) parameters.set('pressKey', input.pressKey)
-  return getJson<PatternAnalysis>(`/api/radius/pattern-analysis?${parameters.toString()}`, signal)
-}
-
-export function getRadiusPressEpisodes(
-  pressKey: RadiusPressKey,
-  fromUtc: string,
-  toUtc: string,
-  signal?: AbortSignal,
-) {
-  return getJson<RadiusPressEpisodes>(
-    `/api/radius/presses/${pressKey}/episodes?${rangeQuery(fromUtc, toUtc)}`,
-    signal,
-  )
-}
-
-export function getRadiusEpisode(
-  pressKey: RadiusPressKey,
-  episodeId: string,
-  signal?: AbortSignal,
-) {
-  return getJson<OperationalEpisode>(
-    `/api/radius/presses/${pressKey}/episodes/${encodeURIComponent(episodeId)}`,
-    signal,
-  )
-}
-
 export function getClassificationWorkspace(signal?: AbortSignal) { return getJson<ClassificationWorkspace>('/api/classification/workspace', signal) }
 export function getClassificationGroups(signal?: AbortSignal) { return getJson<OperationalGroup[]>('/api/classification/groups', signal) }
 export function getClassificationFamilies(signal?: AbortSignal) { return getJson<ProcessFamily[]>('/api/classification/process-families', signal) }
 export function getClassificationIdentities(signal?: AbortSignal) { return getJson<ClassificationWorkspace['observedIdentities']>('/api/classification/identities', signal) }
-export function searchClassifications(query: string, limit = 10, signal?: AbortSignal) {
-  const parameters = new URLSearchParams({ q: query, limit: String(limit) })
-  return getJson<ClassificationSearchResponse>(`/api/classification/search?${parameters.toString()}`, signal)
-}
 export function createClassificationDraft(expectedVersion: number) { return sendJson<ClassificationDraft>('/api/classification/draft', 'POST', { expectedVersion }) }
 export function updateClassificationGroup(groupKey: OperationalGroupKey, expectedRevision: number | null, changes: object) { return sendJson<ClassificationDraft>(`/api/classification/draft/groups/${groupKey}`, 'PATCH', { ...changes, expectedRevision }) }
 export function updateClassifications(expectedRevision: number | null, identities: Array<{ eventType: string; statusCode: string | null; statusDescription: string }>, changes: { operationalGroupKey?: OperationalGroupKey; processFamilyKey?: ProcessFamilyKey; displayLabel?: string | null; explanation?: string; confidence?: MappingConfidence; needsReview?: boolean; defaultTimelineVisibility?: boolean; obsolete?: boolean }) { return sendJson<ClassificationDraft>('/api/classification/draft/classifications', 'PATCH', { identities, expectedRevision, ...changes }) }

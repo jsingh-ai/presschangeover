@@ -84,24 +84,6 @@ describe('classification administration API', () => {
     })
   })
 
-  it('searches published taxonomy without waiting for optional Radius enrichment', async () => {
-    const unavailableObserved = {
-      getObservedIdentities: async () => { throw new Error('statement timeout') },
-    } as unknown as RadiusService
-    const classificationService = new ClassificationService(new InMemoryClassificationRepository())
-    const app = createApp({ telemetryClient, radiusService: unavailableObserved, classificationService, logger: false })
-    await withServer(app, async (baseUrl) => {
-      const response = await fetch(`${baseUrl}/api/classification/search?q=Make%20Ready&limit=5`)
-      assert.equal(response.status, 200)
-      const result = await response.json() as { publishedVersion: number; observedIdentityStatus: string; results: Array<{ title: string }> }
-      assert.equal(result.publishedVersion, 1)
-      assert.equal(result.observedIdentityStatus, 'unavailable')
-      assert.equal(result.results.some(({ title }) => title === 'Make Ready'), true)
-      assert.equal((await fetch(`${baseUrl}/api/classification/search?q=%20%20`)).status, 400)
-      assert.equal((await fetch(`${baseUrl}/api/classification/search?q=make&limit=999`)).status, 400)
-    })
-  })
-
   it('lists published semantics but rejects unauthorized mutation', async () => {
     const classificationService = new ClassificationService(new InMemoryClassificationRepository())
     const app = createApp({ telemetryClient, radiusService, classificationService, classificationAuthorizer: () => ({ id: 'viewer', canEdit: false }), logger: false })

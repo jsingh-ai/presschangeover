@@ -1,7 +1,7 @@
 import { RADIUS_PRESS_KEYS, type RadiusPressKey } from '../radius/models.js'
 import { RadiusUnavailableError, type RadiusService } from '../radius/radius-service.js'
 import { RAW_EXPLORER_DISCOVERY_CATALOG, RAW_EXPLORER_MAX_WINDOW_MINUTES, RawRadiusExplorerService, type RawExplorerOccurrence, type RawExplorerSignalIdentity } from '../raw-radius-explorer/raw-radius-explorer-service.js'
-import type { EngineeringClueCatalogItem } from '../telemetry/engineering-clue-analysis.js'
+import type { EngineeringSignalCatalogItem } from '../telemetry/engineering-signal-catalog.js'
 import { PRODUCTION_CONTEXT_CANONICAL_IDS, type CapabilityAssessment, type PressSemanticSignalEvidence, type RawTelemetryHistoryResponse, type TelemetrySample, type TelemetryScalarValue, type TelemetrySemanticSelector, type TelemetrySourceSignal } from '../telemetry/telemetry-contracts.js'
 import { assessRawHistory } from '../telemetry/historical-telemetry-policy.js'
 import { TelemetryFoundationService, type PressSemanticSignalWithIdentity } from '../telemetry/telemetry-foundation-service.js'
@@ -118,14 +118,14 @@ function mergeHistories(values: PressSemanticSignalWithIdentity[][]): PressSeman
   return [...merged.values()]
 }
 
-const CONTEXT_CATALOG: EngineeringClueCatalogItem[] = [
+const CONTEXT_CATALOG: EngineeringSignalCatalogItem[] = [
   ['job', 'Job'], ['order', 'Order'], ['recipe', 'Recipe'], ['customer', 'Customer'], ['material', 'Material'], ['roll', 'Roll'],
 ].map(([field, friendlyName]) => ({ canonicalId: PRODUCTION_CONTEXT_CANONICAL_IDS[field as keyof typeof PRODUCTION_CONTEXT_CANONICAL_IDS], friendlyName, signalType: 'state_event', category: 'repeat_other', scope: 'machine' }))
 const EVENT_CATALOG = [...new Map([...CONTEXT_CATALOG, ...RAW_EXPLORER_DISCOVERY_CATALOG].map((item) => [item.canonicalId, item])).values()]
 
-function definition(canonicalId: string): EngineeringClueCatalogItem | undefined { return EVENT_CATALOG.find((item) => item.canonicalId === canonicalId) }
+function definition(canonicalId: string): EngineeringSignalCatalogItem | undefined { return EVENT_CATALOG.find((item) => item.canonicalId === canonicalId) }
 
-function compatibleSelectors(item: EngineeringClueCatalogItem, capabilities: CapabilityAssessment[], deckNumber: TelemetryEventSearchInput['deckNumber'], representation: 'samples' | 'changes' = 'samples'): TelemetrySemanticSelector[] {
+function compatibleSelectors(item: EngineeringSignalCatalogItem, capabilities: CapabilityAssessment[], deckNumber: TelemetryEventSearchInput['deckNumber'], representation: 'samples' | 'changes' = 'samples'): TelemetrySemanticSelector[] {
   const capability = capabilities.find((candidate) => candidate.canonicalId === item.canonicalId)
   if (capability?.state !== 'SUPPORTED' || !capability.historyQueryable || capability.evidenceKind !== 'semantic_history') return []
   if (item.scope === 'machine') return deckNumber === null || deckNumber === 'any' ? [{ canonicalId: item.canonicalId, representation }] : []

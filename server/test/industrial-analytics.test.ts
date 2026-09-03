@@ -105,21 +105,6 @@ describe('V1 Industrial Analytics deterministic mathematics', () => {
     assert.equal(alignment.metrics.relation, 'RADIUS_PRECEDED_TELEMETRY'); assert.equal(alignment.metrics.lagMinutes, 1); assert.match(String(alignment.metrics.statement), /preceded/); assert.doesNotMatch(String(alignment.metrics.statement), /cause/i)
   })
 
-  it('describes repeated and extra Radius sequence steps with adequate support', () => {
-    const episode = (id: string, states: string[]) => ({ episodeId: id, startUtc: at(0), endUtc: at(5), orderedStates: states.map((state) => ({ state, identity: { eventType: 'M', statusCode: '1', statusDescription: state }, durationSeconds: 60 })), returnAttempts: 1 })
-    const observation = analytics.sequenceDeviation({ pressKey: 'press14', range: { start: at(0), end: at(10) }, occurrence: episode('test', ['A', 'B', 'B', 'D', 'C']), comparable: [episode('one', ['A', 'B', 'C']), episode('two', ['A', 'B', 'C']), episode('three', ['A', 'B', 'C'])] })
-    assert.equal(observation.support.minimumRequired, INDUSTRIAL_ANALYTICS_RULES.minimumComparableSequences); assert.equal(observation.support.adequate, true); assert.equal(observation.metrics.repeatedStates, 'M / 1 / B'); assert.equal(observation.metrics.extraStates, 'M / 1 / B, M / 1 / D'); assert.equal(observation.material, true)
-  })
-
-  it('keeps equal Radius descriptions distinct when status codes differ', () => {
-    const state = (statusCode: string) => ({ state: 'Make Ready', identity: { eventType: 'M', statusCode, statusDescription: 'Make Ready' }, durationSeconds: 60 })
-    const episode = (id: string, statusCode: string) => ({ episodeId: id, startUtc: at(0), endUtc: at(5), orderedStates: [state(statusCode)], returnAttempts: 0 })
-    const observation = analytics.sequenceDeviation({ pressKey: 'press14', range: { start: at(0), end: at(10) }, occurrence: episode('selected', '20'), comparable: [episode('one', '10'), episode('two', '10'), episode('three', '10')] })
-    assert.equal(observation.metrics.expectedStateAtDivergence, 'M / 10 / Make Ready')
-    assert.equal(observation.metrics.observedStateAtDivergence, 'M / 20 / Make Ready')
-    assert.equal(observation.material, true)
-  })
-
   it('keeps equivalent canonical concepts isolated by press in cross-press comparison', () => {
     const observations = analytics.crossPressComparison({ canonicalId: 'machine.speed.actual', range: { start: at(0), end: at(5) }, series: [{ pressKey: 'press10', samples: numeric([10, 10, 11, 10, 10, 11]) }, { pressKey: 'press14', samples: numeric([100, 101, 100, 101, 100, 101]) }] })
     assert.deepEqual(observations.map(({ pressKey }) => pressKey), ['press10', 'press14']); assert.notEqual(observations[0]!.metrics.pressMedian, observations[1]!.metrics.pressMedian); assert.ok(observations.every(({ variableIds }) => variableIds[0] === 'machine.speed.actual'))

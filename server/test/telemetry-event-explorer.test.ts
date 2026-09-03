@@ -8,7 +8,7 @@ import type { PressSemanticSignalWithIdentity, TelemetryFoundationService } from
 
 const fromUtc = '2026-08-17T10:00:00.000Z'
 const toUtc = '2026-08-17T10:10:00.000Z'
-const radius = { getHealth: async () => ({ status: 'healthy', configured: true }), getOverview: async () => { throw new Error('unused') }, getPressEpisodes: async () => { throw new Error('unused') }, getEpisode: async () => { throw new Error('unused') }, getRawTimeline: async (pressKey: string, rangeFromUtc: string, rangeToUtc: string) => ({ pressKey, displayName: 'Press 14', fromUtc: rangeFromUtc, toUtc: rangeToUtc, segments: [] }) } as RadiusService
+const radius = { getHealth: async () => ({ status: 'healthy', configured: true }), getOverview: async () => { throw new Error('unused') }, getRawTimeline: async (pressKey: string, rangeFromUtc: string, rangeToUtc: string) => ({ pressKey, displayName: 'Press 14', fromUtc: rangeFromUtc, toUtc: rangeToUtc, segments: [] }) } as RadiusService
 
 function history(selector: TelemetrySemanticSelector, pressKey: string): PressSemanticSignalWithIdentity {
   const sample = (minute: number, value: number | boolean | string, valueKind: 'numeric' | 'boolean' | 'string' = 'numeric') => ({ observedAtUtc: `2026-08-17T10:0${minute}:00.000Z`, receivedAtUtc: `2026-08-17T10:0${minute}:00.000Z`, sourceTimestampUtc: `2026-08-17T10:0${minute}:00.000Z`, qualityState: 'GOOD', valueKind, value })

@@ -48,6 +48,7 @@ test('a past press range derives its end state from history and never leaks mach
       elevatedRole: false,
     }),
     getObservations: async () => observations,
+    getObservationsForMachines: async () => new Map([[213, observations]]),
     getPollRuns: async () => [],
     getCurrentStates: async () => [{
       machineId: 213,
@@ -66,13 +67,13 @@ test('a past press range derives its end state from history and never leaks mach
     () => new Date('2026-08-11T04:10:00.000Z'),
   )
 
-  const result = await service.getPressEpisodes(
-    'press13',
+  const overview = await service.getOverview(
     '2026-08-08T05:00:00.000Z',
     '2026-08-08T06:00:00.000Z',
   )
+  const result = overview.presses.find(({ pressKey }) => pressKey === 'press13')!
 
-  assert.equal(result.rangeEndIsLive, false)
+  assert.equal(overview.rangeEndIsLive, false)
   assert.equal(result.currentStatusDescription, 'Historical Make Ready')
   assert.equal(result.currentEventType, 'M')
   assert.notEqual(result.currentStatusAtUtc, '2026-08-11T04:00:00.000Z')

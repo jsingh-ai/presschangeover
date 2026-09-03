@@ -68,12 +68,6 @@ test('Radius range rejects more than 31 days before calling the service', async 
       calls += 1
       throw new Error('must not be called')
     },
-    getPressEpisodes: async () => {
-      throw new Error('must not be called')
-    },
-    getEpisode: async () => {
-      throw new Error('must not be called')
-    },
   }
   const app = createApp({ telemetryClient, radiusService, logger: false })
   const response = await request(
@@ -106,27 +100,10 @@ test('valid Radius overview range is forwarded and returned', async () => {
     },
     unmappedPressKeys: ['press3'],
     presses: [],
-    episodeAnalysis: { sequenceFamilies: [] },
-    operationalAnalytics: {
-      fromUtc: '2026-08-10T00:00:00.000Z', toUtc: '2026-08-11T00:00:00.000Z',
-      scopePressKeys: [], scopePressCount: 0, annotationDisclaimer: '',
-      coverage: { possibleSeconds: 0, observedSeconds: 0, unknownSeconds: 0, coveragePercentage: 0 },
-      categories: [], statusDrivers: [],
-      productionStops: { anchorCount: 0, resolvedCount: 0, censoredCount: 0, outcomes: [], paths: [] },
-      beforeSuccessfulProduction: { anchorCount: 0, resolvedCount: 0, censoredCount: 0, outcomes: [], paths: [] },
-      afterMakeReady: { anchorCount: 0, resolvedCount: 0, censoredCount: 0, outcomes: [], paths: [], confirmedProductionCount: 0, returnedToMakeReadyCount: 0, enteredBadCount: 0, enteredSStateCount: 0, failedToReachConfirmedProductionCount: 0, unresolvedCount: 0, medianSecondsToConfirmedProduction: null, p90SecondsToConfirmedProduction: null },
-      relationshipGroups: [], anomalies: [],
-    },
   }
   const radiusService: RadiusService = {
     getHealth: async () => ({ status: 'healthy', configured: true }),
     getOverview: async () => overview,
-    getPressEpisodes: async () => {
-      throw new Error('not used')
-    },
-    getEpisode: async () => {
-      throw new Error('not used')
-    },
   }
   const app = createApp({ telemetryClient, radiusService, logger: false })
   const response = await request(
@@ -146,14 +123,13 @@ test('valid Radius overview range is forwarded and returned', async () => {
   assert.deepEqual(decisionBody.presses, overview.presses)
 })
 
-test('unknown press keys are rejected before repository access', async () => {
+test('retired Radius episode routes are not exposed', async () => {
   const app = createApp({ telemetryClient, logger: false })
   const response = await request(
     app,
     '/api/radius/presses/press1/episodes?fromUtc=2026-08-10T00%3A00%3A00.000Z&toUtc=2026-08-11T00%3A00%3A00.000Z',
   )
-  assert.equal(response.status, 400)
-  assert.deepEqual(JSON.parse(response.body), { error: 'invalid_press_key' })
+  assert.equal(response.status, 404)
 })
 
 test('unexpected failures are logged with sanitized diagnostics and remain generic to clients', async () => {
@@ -166,12 +142,6 @@ test('unexpected failures are logged with sanitized diagnostics and remain gener
       )
       error.name = 'DatabaseError'
       throw error
-    },
-    getPressEpisodes: async () => {
-      throw new Error('not used')
-    },
-    getEpisode: async () => {
-      throw new Error('not used')
     },
   }
   const app = createApp({

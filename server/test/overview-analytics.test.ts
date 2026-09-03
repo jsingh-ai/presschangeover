@@ -66,7 +66,7 @@ function overview(presses: ReturnType<typeof press>[]): RadiusOverview {
     productionStatusDescription: 'Run Production', stateBreakdownRunConfirmationSeconds: 120, rangeEndIsLive: false,
     feedStatus: 'ONLINE', lastObservationUtc: null, offlinePressCount: 0, onlinePressCount: presses.length,
     summary: { pressesMonitored: presses.length, currentlyRunProduction: 0, currentlyNonProduction: 0, openEpisodes: 0, totalNonProductionSeconds: 0 },
-    unmappedPressKeys: [], presses, episodeAnalysis: { sequenceFamilies: [] }, operationalAnalytics: {} as RadiusOverview['operationalAnalytics'],
+    unmappedPressKeys: [], presses,
     classificationVersion: 4, operationalGroups: SEEDED_OPERATIONAL_GROUPS,
   }
 }

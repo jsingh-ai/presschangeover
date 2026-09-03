@@ -135,40 +135,6 @@ export interface ClassificationWorkspace {
   observedIdentityAsOf: string | null
 }
 
-export interface ClassificationSearchGroupReference {
-  key: OperationalGroupKey
-  displayName: string
-}
-
-export interface ClassificationSearchFamilyReference {
-  key: ProcessFamilyKey
-  displayName: string
-}
-
-export interface ClassificationSearchResult {
-  id: string
-  type: 'group' | 'family' | 'exact_status'
-  title: string
-  score: number
-  matchReason: string
-  description: string | null
-  groups: ClassificationSearchGroupReference[]
-  family: ClassificationSearchFamilyReference | null
-  eventType: string | null
-  statusCode: string | null
-  statusDescription: string | null
-  needsClassification: boolean
-  publishedClassification: boolean
-}
-
-export interface ClassificationSearchResponse {
-  query: string
-  publishedVersion: number
-  observedIdentityStatus: 'fresh' | 'cached' | 'unavailable'
-  observedIdentityAsOf: string | null
-  results: ClassificationSearchResult[]
-}
-
 export interface ClassificationValidation {
   valid: boolean
   errors: string[]

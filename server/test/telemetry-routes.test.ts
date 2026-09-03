@@ -69,48 +69,6 @@ test('ProcessIntelligence semantic route validates bounded explicit representati
   assert.deepEqual(JSON.parse(invalid.body), { error: 'invalid_telemetry_representation' })
 })
 
-test('ProcessIntelligence clue route validates occurrence identity and returns a sanitized bounded analysis', async () => {
-  const fake = client()
-  fake.querySemanticHistory = async (_sourceId, query) => ({
-    sourceId: 41, sourceKey: 'press5', displayName: 'Press 5', fromUtc: query.fromUtc, toUtc: query.toUtc, includeSeed: query.includeSeed,
-    signals: query.signals.map(({ canonicalId, deckNumber, representation }, index) => ({ canonicalId, deckNumber: deckNumber ?? null, supported: true, mappingStatus: 'MAPPED' as const, historianSignalId: index + 1, rawSignalId: `sanitized.${index}`, sourceUnit: null, canonicalUnitStatus: 'unverified', valueKind: representation === 'samples' ? 'numeric' as const : 'integer' as const, sourceSelector: deckNumber === undefined ? null : `[${deckNumber}]`, selectedVariant: 'primary', representation, seedSample: null, samples: [], changes: [] })),
-  })
-  const app = createApp({ telemetryClient: fake, logger: false })
-  const body = { occurrenceId: 'press5:2026-08-12T03:31:00.000Z:1', displayName: 'Press 5', startUtc: '2026-08-12T03:31:00.000Z', endUtc: '2026-08-12T03:32:00.000Z', exactIdentities: [{ eventType: 'B', statusCode: '41-2', statusDescription: 'Maintenance - Electrical' }] }
-  const valid = await request(app, '/api/telemetry/presses/press5/clues', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
-  assert.equal(valid.status, 200)
-  assert.match(valid.body, /"evidenceWindow"|"whereToLook"/)
-  assert.doesNotMatch(valid.body, /historianSignalId|rawSignalId|sourceId/)
-
-  const invalid = await request(app, '/api/telemetry/presses/press5/clues', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, endUtc: body.startUtc }) })
-  assert.equal(invalid.status, 400)
-  assert.deepEqual(JSON.parse(invalid.body), { error: 'invalid_clue_occurrence' })
-})
-
-test('Phase 3 routes validate bounded stop, Radius timing, and fleet speed requests', async () => {
-  const fake = client()
-  fake.querySemanticHistory = async (_sourceId, query) => ({
-    sourceId: 41, sourceKey: 'press5', displayName: 'Press 5', fromUtc: query.fromUtc, toUtc: query.toUtc, includeSeed: query.includeSeed,
-    signals: query.signals.map(({ canonicalId, deckNumber, representation }, index) => ({ canonicalId, deckNumber: deckNumber ?? null, supported: true, mappingStatus: 'MAPPED' as const, historianSignalId: index + 1, rawSignalId: `private.${index}`, sourceUnit: null, canonicalUnitStatus: 'unverified', valueKind: 'numeric' as const, sourceSelector: null, selectedVariant: 'primary', representation, seedSample: null, samples: [], changes: [] })),
-  })
-  const app = createApp({ telemetryClient: fake, logger: false })
-  const occurrence = { occurrenceId: 'phase3-1', displayName: 'Press 5', startUtc: '2026-08-12T03:31:00.000Z', endUtc: '2026-08-12T03:32:00.000Z', operationalGroupKey: 'downtime', operationalGroupName: 'Downtime', processFamilyKey: 'mechanical', processFamilyName: 'Mechanical', exactIdentities: [{ eventType: 'B', statusCode: '64', statusDescription: 'Mech - Press Other' }] }
-  const stop = await request(app, '/api/telemetry/presses/press5/stop-restart-analysis', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ occurrence, candidates: [{ canonicalId: 'anilox.drive.torque.actual', deckNumber: 4, category: 'torque', signalType: 'continuous', source: 'clue' }] }) })
-  assert.equal(stop.status, 200)
-  assert.match(stop.body, /INSUFFICIENT_SPEED_EVIDENCE/)
-  assert.doesNotMatch(stop.body, /historianSignalId|rawSignalId|sourceId/)
-
-  const timing = await request(app, '/api/telemetry/radius-timing-analysis', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ exactIdentity: occurrence.exactIdentities[0], occurrences: [{ occurrenceId: occurrence.occurrenceId, pressKey: 'press5', displayName: 'Press 5', startUtc: occurrence.startUtc }] }) })
-  assert.equal(timing.status, 200)
-  assert.match(timing.body, /"matchedCount":0/)
-
-  const fleet = await request(app, '/api/telemetry/fleet-speed-context', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ fromUtc: '2026-08-12T01:00:00.000Z', toUtc: '2026-08-12T03:00:00.000Z', pressKeys: ['press5'] }) })
-  assert.equal(fleet.status, 200)
-  assert.match(fleet.body, /Direct raw fleet comparison is unavailable/)
-  const invalid = await request(app, '/api/telemetry/fleet-speed-context', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ fromUtc: '2026-08-01T01:00:00.000Z', toUtc: '2026-08-12T03:00:00.000Z', pressKeys: ['press5'] }) })
-  assert.equal(invalid.status, 400)
-})
-
 test('unknown press fails before any hard-coded source lookup', async () => {
   let sourceCalls = 0
   const fake = client()

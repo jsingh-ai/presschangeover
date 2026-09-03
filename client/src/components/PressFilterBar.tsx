@@ -1,5 +1,4 @@
 import type { RadiusPressKey, RadiusPressOverview } from '../types/api'
-import { pressFilterLabel } from '../workspace-state'
 
 interface Props {
   presses: RadiusPressOverview[]
@@ -21,7 +20,7 @@ export function PressFilterBar({ presses, selectedPress, onSelect, onClear }: Pr
         className={press.pressKey === selectedPress ? 'press-scope-button active' : 'press-scope-button'}
         data-press-key={press.pressKey}
         aria-pressed={press.pressKey === selectedPress}
-        aria-label={press.pressKey === selectedPress ? pressFilterLabel(press.displayName) : `Analyze ${press.displayName}`}
+        aria-label={press.pressKey === selectedPress ? `${press.displayName} selected` : `Analyze ${press.displayName}`}
         onClick={() => onSelect(press.pressKey)}
       >{press.displayName}</button>)}
     </div>

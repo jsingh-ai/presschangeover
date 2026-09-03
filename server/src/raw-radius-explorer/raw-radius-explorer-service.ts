@@ -1,7 +1,7 @@
 import { exactRadiusIdentity } from '../radius/radius-identity.js'
 import { RADIUS_PRESS_KEYS, type RadiusPressKey, type RadiusStateSegment, type RadiusStatusSegment } from '../radius/models.js'
 import { RadiusUnavailableError, type RadiusService } from '../radius/radius-service.js'
-import { ENGINEERING_CLUE_CATALOG, type EngineeringCategory, type EngineeringClueCatalogItem, type EngineeringSignalType } from '../telemetry/engineering-clue-analysis.js'
+import { ENGINEERING_SIGNAL_CATALOG, type EngineeringCategory, type EngineeringSignalCatalogItem, type EngineeringSignalType } from '../telemetry/engineering-signal-catalog.js'
 import type { PressSemanticSignalEvidence, TelemetryChange, TelemetrySample, TelemetryScalarValue, TelemetrySemanticSelector } from '../telemetry/telemetry-contracts.js'
 import { TelemetryFoundationService } from '../telemetry/telemetry-foundation-service.js'
 import { isGoodTelemetryQuality } from '../telemetry/historical-telemetry-policy.js'
@@ -18,7 +18,7 @@ const REQUEST_CONCURRENCY = 3
 export const RAW_EXPLORER_MAX_WINDOW_MINUTES = 24 * 60
 export const CURRENT_ROLL_LENGTH_CANONICAL_ID = 'production.roll.length.actual'
 
-export const RAW_EXPLORER_LENGTH_CATALOG: readonly EngineeringClueCatalogItem[] = [
+export const RAW_EXPLORER_LENGTH_CATALOG: readonly EngineeringSignalCatalogItem[] = [
   { canonicalId: 'production.order.length.actual', friendlyName: 'Order Length', signalType: 'step_reference', category: 'repeat_other', scope: 'machine' },
   { canonicalId: 'production.order.length.target', friendlyName: 'Order Length Target', signalType: 'step_reference', category: 'repeat_other', scope: 'machine' },
   { canonicalId: CURRENT_ROLL_LENGTH_CANONICAL_ID, friendlyName: 'Current Roll Length', signalType: 'step_reference', category: 'repeat_other', scope: 'machine' },
@@ -27,7 +27,7 @@ export const RAW_EXPLORER_LENGTH_CATALOG: readonly EngineeringClueCatalogItem[] 
   { canonicalId: 'production.roll.remaining_length', friendlyName: 'Remaining Roll Length', signalType: 'step_reference', category: 'repeat_other', scope: 'machine' },
 ]
 
-export const RAW_EXPLORER_DISCOVERY_CATALOG = [...new Map([...RAW_EXPLORER_LENGTH_CATALOG, ...ENGINEERING_CLUE_CATALOG].map((item) => [item.canonicalId, item])).values()]
+export const RAW_EXPLORER_DISCOVERY_CATALOG = [...new Map([...RAW_EXPLORER_LENGTH_CATALOG, ...ENGINEERING_SIGNAL_CATALOG].map((item) => [item.canonicalId, item])).values()]
 
 export interface RawExplorerIdentity {
   identity: string
@@ -265,7 +265,7 @@ export class RawRadiusExplorerService {
   ) {}
 
   async identities(fromUtc: string, toUtc: string): Promise<RawExplorerIdentity[]> {
-    const overview = await (this.radius.getAnalysisOverview?.(fromUtc, toUtc) ?? this.radius.getOverview(fromUtc, toUtc))
+    const overview = await this.radius.getOverview(fromUtc, toUtc)
     const observed = new Map<string, RawExplorerIdentity>()
     for (const press of overview.presses) for (const segment of observedRadiusEntrySegments(press.timelineSegments)) {
       if (!['G', 'B', 'M', 'S'].includes(segment.eventType) || typeof segment.statusCode !== 'string' || !segment.statusCode.trim() || !segment.statusDescription.trim()) continue
@@ -280,7 +280,7 @@ export class RawRadiusExplorerService {
 
   async explore(input: RawExplorerSetup) {
     const started = this.now()
-    const overview = await (this.radius.getAnalysisOverview?.(input.fromUtc, input.toUtc) ?? this.radius.getOverview(input.fromUtc, input.toUtc))
+    const overview = await this.radius.getOverview(input.fromUtc, input.toUtc)
     const occurrences: RawExplorerOccurrence[] = []
     for (const pressKey of RADIUS_PRESS_KEYS) {
       const press = overview.presses.find((item) => item.pressKey === pressKey)

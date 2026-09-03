@@ -1,5 +1,5 @@
 import type { RadiusPressKey } from '../radius/models.js'
-import { ENGINEERING_CLUE_CATALOG, type EngineeringClueCatalogItem } from '../telemetry/engineering-clue-analysis.js'
+import { ENGINEERING_SIGNAL_CATALOG, type EngineeringSignalCatalogItem } from '../telemetry/engineering-signal-catalog.js'
 import type { CapabilityAssessment, TelemetrySample, TelemetrySemanticSelector } from '../telemetry/telemetry-contracts.js'
 import { isGoodTelemetryQuality } from '../telemetry/historical-telemetry-policy.js'
 import type { IndustrialAnalyticalObservation, IndustrialNumericSample } from './contracts.js'
@@ -11,8 +11,8 @@ export interface SelectedEventTelemetrySeries {
   canonicalId: string
   deckNumber?: number
   friendlyName: string
-  signalType: EngineeringClueCatalogItem['signalType']
-  category: EngineeringClueCatalogItem['category']
+  signalType: EngineeringSignalCatalogItem['signalType']
+  category: EngineeringSignalCatalogItem['category']
   representation: 'samples' | 'changes'
 }
 
@@ -20,7 +20,7 @@ function key(item: { canonicalId: string; deckNumber?: number | null }) { return
 
 export function selectBoundedEventTelemetry(capabilities: CapabilityAssessment[], maximum = AI_EVENT_TELEMETRY_SERIES_LIMIT): SelectedEventTelemetrySeries[] {
   const byCanonical = new Map(capabilities.map((item) => [item.canonicalId, item]))
-  const supported = ENGINEERING_CLUE_CATALOG.flatMap((definition) => {
+  const supported = ENGINEERING_SIGNAL_CATALOG.flatMap((definition) => {
     if (definition.canonicalId === 'machine.speed.actual' || definition.canonicalId === 'machine.speed.setpoint') return []
     const capability = byCanonical.get(definition.canonicalId)
     if (capability?.state !== 'SUPPORTED' || !capability.historyQueryable || capability.evidenceKind !== 'semantic_history') return []

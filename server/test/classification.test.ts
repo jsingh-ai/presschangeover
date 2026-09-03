@@ -4,7 +4,6 @@ import { InMemoryClassificationRepository } from '../src/classification/classifi
 import { ClassificationForbiddenError, ClassificationService } from '../src/classification/classification-service.js'
 import { exactRadiusIdentity } from '../src/radius/radius-identity.js'
 import type { RadiusIdentity } from '../src/classification/models.js'
-import type { RadiusPressEpisodes, RadiusStateSegment, RadiusOfflineSegment } from '../src/radius/models.js'
 
 const admin = { id: 'plant\\classification.admin', canEdit: true }
 const viewer = { id: 'plant\\viewer', canEdit: false }
@@ -85,13 +84,4 @@ describe('Radius semantic classification', () => {
     await assert.rejects(() => service.editMappings(viewer, [identity('G', '20', 'Run')], { operationalGroupKey: 'ADMIN_UNKNOWN' }, null), ClassificationForbiddenError)
   })
 
-  it('classifies raw segments while leaving offline outside every operational group', async () => {
-    const service = new ClassificationService(new InMemoryClassificationRepository())
-    const radius: RadiusStateSegment = { kind: 'radius', machineId: 203, pressKey: 'press3', displayName: 'Press 3', startUtc: '2026-08-10T10:00:00.000Z', endUtc: '2026-08-10T10:10:00.000Z', durationSeconds: 600, isOpen: false, sourceGeneration: 'compact', eventType: 'G', statusCode: '20', statusDescription: 'Run', isProduction: false }
-    const offline: RadiusOfflineSegment = { kind: 'offline', machineId: 203, pressKey: 'press3', displayName: 'Press 3', startUtc: radius.endUtc, endUtc: '2026-08-10T10:20:00.000Z', durationSeconds: 600, isOpen: false, sourceGeneration: 'offline_inference', eventType: null, statusCode: null, statusDescription: null, isProduction: false }
-    const result = await service.classifyPressEpisodes({ timelineSegments: [radius, offline], episodes: [], operationalGroups: [], analysis: {}, runComparison: {}, summary: {} } as unknown as RadiusPressEpisodes)
-    assert.equal(result.timelineSegments[0].kind === 'radius' && result.timelineSegments[0].classification?.operationalGroupKey, 'PRODUCTION')
-    assert.equal('classification' in result.timelineSegments[1], false)
-    assert.equal(result.timelineSegments.filter(({ kind }) => kind === 'radius').reduce((sum, segment) => sum + segment.durationSeconds, 0), 600)
-  })
 })

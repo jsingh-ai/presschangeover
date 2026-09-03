@@ -5,7 +5,6 @@ export type IndustrialAnalysisFamily =
   | 'robust_numeric_change'
   | 'event_aligned_change'
   | 'value_state_transition'
-  | 'radius_sequence_deviation'
   | 'contextual_baseline'
   | 'contextual_telemetry_baseline'
   | 'speed_recovery'
@@ -86,19 +85,6 @@ export interface IndustrialBaselineMetricInput {
   deltaFactId: string
   sampleCount?: number
   comparisonSampleCount?: number
-}
-
-export interface IndustrialSequenceEpisode {
-  episodeId: string
-  startUtc: string
-  endUtc: string
-  orderedStates: Array<{
-    state: string
-    identity: { eventType: string; statusCode: string | null; statusDescription: string }
-    durationSeconds: number
-  }>
-  returnAttempts: number
-  productionRestored?: boolean
 }
 
 export interface IndustrialRelationshipResult {

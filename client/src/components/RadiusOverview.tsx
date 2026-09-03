@@ -430,7 +430,7 @@ export function RadiusOverview({ overview, selectedPress }: RadiusOverviewProps)
   return <>
     <div className="overview-toolbar"><div><strong>{selectedPress ? activePress?.displayName ?? selectedPress : 'All Presses'}</strong><span>{formatPlantDateTime(overview.fromUtc)} – {formatPlantDateTime(overview.toUtc)} CT</span></div><div className="overview-hierarchy-key"><span>Radius state</span><b>→</b><span>Process group</span><b>→</b><span>Process family</span></div></div>
     {feedMessage && <div className="feed-banner feed-banner--degraded" role="status">{feedMessage}</div>}
-    {!data ? <section className="panel unavailable-panel"><h2>Overview classification unavailable</h2><p>The read-only Radius response did not include a published classification view. Radius evidence remains available in Operational Analysis.</p></section>
+    {!data ? <section className="panel unavailable-panel"><h2>Overview classification unavailable</h2><p>The read-only Radius response did not include a published classification view. Exact Radius evidence remains available in Raw Radius Explorer.</p></section>
       : data.fleetSummary.observedSeconds === 0 ? <section className="panel unavailable-panel"><h2>No observed Radius data</h2><p>The selected period contains only Data unavailable. No press is ranked and no operational meaning is inferred.</p></section>
         : selectedPress
           ? <SinglePressOverview overview={overview} selectedPress={selectedPress} selectedState={selectedState} selectedGroup={selectedGroup} selectedFamily={selectedFamily} onState={chooseState} onGroup={chooseGroup} onFamily={setSelectedFamily} />

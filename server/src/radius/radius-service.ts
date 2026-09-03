@@ -1,6 +1,5 @@
 import {
   clipSegmentsToRange,
-  decodeEpisodeId,
   deriveOperationalEpisodes,
   PRODUCTION_CONFIRMATION_MS,
 } from '../episodes/episode-engine.js'
@@ -18,7 +17,6 @@ import type {
   RadiusObservation,
   RadiusCurrentState,
   RadiusOverview,
-  RadiusPressEpisodes,
   RadiusPressKey,
   RadiusPressMapping,
   RadiusPollRun,
@@ -27,9 +25,6 @@ import type {
 } from './models.js'
 import { RADIUS_PRESS_KEYS } from './models.js'
 import { RadiusRepository, type RadiusExactIdentity, type RadiusIdentityHistoryResult } from './radius-repository.js'
-import { analyzeFleetEpisodes, analyzePressEpisodes } from './episode-analysis.js'
-import { analyzeOperationalHistory } from './operational-analytics.js'
-import { buildOperationalRunComparison } from './operational-runs.js'
 import {
   qualifyStateBreakdownRuns,
   STATE_BREAKDOWN_RUN_CONFIRMATION_SECONDS,
@@ -37,7 +32,6 @@ import {
 import type { ObservedRadiusIdentity } from '../classification/models.js'
 
 const EPISODE_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1_000
-const MAX_EPISODE_DETAIL_MS = 31 * 24 * 60 * 60 * 1_000
 const CURRENT_RANGE_TOLERANCE_MS = 10_000
 
 export class RadiusUnavailableError extends Error {
@@ -57,21 +51,9 @@ export class RadiusNotFoundError extends Error {
 export interface RadiusService {
   getHealth(): Promise<RadiusHealth>
   getOverview(fromUtc: string, toUtc: string): Promise<RadiusOverview>
-  getAnalysisOverview?(fromUtc: string, toUtc: string): Promise<RadiusOverview>
-  getPressEpisodes(
-    pressKey: RadiusPressKey,
-    fromUtc: string,
-    toUtc: string,
-  ): Promise<RadiusPressEpisodes>
-  getEpisode(
-    pressKey: RadiusPressKey,
-    episodeId: string,
-  ): Promise<OperationalEpisode>
   getObservedIdentities?(): Promise<ObservedRadiusIdentity[]>
   getRawTimeline?(pressKey: RadiusPressKey, fromUtc: string, toUtc: string): Promise<RawRadiusTimeline>
   getExactIdentityHistory?(input: { pressKey: RadiusPressKey; fromUtc: string; toUtc: string; identity: RadiusExactIdentity; maximumOccurrences: number }): Promise<RadiusIdentityHistoryResult>
-  getActivityAnalysis?(fromUtc: string, toUtc: string, selection?: import('./models.js').ActivitySelection, pressKey?: RadiusPressKey, evidencePage?: { offset?: number; limit?: number }): Promise<import('./models.js').ActivityAnalysis>
-  getPatternAnalysis?(fromUtc: string, toUtc: string, input?: { selectedPatternKey?: string; conditions?: import('./models.js').ActivitySelection[]; matchMode?: import('./models.js').PatternMatchMode; pressKey?: RadiusPressKey }): Promise<import('./models.js').PatternAnalysis>
 }
 
 export class UnavailableRadiusService implements RadiusService {
@@ -80,14 +62,6 @@ export class UnavailableRadiusService implements RadiusService {
   }
 
   async getOverview(): Promise<RadiusOverview> {
-    throw new RadiusUnavailableError()
-  }
-
-  async getPressEpisodes(): Promise<RadiusPressEpisodes> {
-    throw new RadiusUnavailableError()
-  }
-
-  async getEpisode(): Promise<OperationalEpisode> {
     throw new RadiusUnavailableError()
   }
 
@@ -399,11 +373,6 @@ export class DatabaseRadiusService implements RadiusService {
     return this.getOverviewWithinContext(fromUtc, toUtc, contextFromUtc, contextToUtc)
   }
 
-  async getAnalysisOverview(fromUtc: string, toUtc: string): Promise<RadiusOverview> {
-    const { contextToUtc } = this.contextBounds(fromUtc, toUtc)
-    return this.getOverviewWithinContext(fromUtc, toUtc, fromUtc, contextToUtc)
-  }
-
   private async getOverviewWithinContext(
     fromUtc: string,
     toUtc: string,
@@ -514,99 +483,7 @@ export class DatabaseRadiusService implements RadiusService {
         (pressKey) => !this.mappings.has(pressKey),
       ),
       presses,
-      episodeAnalysis: analyzeFleetEpisodes(pressData.flatMap(({ episodes }) => episodes)),
-      operationalAnalytics: analyzeOperationalHistory(
-        pressData.map(({ mapping, segments, episodes }) => ({
-          pressKey: mapping.pressKey,
-          displayName: mapping.displayName,
-          segments,
-          episodes,
-        })),
-        fromUtc,
-        toUtc,
-      ),
     }
   }
 
-  async getPressEpisodes(
-    pressKey: RadiusPressKey,
-    fromUtc: string,
-    toUtc: string,
-  ): Promise<RadiusPressEpisodes> {
-    await this.assertSafeAccess()
-    const mapping = this.requireMapping(pressKey)
-    const { contextFromUtc, contextToUtc } = this.contextBounds(fromUtc, toUtc)
-    const mappings = [...this.mappings.values()]
-    const [sharedPollRuns, currentStates] = await Promise.all([
-      this.repository.getPollRuns(contextFromUtc, contextToUtc),
-      this.repository.getCurrentStates(mappings.map(({ machineId }) => machineId)),
-    ])
-    const currentByMachine = new Map(currentStates.map((state) => [state.machineId, state]))
-    const allPressData = await this.loadMappedPressData(mappings, fromUtc, toUtc, sharedPollRuns, currentByMachine)
-    const data = allPressData.find(({ mapping: candidate }) => candidate.pressKey === pressKey)
-    if (!data) throw new RadiusNotFoundError()
-    const rangeSeconds = (Date.parse(toUtc) - Date.parse(fromUtc)) / 1_000
-    const metrics = summarizeAvailabilityMetrics(
-      data.visibleSegments,
-      rangeSeconds,
-    )
-    return {
-      fromUtc,
-      toUtc,
-      plantTimeZone: this.plantTimeZone,
-      stateBreakdownRunConfirmationSeconds: STATE_BREAKDOWN_RUN_CONFIRMATION_SECONDS,
-      rangeEndIsLive: data.rangeEndIsLive,
-      press: mapping,
-      availability: data.availability,
-      lastRadiusStatus: data.lastRadiusStatus,
-      lastObservationUtc: data.lastObservationUtc,
-      offlineSinceUtc: data.offlineSinceUtc,
-      currentStatusDescription: data.currentStatusDescription,
-      currentEventType: data.currentEventType,
-      currentStatusAtUtc: data.currentStatusAtUtc,
-      isCurrentlyProduction: data.isCurrentlyProduction,
-      timelineSegments: data.visibleSegments,
-      episodes: data.episodes,
-      analysis: analyzePressEpisodes(data.episodes),
-      operationalAnalytics: analyzeOperationalHistory(
-        [{ pressKey: mapping.pressKey, displayName: mapping.displayName, segments: data.segments, episodes: data.episodes }],
-        fromUtc,
-        toUtc,
-      ),
-      runComparison: buildOperationalRunComparison(
-        allPressData.map(({ mapping: candidate, segments }) => ({
-          pressKey: candidate.pressKey,
-          displayName: candidate.displayName,
-          segments,
-        })),
-        pressKey,
-        fromUtc,
-        toUtc,
-      ),
-      summary: {
-        ...episodeSummary(data.episodes),
-        totalNonProductionSeconds: metrics.nonProductionSeconds,
-        ...metrics,
-      },
-    }
-  }
-
-  async getEpisode(
-    pressKey: RadiusPressKey,
-    episodeId: string,
-  ): Promise<OperationalEpisode> {
-    const decoded = decodeEpisodeId(episodeId)
-    if (!decoded || decoded.pressKey !== pressKey) {
-      throw new RadiusNotFoundError()
-    }
-    const startMs = Date.parse(decoded.startUtc)
-    const fromUtc = new Date(startMs - 1).toISOString()
-    const toUtc = new Date(startMs + MAX_EPISODE_DETAIL_MS).toISOString()
-    const response = await this.getPressEpisodes(pressKey, fromUtc, toUtc)
-    const episode = response.episodes.find(
-      (candidate) => candidate.episodeId === episodeId,
-    )
-    if (!episode) throw new RadiusNotFoundError()
-    return episode
-  }
 }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import type { RadiusService } from '../src/radius/radius-service.js'
 import type { RadiusStatusSegment } from '../src/radius/models.js'
-import { ENGINEERING_CLUE_CATALOG } from '../src/telemetry/engineering-clue-analysis.js'
+import { ENGINEERING_SIGNAL_CATALOG } from '../src/telemetry/engineering-signal-catalog.js'
 import type { CapabilityAssessment, PressSemanticSignalEvidence, TelemetryChange, TelemetrySample, TelemetrySemanticSelector } from '../src/telemetry/telemetry-contracts.js'
 import type { TelemetryFoundationService } from '../src/telemetry/telemetry-foundation-service.js'
 import { CURRENT_ROLL_LENGTH_CANONICAL_ID, normalizeHistorianNumber, numericSummary, observedRadiusEntrySegments, RawRadiusExplorerService, RAW_EXPLORER_LENGTH_CATALOG, RAW_EXPLORER_MAX_WINDOW_MINUTES, samplesWithSeed, stateSummary, type RawExplorerOccurrence } from '../src/raw-radius-explorer/raw-radius-explorer-service.js'
@@ -34,12 +34,9 @@ function radiusSegment(start = startUtc, end = endUtc): RadiusStatusSegment {
 function radiusService(): RadiusService {
   return {
     getHealth: async () => ({ status: 'healthy', configured: true }),
-    getOverview: async () => { throw new Error('classified overview must not be used') },
-    getAnalysisOverview: async () => ({ presses: [{ pressKey: 'press3', displayName: 'Press 3', timelineSegments: [radiusSegment()] }] }) as never,
+    getOverview: async () => ({ presses: [{ pressKey: 'press3', displayName: 'Press 3', timelineSegments: [radiusSegment()] }] }) as never,
     getRawTimeline: async (pressKey, fromUtc, toUtc) => ({ pressKey, displayName: 'Press 3', fromUtc, toUtc, segments: [radiusSegment()] }),
     getObservedIdentities: async () => [{ identity: 'B|400|Recorded B state', eventType: 'B', statusCode: '400', statusDescription: 'Recorded B state', eventCount: 2, lastSeenUtc: startUtc }],
-    getPressEpisodes: async () => { throw new Error('not used') },
-    getEpisode: async () => { throw new Error('not used') },
   }
 }
 
@@ -51,7 +48,7 @@ describe('Raw Radius Code Explorer', () => {
   it('uses raw exact identity, phase labels, press order, and preserves a long occurrence', async () => {
     const longEnd = '2026-08-13T15:00:00.000Z'
     const source = radiusService()
-    source.getAnalysisOverview = async () => ({ presses: [{ pressKey: 'press3', displayName: 'Press 3', timelineSegments: [radiusSegment(startUtc, longEnd)] }] }) as never
+    source.getOverview = async () => ({ presses: [{ pressKey: 'press3', displayName: 'Press 3', timelineSegments: [radiusSegment(startUtc, longEnd)] }] }) as never
     const telemetry = { capabilities: { get: async () => ({ capabilities: [] }) } } as unknown as TelemetryFoundationService
     const explorer = new RawRadiusExplorerService(source, telemetry)
     const identities = await explorer.identities(startUtc, longEnd)
@@ -71,7 +68,7 @@ describe('Raw Radius Code Explorer', () => {
     const segments = [before, offline, resumed, observedAgain]
     assert.deepEqual(observedRadiusEntrySegments(segments).map(({ startUtc }) => startUtc), [before.startUtc, observedAgain.startUtc])
     const source = radiusService()
-    source.getAnalysisOverview = async () => ({ presses: [{ pressKey: 'press3', displayName: 'Press 3', timelineSegments: segments }] }) as never
+    source.getOverview = async () => ({ presses: [{ pressKey: 'press3', displayName: 'Press 3', timelineSegments: segments }] }) as never
     const telemetry = { capabilities: { get: async () => ({ capabilities: [] }) } } as unknown as TelemetryFoundationService
     const explorer = new RawRadiusExplorerService(source, telemetry)
     assert.equal((await explorer.identities(before.startUtc, observedAgain.endUtc)).find(({ statusCode }) => statusCode === '400')?.eventCount, 2)
@@ -147,7 +144,7 @@ describe('Raw Radius Code Explorer', () => {
 
   it('chunks the maximum 1,440-minute discovery window and batches mapped supported selectors only', async () => {
     assert.equal(RAW_EXPLORER_MAX_WINDOW_MINUTES, 1_440)
-    const capabilities: CapabilityAssessment[] = ENGINEERING_CLUE_CATALOG.map(({ canonicalId, scope }) => ({ canonicalId, state: 'SUPPORTED', deckNumbers: scope === 'deck' ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] : [], historyQueryable: true, evidenceKind: 'semantic_history' }))
+    const capabilities: CapabilityAssessment[] = ENGINEERING_SIGNAL_CATALOG.map(({ canonicalId, scope }) => ({ canonicalId, state: 'SUPPORTED', deckNumbers: scope === 'deck' ? [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] : [], historyQueryable: true, evidenceKind: 'semantic_history' }))
     const calls: Array<{ fromUtc: string; toUtc: string; signals: TelemetrySemanticSelector[] }> = []
     const telemetry = {
       capabilities: { get: async () => ({ capabilities }) },
@@ -263,7 +260,7 @@ describe('Raw Radius Code Explorer', () => {
 
   it('bounds lazy same-code history and preserves exact statusCode identity', async () => {
     const source = radiusService(); let historyInput: Parameters<NonNullable<RadiusService['getExactIdentityHistory']>>[0] | undefined
-    source.getAnalysisOverview = async () => { throw new Error('full overview must not be used by lazy history') }
+    source.getOverview = async () => { throw new Error('full overview must not be used by lazy history') }
     const identity = { eventType: 'B', statusCode: '400', statusDescription: 'Recorded B state' }
     const neighbor = (eventType: string, statusCode: string, statusDescription: string) => ({ eventType, statusCode, statusDescription })
     source.getExactIdentityHistory = async (input) => {

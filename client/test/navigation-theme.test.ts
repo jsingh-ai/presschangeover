@@ -1,37 +1,30 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { areaFromPathname, areaPath, operationalSectionFromSearch, pressFromLocation } from '../src/navigation'
+import { areaFromPathname, areaPath, pressFromLocation } from '../src/navigation'
 import { oppositeTheme, resolveTheme } from '../src/theme'
 
 describe('analytics and administration navigation context', () => {
-  it('recognizes analytics, Intelligent Search, and State Classification routes', () => {
+  it('recognizes current intelligence, explorer, and administration routes', () => {
     assert.equal(areaFromPathname('/overview'), 'overview')
-    assert.equal(areaFromPathname('/operational-analysis'), 'operational-analysis')
     assert.equal(areaFromPathname('/machine-intelligence'), 'machine-intelligence')
     assert.equal(areaFromPathname('/job-intelligence'), 'machine-intelligence')
     assert.equal(areaPath('machine-intelligence'), '/machine-intelligence')
     assert.equal(areaFromPathname('/stop-intelligence'), 'stop-intelligence')
     assert.equal(areaPath('stop-intelligence'), '/stop-intelligence')
-    assert.equal(areaFromPathname('/patterns-episodes'), 'patterns-episodes')
-    assert.equal(areaPath('patterns-episodes'), '/patterns-episodes')
-    assert.equal(areaFromPathname('/intelligent-search'), 'intelligent-search')
-    assert.equal(areaPath('intelligent-search'), '/intelligent-search')
+    assert.equal(areaFromPathname('/raw-radius-explorer'), 'raw-radius-explorer')
+    assert.equal(areaPath('raw-radius-explorer'), '/raw-radius-explorer')
+    assert.equal(areaFromPathname('/telemetry-event-explorer'), 'telemetry-event-explorer')
     assert.equal(areaFromPathname('/administration/state-classification'), 'state-classification')
     assert.equal(areaPath('state-classification'), '/administration/state-classification')
     assert.equal(areaFromPathname('/press/press7'), 'overview')
   })
 
   it('preserves query press scope and accepts legacy press deep links', () => {
-    assert.equal(pressFromLocation('/operational-analysis', '?press=press14'), 'press14')
+    assert.equal(pressFromLocation('/overview', '?press=press14'), 'press14')
     assert.equal(pressFromLocation('/press/press7', ''), 'press7')
     assert.equal(pressFromLocation('/overview', '?press=invalid'), undefined)
   })
 
-  it('recognizes legacy operational-analysis section links safely', () => {
-    assert.equal(operationalSectionFromSearch('?section=drivers'), 'drivers')
-    assert.equal(operationalSectionFromSearch('?section=recovery'), 'recovery')
-    assert.equal(operationalSectionFromSearch('?section=unknown'), 'state')
-  })
 })
 
 describe('theme preference', () => {

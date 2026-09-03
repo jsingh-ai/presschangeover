@@ -10,21 +10,17 @@ const shellSource = readFileSync(new URL('../src/components/ApplicationShell.tsx
 const stylesSource = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8')
 
 describe('application shell', () => {
-  it('renders analytics, explorers, search, and administration destinations', () => {
+  it('renders current intelligence, explorer, and administration destinations', () => {
     const html = renderToStaticMarkup(createElement(ApplicationShell, {
-      area: 'operational-analysis', theme: 'light', onNavigate() {}, onToggleTheme() {},
-      context: createElement('span', null, 'Context'), children: createElement('h1', null, 'Operational Analysis'), footer: createElement('span', null, 'Health'),
+      area: 'stop-intelligence', theme: 'light', onNavigate() {}, onToggleTheme() {},
+      context: createElement('span', null, 'Context'), children: createElement('h1', null, 'Stop Intelligence'), footer: createElement('span', null, 'Health'),
     }))
-    assert.equal((html.match(/class="primary-nav-link/g) ?? []).length, 10)
+    assert.equal((html.match(/class="primary-nav-link/g) ?? []).length, 6)
     assert.match(html, /Overview/)
-    assert.match(html, /Operational Analysis/)
     assert.match(html, /Machine Intelligence/)
     assert.match(html, /Stop Intelligence/)
-    assert.match(html, /Press Downtime/)
     assert.match(html, /Raw Radius Explorer/)
     assert.match(html, /Telemetry Event Explorer/)
-    assert.match(html, /Patterns &amp; Episodes/)
-    assert.match(html, /Intelligent Search/)
     assert.match(html, /State Classification/)
     assert.match(html, /aria-current="page"/)
     assert.match(html, /Switch to dark mode/)
@@ -34,12 +30,12 @@ describe('application shell', () => {
 
   it('exposes a persisted dark-mode state without removing navigation labels', () => {
     const html = renderToStaticMarkup(createElement(ApplicationShell, {
-      area: 'patterns-episodes', theme: 'dark', onNavigate() {}, onToggleTheme() {},
+      area: 'machine-intelligence', theme: 'dark', onNavigate() {}, onToggleTheme() {},
       context: null, children: null, footer: null,
     }))
     assert.match(html, /aria-pressed="true"/)
     assert.match(html, /Switch to light mode/)
-    assert.match(html, /Patterns &amp; Episodes/)
+    assert.match(html, /Machine Intelligence/)
   })
 
   it('persists a compact desktop navigation state and keeps the control available in the sidebar', () => {

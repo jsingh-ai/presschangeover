@@ -78,42 +78,26 @@ Production deployment uses the dedicated `ProcessIntelligence.Node` service and 
 - GET /api/health — local Process Intelligence health
 - GET /api/telemetry/health — sanitized TelemetryQueryApi and historian status
 - GET /api/telemetry/sources — projected telemetry source list
-- GET /api/telemetry/sources/:sourceId/physical-state?fromUtc=...&toUtc=... — validated physical-state request with a maximum two-hour range
-- POST /api/telemetry/presses/:pressKey/clues — read-only, capability-filtered Engineering Telemetry Clues for one exact Radius occurrence
+- GET/POST /api/telemetry/... — validated, server-side read-only telemetry evidence
 - GET /api/radius/health — sanitized Radius configuration/connectivity state
-- GET /api/radius/overview?fromUtc=...&toUtc=... — compressed per-press Radius timelines and fleet summary, maximum 31 days
-- GET /api/radius/presses/:pressKey/episodes?fromUtc=...&toUtc=... — derived operational episodes for one mapped press
-- GET /api/radius/presses/:pressKey/episodes/:episodeId — detailed status sequence for one deterministic episode
+- GET /api/radius/overview?fromUtc=...&toUtc=... — per-press Radius timelines and fleet summary, maximum 31 days
+- GET /api/machine-intelligence/presses/:pressKey — telemetry-led job and recipe evidence, maximum 72 hours per request
+- GET /api/stop-intelligence/... — fleet stop summaries and detailed read-only stop evidence
+- GET/POST /api/radius/raw-explorer/... — exact Radius code exploration
+- GET/POST /api/telemetry/event-explorer/... — telemetry event exploration
 - GET /api/classification/workspace — published groups, observed exact identities, draft status, versions, and audit history
 - GET /api/classification/groups, /process-families, /identities, /classifications, /review-required, /draft, /versions, /audit — focused classification resources
 - POST/PATCH/DELETE /api/classification/draft/... — authorized optimistic-concurrency draft, validation, publish, and discard operations
 
 ## Client information architecture
 
-The React client has three primary analytics workspaces plus one administration destination:
+The React client exposes the current operational workspaces:
 
-- **Overview** (`/overview`) — fleet signal summary, state magnitude, prioritized existing findings, and the supporting press-activity timeline.
-- **Operational Analysis** (`/operational-analysis`) — State Breakdown, Status Drivers, and Stops & Recovery together in one continuous workspace.
-- **Patterns & Episodes** (`/patterns-episodes`) — relationship evidence, supported deviations, recurring press behavior, and selected-press episode investigation.
-- **Administration → State Classification** (`/administration/state-classification`) — versioned operational groups and exact Radius identity mappings. It is read-only until the separate application store and trusted administrator identity boundary are configured.
+- **Overview** (`/overview`) — fleet signal summary and supporting press timelines.
+- **Machine Intelligence** (`/machine-intelligence`) — fleet, recipe, job occurrence, roll, telemetry, and Radius evidence.
+- **Stop Intelligence** (`/stop-intelligence`) — physical-stop classification and investigation.
+- **Raw Radius Explorer** (`/raw-radius-explorer`) — exact recorded Radius codes with synchronized evidence.
+- **Telemetry Event Explorer** (`/telemetry-event-explorer`) — threshold, delta, and value-transition evidence.
+- **Administration → State Classification** (`/administration/state-classification`) — versioned operational groups and exact Radius identity mappings.
 
-The selected time range and press scope remain global while moving between workspaces. Evidence opens in an accessible side drawer without replacing the underlying workspace; meaningful URL state supports browser Back/Forward and shareable investigation links. The interface supports persistent light and dark themes, using the operating-system preference until the user chooses one.
-
-These workspaces reorganize the existing Radius analytics and do not alter analytics semantics or API contracts. Telemetry graphs remain intentionally deferred to a separate feature layer.
-
-## Operational analytics contract
-
-Analytics are calculated once from each request's canonical, normalized Radius timelines; widgets do not independently reconstruct state. Adjacent exact identities are merged across the legacy/compact cutover, intervals are clipped to the UTC range, offline/gap boundaries stop sequence traversal, and transitions never cross presses. Unknown time is `possible press-seconds - observed Radius seconds` and is never assigned to an event category.
-
-- Immediately after A: denominator is A occurrences with a known next meaningful state in range; numerator is the subset whose next state is B.
-- Immediately before B: denominator is B occurrences with a known previous meaningful state in range; numerator is the subset whose previous state is A.
-- Within two/three transitions: each anchor contributes at most once to a given target; anchors with no known candidate remain censored.
-- Production stop: transition from verified `G / Run Production` to the first known non-production state.
-- Successful return: an existing episode return satisfying five continuously observed production minutes; confirmation time remains evidence and is not added to downtime.
-- Make Ready: an exact `M` interval exit followed until confirmed production, another Make Ready, a data/range boundary, or exhaustion of the bounded known sequence.
-
-Every percentage is paired with `numerator/denominator`. P90 is shown only with at least five observations. Relationship support below 10 resolved anchors is flagged low. Descriptive thresholds are deterministic: consistent in range = exactly 100% with at least 10 resolved anchors; dominant = at least 60%; common = at least 40%; occasional = at least 15%; otherwise rare. A relationship exception becomes an anomaly only when the immediate-after cohort has at least five resolved anchors, its dominant outcome is at least 60%, and another outcome actually occurred. These labels describe operator-entered Radius annotations, not physical causation or root cause.
-
-Radius data availability is derived without writing to Radius. Legacy snapshots and compact `machine_status_events` reconstruct operational state, while `machine_status_poll_runs` supplies compact-era heartbeat evidence and `machine_status_current` supplies current state. A heartbeat remains trusted while its age is less than or equal to `RADIUS_STALE_SECONDS`; an `OFFLINE` timeline span begins only when the age is strictly greater, at `lastHeartbeat + threshold`. See [docs/radius-storage-model.md](docs/radius-storage-model.md) for the verified production model and exact cutover.
-
-Radius is disabled unless every external Radius setting is present and verified. The server rejects partial configuration, non-local database hosts, unexpected schema/timestamp settings, writer/elevated roles, schema-creation capability, and role memberships. See `docs/radius-readonly-discovery.sql` and `docs/create-processintelligence-readonly.sql` for the administrator workflow; neither script contains a password.
+The interface supports persistent light and dark themes. All telemetry and Radius access remains server-side and read-only.

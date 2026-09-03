@@ -5,7 +5,7 @@ import type { BasicHistoricalSummary, EventLearningReport as EventLearningReport
 import type { TimedNumericSample } from '../types/evidence'
 import { CURRENT_ROLL_LENGTH_CANONICAL_ID, RawExplorerInspectionTooltip, rawExplorerNumberSamples, rawExplorerStateIntervals, rawUnmappedNumberSamples, rawUnmappedStateIntervals } from './RawRadiusExplorerPage'
 import { SynchronizedTimeline, type TimelineEventTrack, type TimelineIntervalTrack, type TimelineNumericTrack } from './SynchronizedTimeline'
-import { safeEngineeringSourceUnit } from './EngineeringTelemetryInspector'
+import { safeTelemetrySourceUnit } from '../telemetry-presentation'
 import { EventLearningReport } from './EventLearningReport'
 
 type SourceTab = 'canonical' | 'raw'
@@ -71,7 +71,7 @@ function number(value: number | undefined | null) { return value === undefined |
 function scalar(value: TelemetryEventScalar | undefined | null) { return value === undefined || value === null ? '—' : typeof value === 'number' ? number(value) : typeof value === 'boolean' ? value ? 'True' : 'False' : value || '(empty)' }
 function canonicalKey(signal: { canonicalId: string; deckNumber: number | null }) { return `canonical:${signal.canonicalId}:${signal.deckNumber ?? ''}` }
 function rawKey(rawIdentity: string) { return `raw:${rawIdentity}` }
-function sourceUnit(sourceUnit: string | null) { const safe = safeEngineeringSourceUnit({ sourceUnit }); return safe ? `${safe} · unverified` : 'Unit unverified' }
+function sourceUnit(sourceUnit: string | null) { const safe = safeTelemetrySourceUnit({ sourceUnit }); return safe ? `${safe} · unverified` : 'Unit unverified' }
 function ruleLabel(rule: TelemetryEventRule) {
   if (rule.kind === 'threshold') return `${rule.operator} ${number(rule.threshold)}`
   if (rule.kind === 'delta') return `${rule.direction === 'either' ? 'Increase or decrease' : rule.direction === 'increase' ? 'Increase' : 'Decrease'} by ≥ ${number(rule.amount)} within ${rule.windowMinutes} minutes`

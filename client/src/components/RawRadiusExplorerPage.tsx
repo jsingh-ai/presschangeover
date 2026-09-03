@@ -5,7 +5,7 @@ import { SynchronizedTimeline, type TimelineIntervalItem, type TimelineIntervalT
 import { createCustomRange, createPresetRange, defaultCustomValues, formatPlantDateTime, formatSelectedRange, PLANT_TIME_ZONE, RangeValidationError, restoreSelectedRange, type SelectedRange } from '../time-ranges'
 import type { BasicHistoricalSummary, EventLearningReport as EventLearningReportContract, EventSignalPattern, RawExplorerCategory, RawExplorerChangedSignal, RawExplorerDetail, RawExplorerIdentity, RawExplorerNumericSummary, RawExplorerOccurrence, RawExplorerPlotResult, RawExplorerResult, RawExplorerSignalHistory, RawExplorerStateSummary, RawRadiusPhase, RawTelemetryReviewStatus, RawTelemetryScalar, RawTelemetryValue, RawUnmappedChangedSignal, RawUnmappedHistory, RawUnmappedPlotResult } from '../types/api'
 import type { TimedNumericSample } from '../types/evidence'
-import { safeEngineeringSourceUnit } from './EngineeringTelemetryInspector'
+import { safeTelemetrySourceUnit } from '../telemetry-presentation'
 import { EventLearningReport } from './EventLearningReport'
 
 const MAX_WINDOW_MINUTES = 1_440
@@ -71,7 +71,7 @@ function signalLabel(signal: { friendlyName: string; deckNumber: number | null }
 }
 
 function evidenceUnit(sourceUnit: string | null): string {
-  const safe = safeEngineeringSourceUnit({ sourceUnit })
+  const safe = safeTelemetrySourceUnit({ sourceUnit })
   return safe ? `${safe} · unverified` : 'Unit unverified'
 }
 
@@ -306,7 +306,7 @@ function CanonicalSignalRow({ signal, selected, pinned, plotting, onPreview, onP
 function RawUnmappedSignalRow({ signal, selected, pinned, plotting, reviewing, onPreview, onPin, onReview }: { signal: RawUnmappedChangedSignal; selected: boolean; pinned: boolean; plotting: boolean; reviewing: boolean; onPreview: () => void; onPin: () => void; onReview: (status: RawTelemetryReviewStatus) => void }) {
   const numeric = typeof signal.firstValue === 'number' && typeof signal.lastValue === 'number'
   const stateSequence = signal.transitionSequence.length ? signal.transitionSequence : [signal.firstValue, signal.lastValue]
-  const unit = safeEngineeringSourceUnit({ sourceUnit: signal.sourceUnit })
+  const unit = safeTelemetrySourceUnit({ sourceUnit: signal.sourceUnit })
   return <div className={`raw-change-row raw-unmapped-row raw-browser-row ${selected ? 'is-previewed' : ''} ${pinned ? 'is-pinned' : ''}`.trim()} data-raw-identity={signal.rawIdentity} data-data-kind={signal.dataKind} role="button" tabIndex={0} aria-pressed={selected} onClick={onPreview} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onPreview() } }}>
     <div><div className="raw-signal-heading"><strong>{signal.displayName}</strong><span>RAW / UNMAPPED</span>{selected && <span>{signal.plottable && signal.dataKind !== 'container' ? 'Preview' : 'Selected'}</span>}{pinned && <span>Pinned</span>}</div>
       <small>{signal.discoveryCategory}{unit ? ` · ${unit} (raw / unverified)` : ' · Unit unverified'}</small>
