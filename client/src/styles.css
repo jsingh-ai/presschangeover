@@ -2645,6 +2645,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .si-fleet-identity { font-weight: 850; text-shadow: 0 1px 1px rgb(0 0 0 / 32%); }
 .si-fleet-identity--order { background: #5147a8; }
 .si-fleet-identity--recipe { background: #984970; }
+.si-fleet-identity--material { background: #218269; }
 .si-reviewed-state--changeover { background: #2c72a8; }
 .si-reviewed-state--downtime { background: #b64743; }
 .si-reviewed-state--uncertain { color: #302308; background: #d2a13d; }
@@ -2749,7 +2750,8 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 /* Stop Intelligence fleet-track density and always-visible raw Radius labels. */
 .si-fleet-synchronized .si-fleet-track--order { order: 0 !important; }
 .si-fleet-synchronized .si-fleet-track--recipe { order: 1 !important; }
-.si-fleet-synchronized .synchronized-timeline__row--numeric:has(.synchronized-timeline__numeric[aria-label^="Roll length (actual)"]) { order: 2 !important; min-height: 5.6rem; }
+.si-fleet-synchronized .si-fleet-track--material { order: 2 !important; }
+.si-fleet-synchronized .synchronized-timeline__row--numeric:has(.synchronized-timeline__numeric[aria-label^="Roll length (actual)"]) { order: 3 !important; min-height: 5.6rem; }
 .si-fleet-synchronized .synchronized-timeline__row--numeric:has(.synchronized-timeline__numeric[aria-label^="Roll length (actual)"]) .synchronized-timeline__numeric { height: 5.4rem; background: linear-gradient(180deg, color-mix(in srgb, #7857a5 6%, var(--surface-strong)), var(--surface-strong)); }
 .si-fleet-synchronized .synchronized-timeline__row--numeric:has(.synchronized-timeline__numeric[aria-label^="Roll length (actual)"]) .synchronized-timeline__numeric path { stroke: #7857a5; }
 .si-fleet-synchronized .synchronized-timeline__row--numeric:has(.synchronized-timeline__numeric[aria-label^="Web width"]),

@@ -638,6 +638,7 @@ test('builds a lightweight single-press summary and loads bounded detail only fo
       { canonicalId: 'production.roll.length.actual', state: 'SUPPORTED', deckNumbers: [], historyQueryable: true, evidenceKind: 'semantic_history' },
       { canonicalId: 'production.order', state: 'SUPPORTED', deckNumbers: [], historyQueryable: true, evidenceKind: 'semantic_history' },
       { canonicalId: 'production.recipe', state: 'SUPPORTED', deckNumbers: [], historyQueryable: true, evidenceKind: 'semantic_history' },
+      { canonicalId: 'production.material', state: 'SUPPORTED', deckNumbers: [], historyQueryable: true, evidenceKind: 'semantic_history' },
       { canonicalId: 'ink.pump.frequency.supply', state: 'SUPPORTED', deckNumbers: [1], historyQueryable: true, evidenceKind: 'semantic_history' },
     ] }) },
     semanticHistoryWithIdentity: async (pressKey: 'press14' | 'press15') => {
@@ -645,7 +646,7 @@ test('builds a lightweight single-press summary and loads bounded detail only fo
       const historianSignalId = pressKey === 'press14' ? 204 : 222
       return {
         pressKey, sourceKey: pressKey, displayName: pressKey === 'press14' ? 'Press 14' : 'Press 15', fromUtc: at(-60), toUtc: at(90), includeSeed: true,
-        signals: [{ canonicalId: 'machine.speed.actual', deckNumber: null, historianSignalId, seed: null, samples: telemetrySamples([[-10, 800], [8, 800, 'BAD'], [10, 0], [15, 100], [18, 0], [20, 700], [25, 700], [30, 800]]), changes: [] }, actionSignal('production.roll', null, historianSignalId + 1, `${pressKey}.Roll`, [[12, 'R100', 'R101']]), actionSignal('production.roll.length.actual', null, historianSignalId + 5, `${pressKey}.RollLength`, [[5, 0, 100], [15, 100, 300], [22, 300, 0], [30, 0, 120]]), actionSignal('ink.pump.frequency.supply', 1, historianSignalId + 2, `${pressKey}.PumpSupply[1]`, [[14, 0, 20], [15, 20, 18], [16, 18, 0]]), actionSignal('production.order', null, historianSignalId + 3, `${pressKey}.Order`, [], 'ORD-100'), actionSignal('production.recipe', null, historianSignalId + 4, `${pressKey}.Recipe`, [], 'RECIPE-A')],
+        signals: [{ canonicalId: 'machine.speed.actual', deckNumber: null, historianSignalId, seed: null, samples: telemetrySamples([[-10, 800], [8, 800, 'BAD'], [10, 0], [15, 100], [18, 0], [20, 700], [25, 700], [30, 800]]), changes: [] }, actionSignal('production.roll', null, historianSignalId + 1, `${pressKey}.Roll`, [[12, 'R100', 'R101']]), actionSignal('production.roll.length.actual', null, historianSignalId + 5, `${pressKey}.RollLength`, [[5, 0, 100], [15, 100, 300], [22, 300, 0], [30, 0, 120]]), actionSignal('ink.pump.frequency.supply', 1, historianSignalId + 2, `${pressKey}.PumpSupply[1]`, [[14, 0, 20], [15, 20, 18], [16, 18, 0]]), actionSignal('production.order', null, historianSignalId + 3, `${pressKey}.Order`, [], 'ORD-100'), actionSignal('production.recipe', null, historianSignalId + 4, `${pressKey}.Recipe`, [], 'RECIPE-A'), actionSignal('production.material', null, historianSignalId + 6, `${pressKey}.Material`, [[18, 'MAT-A', 'MAT-B']], 'MAT-A')],
         readDiagnostics: { gaps: [], sourceGaps: [{ startUtc: at(5), endUtc: at(8) }] },
       }
     },
@@ -677,7 +678,7 @@ test('builds a lightweight single-press summary and loads bounded detail only fo
   assert.ok(fleet.presses[0]!.speedContext.unknownIntervals.some(({ state }) => state === 'SOURCE_TELEMETRY_UNAVAILABLE'))
   assert.ok(fleet.presses[0]!.speedContext.unknownIntervals.some(({ state }) => state === 'UNKNOWN_SPEED_QUALITY'))
   assert.equal(fleet.presses[0]!.radiusContext.states[0]?.statusCode, '150')
-  assert.deepEqual(fleet.presses[0]!.identityContext.map(({ canonicalId, observations }) => [canonicalId, observations[0]?.value]), [['production.order', 'ORD-100'], ['production.recipe', 'RECIPE-A']])
+  assert.deepEqual(fleet.presses[0]!.identityContext.map(({ canonicalId, observations }) => [canonicalId, observations.map(({ value }) => value)]), [['production.order', ['ORD-100']], ['production.recipe', ['RECIPE-A']], ['production.material', ['MAT-A', 'MAT-B']]])
   assert.deepEqual(fleet.presses[0]!.rollLengthContext?.observations.map(({ value }) => value), [0, 100, 300, 0, 120])
   assert.equal(fleet.presses[0]!.rollLengthContext?.canonicalId, 'production.roll.length.actual')
 

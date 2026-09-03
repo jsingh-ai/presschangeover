@@ -200,7 +200,7 @@ function fleetPress(report: StopIntelligenceReport, speedContext: StopSpeedConte
       states: (radiusTimeline?.segments ?? []).map((state) => ({ kind: state.kind, startUtc: state.startUtc, endUtc: state.endUtc, eventType: state.eventType, statusCode: state.statusCode, statusDescription: state.statusDescription, isProduction: state.isProduction })),
       reason: radiusTimeline ? 'Exact raw Radius context for the selected press and time window.' : 'Raw Radius context is unavailable for this selected window.',
     },
-    identityContext: actionContext.flatMap((series) => series.canonicalId === 'production.order' || series.canonicalId === 'production.recipe' ? [{ signalId: series.signalId, canonicalId: series.canonicalId, rawIdentity: series.rawIdentity, observations: series.observations }] : []),
+    identityContext: actionContext.flatMap((series) => series.canonicalId === 'production.order' || series.canonicalId === 'production.recipe' || series.canonicalId === 'production.material' ? [{ signalId: series.signalId, canonicalId: series.canonicalId, rawIdentity: series.rawIdentity, observations: series.observations }] : []),
     rollLengthContext: rollLength && rollLengthObservations.length ? { signalId: rollLength.signalId, canonicalId: 'production.roll.length.actual', rawIdentity: rollLength.rawIdentity, unit: rollLength.unit, observations: rollLengthObservations } : null,
     productionAttributeContext, changeoverStabilizationPhases,
   }

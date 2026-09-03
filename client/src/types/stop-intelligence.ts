@@ -129,7 +129,7 @@ export interface StopFleetPressSummary {
   }
   identityContext: Array<{
     signalId: number | null
-    canonicalId: 'production.order' | 'production.recipe'
+    canonicalId: 'production.order' | 'production.recipe' | 'production.material'
     rawIdentity: string | null
     observations: Array<{ atUtc: string; value: string | number | boolean; qualityState: string }>
   }>

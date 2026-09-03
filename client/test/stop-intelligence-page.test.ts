@@ -23,7 +23,7 @@ const styles = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8
 const fleetTimelineSource = page.slice(page.indexOf('function FleetTimeline'), page.indexOf('function FleetRow'))
 
 const episode = (classification: StopFleetEpisode['classification'], stopId: string): StopFleetEpisode => ({ stopId, pressKey: 'press14', startAt: '2026-08-25T20:00:00.000Z', endAt: '2026-08-25T20:10:00.000Z', physicalDurationSeconds: 600, classification, confidence: 'HIGH', movementAttemptCount: 2, failedRecoveryCount: 1, radiusAlignment: 'CONTRADICTORY', radiusStatusDescription: 'Run Production', primaryReasonCodes: ['RECIPE_CHANGED'], leftCensored: false, rightCensored: false, affectedByCollectionGap: false, affectedBySpeedQuality: false, changeoverActivityWindows: [] })
-const press = (overrides: Partial<StopFleetPressSummary> = {}): StopFleetPressSummary => ({ pressKey: 'press14', displayName: 'Press 14', telemetryEvidenceState: 'AVAILABLE', stopCount: 4, totalPhysicalStopSeconds: 2_400, changeoverCount: 1, downtimeCount: 1, uncertainCount: 1, badDataCount: 1, changeoverPhysicalStopSeconds: 600, longestPhysicalStopSeconds: 900, dataAvailabilityWarning: false, warningReason: null, episodes: [episode('CHANGEOVER', 'c'), episode('DOWNTIME', 'd'), episode('UNCERTAIN', 'u'), episode('IGNORE_BAD_DATA', 'b')], speedContext: { fromUtc: '2026-08-25T19:45:00.000Z', toUtc: '2026-08-25T20:25:00.000Z', unit: 'ft/min', stopThreshold: 1, recoveryThreshold: 595, observations: [{ atUtc: '2026-08-25T19:50:00.000Z', speed: 800, qualityState: 'GOOD' }, { atUtc: '2026-08-25T20:00:00.000Z', speed: 0, qualityState: 'GOOD' }, { atUtc: '2026-08-25T20:10:00.000Z', speed: 700, qualityState: 'GOOD' }], unknownIntervals: [] }, radiusContext: { states: [{ kind: 'radius', startUtc: '2026-08-25T19:45:00.000Z', endUtc: '2026-08-25T20:25:00.000Z', eventType: 'G', statusCode: '150', statusDescription: 'Run Production', isProduction: true }], reason: 'Raw Radius available.' }, identityContext: [{ signalId: 20, canonicalId: 'production.order', rawIdentity: 'Order', observations: [{ atUtc: '2026-08-25T19:45:00.000Z', value: 'ORD-100', qualityState: 'GOOD' }] }, { signalId: 21, canonicalId: 'production.recipe', rawIdentity: 'Recipe', observations: [{ atUtc: '2026-08-25T19:45:00.000Z', value: 'REC-A', qualityState: 'GOOD' }] }], rollLengthContext: { signalId: 22, canonicalId: 'production.roll.length.actual', rawIdentity: 'RollLength', unit: 'ft', observations: [{ atUtc: '2026-08-25T19:45:00.000Z', value: 0, qualityState: 'GOOD' }, { atUtc: '2026-08-25T19:55:00.000Z', value: 500, qualityState: 'GOOD' }, { atUtc: '2026-08-25T20:00:00.000Z', value: 0, qualityState: 'GOOD' }, { atUtc: '2026-08-25T20:10:00.000Z', value: 400, qualityState: 'GOOD' }] }, ...overrides })
+const press = (overrides: Partial<StopFleetPressSummary> = {}): StopFleetPressSummary => ({ pressKey: 'press14', displayName: 'Press 14', telemetryEvidenceState: 'AVAILABLE', stopCount: 4, totalPhysicalStopSeconds: 2_400, changeoverCount: 1, downtimeCount: 1, uncertainCount: 1, badDataCount: 1, changeoverPhysicalStopSeconds: 600, longestPhysicalStopSeconds: 900, dataAvailabilityWarning: false, warningReason: null, episodes: [episode('CHANGEOVER', 'c'), episode('DOWNTIME', 'd'), episode('UNCERTAIN', 'u'), episode('IGNORE_BAD_DATA', 'b')], speedContext: { fromUtc: '2026-08-25T19:45:00.000Z', toUtc: '2026-08-25T20:25:00.000Z', unit: 'ft/min', stopThreshold: 1, recoveryThreshold: 595, observations: [{ atUtc: '2026-08-25T19:50:00.000Z', speed: 800, qualityState: 'GOOD' }, { atUtc: '2026-08-25T20:00:00.000Z', speed: 0, qualityState: 'GOOD' }, { atUtc: '2026-08-25T20:10:00.000Z', speed: 700, qualityState: 'GOOD' }], unknownIntervals: [] }, radiusContext: { states: [{ kind: 'radius', startUtc: '2026-08-25T19:45:00.000Z', endUtc: '2026-08-25T20:25:00.000Z', eventType: 'G', statusCode: '150', statusDescription: 'Run Production', isProduction: true }], reason: 'Raw Radius available.' }, identityContext: [{ signalId: 20, canonicalId: 'production.order', rawIdentity: 'Order', observations: [{ atUtc: '2026-08-25T19:45:00.000Z', value: 'ORD-100', qualityState: 'GOOD' }] }, { signalId: 21, canonicalId: 'production.recipe', rawIdentity: 'Recipe', observations: [{ atUtc: '2026-08-25T19:45:00.000Z', value: 'REC-A', qualityState: 'GOOD' }] }, { signalId: 23, canonicalId: 'production.material', rawIdentity: 'Material', observations: [{ atUtc: '2026-08-25T19:45:00.000Z', value: 'MAT-A', qualityState: 'GOOD' }, { atUtc: '2026-08-25T20:05:00.000Z', value: 'MAT-B', qualityState: 'GOOD' }] }], rollLengthContext: { signalId: 22, canonicalId: 'production.roll.length.actual', rawIdentity: 'RollLength', unit: 'ft', observations: [{ atUtc: '2026-08-25T19:45:00.000Z', value: 0, qualityState: 'GOOD' }, { atUtc: '2026-08-25T19:55:00.000Z', value: 500, qualityState: 'GOOD' }, { atUtc: '2026-08-25T20:00:00.000Z', value: 0, qualityState: 'GOOD' }, { atUtc: '2026-08-25T20:10:00.000Z', value: 400, qualityState: 'GOOD' }] }, ...overrides })
 
 const visualDetail = (): StopIntelligenceDetail => ({
   stopId: 'visual-stop', displayName: 'Press 14', rangeFromUtc: '2026-08-25T19:45:00.000Z', rangeToUtc: '2026-08-25T20:25:00.000Z', telemetryEvidenceState: 'SOURCE_TELEMETRY_UNAVAILABLE',
@@ -228,7 +228,7 @@ describe('fleet timeline as the primary stop navigator', () => {
     assert.match(styles, /synchronized-timeline__numeric-marker--radius-change::after/)
   })
 
-  it('plots canonical actual roll length between Recipe and Raw Radius when the press exposes it', () => {
+  it('plots canonical actual roll length between Material and Raw Radius when the press exposes it', () => {
     const value = navigationPress()
     const track = buildFleetRollLengthTrack(value)
     assert.equal(track.label, 'Roll length (actual)')
@@ -280,6 +280,7 @@ describe('fleet timeline as the primary stop navigator', () => {
     assert.equal(stop.radius?.statusCode, '150')
     assert.equal(stop.order?.value, 'ORD-100')
     assert.equal(stop.recipe?.value, 'REC-A')
+    assert.equal(stop.material?.value, 'MAT-B')
     const running = fleetHoverSnapshot(value, segments, '2026-08-25T19:50:00.000Z')
     assert.equal(running.segment?.kind, 'running')
     assert.equal(running.nearestSpeed?.speed, 800)
@@ -313,16 +314,17 @@ describe('fleet timeline as the primary stop navigator', () => {
     assert.match(styles, /si-fleet-state--downtime[^}]*#b64743/)
     assert.match(styles, /si-fleet-state--changeover[^}]*#2c72a8/)
     assert.match(styles, /si-fleet-track--state \.synchronized-timeline__interval,[\s\S]*?cursor: pointer/)
-    for (const track of ['Raw Radius', 'Stop State · predicted', 'Operator-reviewed state', 'Order', 'Recipe', 'Roll length \\(actual\\)', 'Actual speed']) assert.match(page, new RegExp(track))
+    for (const track of ['Raw Radius', 'Stop State · predicted', 'Operator-reviewed state', 'Order', 'Recipe', 'Material', 'Roll length \\(actual\\)', 'Actual speed']) assert.match(page, new RegExp(track))
   })
 
   it('places identity above Radius and uses stable family-aware colors for exact values', () => {
     const orderPosition = page.indexOf('label: \'Order\'')
     const recipePosition = page.indexOf('label: \'Recipe\'')
+    const materialPosition = page.indexOf('label: \'Material\'')
     const radiusPosition = page.indexOf("label: 'Raw Radius'")
     const stopPosition = page.indexOf("label: 'Stop State · predicted'")
-    assert.ok(orderPosition < recipePosition && recipePosition < radiusPosition && radiusPosition < stopPosition)
-    assert.match(page, /`interval:fleet-recipe:[\s\S]*`numeric:\$\{rollLengthTrack\.id\}`[\s\S]*`interval:fleet-radius:/)
+    assert.ok(orderPosition < recipePosition && recipePosition < materialPosition && materialPosition < radiusPosition && radiusPosition < stopPosition)
+    assert.match(page, /`interval:fleet-recipe:[\s\S]*`interval:fleet-material:[\s\S]*`numeric:\$\{rollLengthTrack\.id\}`[\s\S]*`interval:fleet-radius:/)
     assert.deepEqual(radiusCodeStyle('G', '150'), radiusCodeStyle('G', '150'))
     assert.match(String(radiusCodeStyle('G', '150')?.background), /^hsl\(1[3-4]\d /)
     assert.match(String(radiusCodeStyle('M', '210')?.background), /^hsl\(2[0-1]\d /)
@@ -330,6 +332,7 @@ describe('fleet timeline as the primary stop navigator', () => {
     assert.notEqual(radiusCodeStyle('M', '210')?.background, radiusCodeStyle('M', '220')?.background)
     assert.notEqual(identityValueStyle('production.order', 0)?.background, identityValueStyle('production.order', 1)?.background)
     assert.notEqual(identityValueStyle('production.recipe', 0)?.background, identityValueStyle('production.recipe', 1)?.background)
+    assert.notEqual(identityValueStyle('production.material', 0)?.background, identityValueStyle('production.material', 1)?.background)
     assert.match(styles, /si-fleet-radius--g[^}]*#31825d/)
     assert.match(styles, /si-fleet-radius--m[^}]*#326fa1/)
     assert.match(styles, /si-fleet-radius--b[^}]*#b56b26/)
