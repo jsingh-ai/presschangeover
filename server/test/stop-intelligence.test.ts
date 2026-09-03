@@ -9,7 +9,7 @@ import { STOP_INTELLIGENCE_ACTION_VERSION, type CanonicalSpeedObservation, type 
 import { buildStopEvidence, isDirectAniloxActivitySignal, STOP_FAMILY_CANONICAL_PATTERNS, stopIdentityDefinitions } from '../src/stop-intelligence/evidence-model.js'
 import { analyzePhysicalStops, bridgeMatchingSpeedStateEvidence, normalizeSpeedQuality } from '../src/stop-intelligence/physical-stop-engine.js'
 import { overlayRadius } from '../src/stop-intelligence/radius-overlay.js'
-import { buildDeckStatusContext, deckStatusRawCandidates, downsampleFleetRollLength, downsampleFleetSpeed, evidenceSelectors, latestSustainedGoodRunAnchor, productionAttributeDisplayUnit, productionAttributeHistoryRanges, productionAttributeRawCandidates, selectBoundedRawEvidenceCandidates, STOP_DETAIL_RAW_EVIDENCE_LIMIT, StopIntelligenceService, stopIntelligenceStopId, uncanonicalizedRawCandidates } from '../src/stop-intelligence/service.js'
+import { buildDeckStatusContext, candidateClassificationSelectors, deckStatusRawCandidates, downsampleFleetRollLength, downsampleFleetSpeed, evidenceSelectors, latestSustainedGoodRunAnchor, overviewEvidenceSelectors, productionAttributeDisplayUnit, productionAttributeHistoryRanges, productionAttributeRawCandidates, pumpFrequencySelectors, selectBoundedRawEvidenceCandidates, STOP_DETAIL_RAW_EVIDENCE_LIMIT, StopIntelligenceService, stopIntelligenceStopId, uncanonicalizedRawCandidates } from '../src/stop-intelligence/service.js'
 import { buildChangeoverActions, buildUncanonicalizedRawActions, detectRequiredChangeoverActivity } from '../src/stop-intelligence/action-engine.js'
 import { InMemoryStopIntelligenceCorrectionRepository, STOP_OPERATOR_DECISION_STATES, StopIntelligenceCorrectionService } from '../src/stop-intelligence/correction-service.js'
 import { buildChangeoverActivityWindows } from '../src/stop-intelligence/changeover-stage-engine.js'
@@ -630,6 +630,7 @@ test('builds a lightweight single-press summary and loads bounded detail only fo
   const readOrder: string[] = []
   const radiusReads: Array<{ pressKey: string; fromUtc: string; toUtc: string }> = []
   let rawDiscoveryReads = 0
+  let rawCatalogReads = 0
   const telemetry = {
     sources: { resolve: async (pressKey: 'press14' | 'press15') => ({ pressKey, source: { id: pressKey === 'press14' ? 1 : 34, sourceKey: pressKey, displayName: pressKey === 'press14' ? 'Press 14' : 'Press 15', enabled: true }, metadataStatus: 'FRESH' }) },
     capabilities: { get: async (pressKey: 'press14' | 'press15') => ({ pressKey, sourceId: pressKey === 'press14' ? 1 : 34, sourceKey: pressKey, displayName: pressKey === 'press14' ? 'Press 14' : 'Press 15', metadataStatus: 'FRESH', capabilities: [
@@ -648,10 +649,10 @@ test('builds a lightweight single-press summary and loads bounded detail only fo
         readDiagnostics: { gaps: [], sourceGaps: [{ startUtc: at(5), endUtc: at(8) }] },
       }
     },
-    rawCatalog: async () => Array.from({ length: 10 }, (_, index) => index + 1).flatMap((deckNumber, index) => [
+    rawCatalog: async () => { rawCatalogReads += 1; return Array.from({ length: 10 }, (_, index) => index + 1).flatMap((deckNumber, index) => [
       { id: index * 2 + 1, sourceId: 1, signalId: `Ruby.Press14.Line14.ProcessData.Color deck ${deckNumber}.Status [0/1]`, displayName: 'Status', sourceUnit: null, valueKind: 'boolean', enabled: true },
       { id: index * 2 + 2, sourceId: 1, signalId: `Ruby.Press14.Line14.ProcessData.Color deck ${deckNumber}.Position [#]`, displayName: 'Position', sourceUnit: null, valueKind: 'integer', enabled: true },
-    ]),
+    ]) },
     rawChanges: async () => { rawDiscoveryReads += 1; throw new Error('RAW_HISTORY_EXPIRED') },
     rawHistory: async (_pressKey: string, rawIdentity: string) => rawHistory(rawIdentity, rawIdentity, /\.Status \[0\/1\]$/.test(rawIdentity) ? [[-20, true]] : [[-20, 3]]),
   } as unknown as TelemetryFoundationService
@@ -663,6 +664,7 @@ test('builds a lightweight single-press summary and loads bounded detail only fo
   const range = { fromUtc: at(0), toUtc: at(40) }
   const fleet = await service.fleet({ pressKey: 'press14', ...range })
   assert.deepEqual(readOrder, ['press14'])
+  assert.equal(rawCatalogReads, 0)
   assert.equal(fleet.presses.length, 1)
   assert.deepEqual(fleet.presses.map(({ stopCount, totalPhysicalStopSeconds, longestPhysicalStopSeconds }) => [stopCount, totalPhysicalStopSeconds, longestPhysicalStopSeconds]), [[1, 600, 600]])
   assert.ok(fleet.presses.every(({ dataAvailabilityWarning }) => dataAvailabilityWarning))
@@ -697,6 +699,7 @@ test('builds a lightweight single-press summary and loads bounded detail only fo
   assert.ok(detail!.actionSignalContext.some(({ canonicalId }) => canonicalId === 'production.roll'))
   assert.ok(detail!.actionSignalContext.some(({ canonicalId }) => canonicalId === 'ink.pump.frequency.supply'))
   assert.equal(detail!.deckStatusContext.availability, 'AVAILABLE')
+  assert.equal(rawCatalogReads, 1)
   assert.deepEqual(detail!.deckStatusContext.decks.map(({ deckNumber }) => deckNumber), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
   assert.equal(detail!.rawUnmappedContext.availability, 'NOT_LOADED')
   assert.equal(rawDiscoveryReads, 0)
@@ -945,6 +948,63 @@ test('selects complete per-deck wash, pump, impression, and deck evidence beyond
   const selection = evidenceSelectors('press3', capabilities)
   assert.ok(selection.selectors.length > 120)
   for (const prefix of ['ink.washup.', 'ink.pump.', 'ink.viscosity.', 'impression.', 'deck.']) assert.ok(selection.selectors.some(({ canonicalId, deckNumber }) => canonicalId.startsWith(prefix) && deckNumber === 10), prefix)
+})
+
+test('uses typed staged selectors instead of full-day dense analog and investigation evidence', () => {
+  const ids = [
+    'production.order', 'production.recipe', 'production.roll', 'production.roll.length.actual',
+    'ink.washup.state', 'ink.pump.status', 'ink.pump.sequence', 'ink.pump.frequency.supply', 'ink.pump.frequency.return', 'ink.viscosity.mode', 'ink.viscosity.status',
+    'impression.plate_cylinder.drive_side', 'deck.active', 'register.long.actual_or_correction',
+  ]
+  const capabilities = { pressKey: 'press11', sourceId: 25, sourceKey: 'press11', displayName: 'Press 11', metadataStatus: 'FRESH', capabilities: ids.map((canonicalId) => ({ canonicalId, state: 'SUPPORTED', deckNumbers: canonicalId.startsWith('production.') ? [] : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], historyQueryable: true, evidenceKind: 'semantic_history' })) } as PressEvidenceCapabilities
+  const full = evidenceSelectors('press11', capabilities)
+  const overview = overviewEvidenceSelectors('press11', capabilities)
+  const followup = candidateClassificationSelectors('press11', capabilities)
+  const frequency = pumpFrequencySelectors('press11', capabilities)
+
+  assert.equal(full.selectors.find(({ canonicalId }) => canonicalId === 'production.roll.length.actual')?.representation, 'samples')
+  assert.ok(overview.selectors.some(({ canonicalId, deckNumber }) => canonicalId === 'ink.washup.state' && deckNumber === 10))
+  assert.ok(!overview.selectors.some(({ canonicalId }) => canonicalId.startsWith('impression.') || canonicalId.startsWith('deck.') || canonicalId.startsWith('register.') || canonicalId.startsWith('ink.pump.')))
+  assert.ok(followup.selectors.some(({ canonicalId }) => canonicalId.startsWith('impression.')))
+  assert.ok(followup.selectors.some(({ canonicalId }) => canonicalId === 'ink.pump.status'))
+  assert.ok(!followup.selectors.some(({ canonicalId }) => canonicalId.startsWith('ink.pump.frequency.')))
+  assert.equal(frequency.length, 20)
+  assert.ok(frequency.every(({ representation }) => representation === 'samples'))
+})
+
+test('loads only wash on the overview, then direct pump and impression evidence for a viable stop', async () => {
+  const queries: Array<Array<{ canonicalId: string; deckNumber?: number | null; representation: string }>> = []
+  const capabilities = [
+    ['production.order', []], ['production.recipe', []], ['production.roll', []], ['production.roll.length.actual', []],
+    ['ink.washup.state', [1]], ['ink.pump.status', [1]], ['ink.pump.frequency.supply', [1]],
+    ['impression.plate_cylinder.drive_side', [1]], ['deck.active', [1]], ['register.long.actual_or_correction', [1]],
+  ].map(([canonicalId, deckNumbers]) => ({ canonicalId, state: 'SUPPORTED', deckNumbers, historyQueryable: true, evidenceKind: 'semantic_history' }))
+  const availableSignals = [
+    { canonicalId: 'machine.speed.actual', deckNumber: null, historianSignalId: 204, seed: null, samples: telemetrySamples([[-10, 800], [10, 0], [15, 100], [18, 0], [20, 700], [27, 700], [30, 800]]), changes: [] },
+    actionSignal('ink.washup.state', 1, 205, 'Press14.Wash[1]', [[12, false, true]], false),
+    actionSignal('ink.pump.status', 1, 206, 'Press14.PumpStatus[1]', [[14, false, true]], false),
+    actionSignal('impression.plate_cylinder.drive_side', 1, 207, 'Press14.Impression[1]', [[16, 0, 4]], 0),
+  ]
+  const telemetry = {
+    sources: { resolve: async () => ({ pressKey: 'press14', source: { id: 1, sourceKey: 'press14', displayName: 'Press 14', enabled: true }, metadataStatus: 'FRESH' }) },
+    capabilities: { get: async () => ({ pressKey: 'press14', sourceId: 1, sourceKey: 'press14', displayName: 'Press 14', metadataStatus: 'FRESH', capabilities }) },
+    semanticHistoryWithIdentity: async (_pressKey: string, query: { fromUtc: string; toUtc: string; includeSeed: boolean; signals: Array<{ canonicalId: string; deckNumber?: number | null; representation: string }> }) => {
+      queries.push(query.signals)
+      const signals = availableSignals.filter((candidate) => query.signals.some((selector) => selector.canonicalId === candidate.canonicalId && (selector.deckNumber ?? null) === candidate.deckNumber))
+      return { pressKey: 'press14', sourceKey: 'press14', displayName: 'Press 14', fromUtc: query.fromUtc, toUtc: query.toUtc, includeSeed: query.includeSeed, signals, readDiagnostics: { gaps: [], sourceGaps: [] } }
+    },
+  } as unknown as TelemetryFoundationService
+  const service = new StopIntelligenceService(telemetry, undefined, () => Date.parse(at(120)))
+
+  const report = await service.fleet({ pressKey: 'press14', fromUtc: at(0), toUtc: at(40) })
+
+  assert.equal(report.presses[0]?.episodes[0]?.classification, 'CHANGEOVER')
+  assert.equal(queries.length, 2)
+  assert.ok(queries[0]!.some(({ canonicalId }) => canonicalId === 'ink.washup.state'))
+  assert.ok(!queries[0]!.some(({ canonicalId }) => canonicalId.startsWith('ink.pump.') || canonicalId.startsWith('impression.')))
+  assert.ok(queries[1]!.some(({ canonicalId }) => canonicalId === 'ink.pump.status'))
+  assert.ok(queries[1]!.some(({ canonicalId }) => canonicalId.startsWith('impression.')))
+  assert.ok(queries.every((selectors) => !selectors.some(({ canonicalId }) => canonicalId.startsWith('ink.pump.frequency.') || canonicalId.startsWith('deck.') || canonicalId.startsWith('register.'))))
 })
 
 test('keeps raw/unmapped observations visible below the chronology even when behavior repeats in all phases', () => {

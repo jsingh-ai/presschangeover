@@ -63,7 +63,7 @@ import type {
   TelemetryRepresentation,
 } from '../types/evidence'
 import type { ChangeoverInspector, ChangeoverReport, ChangeoverRequest } from '../types/changeover'
-import type { StopIntelligenceCorrection, StopIntelligenceDetail, StopIntelligenceFleetReport, StopOperatorState, StopPredictedState } from '../types/stop-intelligence'
+import type { StopFleetPressSummary, StopIntelligenceCorrection, StopIntelligenceDetail, StopIntelligenceFleetReport, StopOperatorState, StopPredictedState } from '../types/stop-intelligence'
 import type { PressDowntimePressReport } from '../types/press-downtime'
 
 export class ApiRequestError extends Error {
@@ -184,6 +184,10 @@ export function getJobIntelligenceReport(input: { pressKey: RadiusPressKey; from
 
 export function getStopIntelligenceFleet(pressKey: RadiusPressKey, fromUtc: string, toUtc: string, signal?: AbortSignal) {
   return getJson<StopIntelligenceFleetReport>(`/api/stop-intelligence/fleet?pressKey=${encodeURIComponent(pressKey)}&${rangeQuery(fromUtc, toUtc)}`, signal)
+}
+
+export function getStopIntelligenceProductionAttributes(pressKey: RadiusPressKey, fromUtc: string, toUtc: string, signal?: AbortSignal) {
+  return getJson<NonNullable<StopFleetPressSummary['productionAttributeContext']>>(`/api/stop-intelligence/presses/${encodeURIComponent(pressKey)}/production-attributes?${rangeQuery(fromUtc, toUtc)}`, signal)
 }
 
 export function getPressDowntimePress(pressKey: RadiusPressKey, fromUtc: string, toUtc: string, signal?: AbortSignal) {

@@ -725,6 +725,11 @@ export function createApp({
     response.status(200).json(await stopIntelligence.fleet(parseStopIntelligenceQuery(request.query), String(response.locals.requestId), cancellationSignal(request, response)))
   }))
 
+  app.get('/api/stop-intelligence/presses/:pressKey/production-attributes', asyncRoute(async (request, response) => {
+    const query = parseStopIntelligenceQuery({ ...request.query, pressKey: request.params.pressKey })
+    response.status(200).json(await stopIntelligence.productionAttributes(query, String(response.locals.requestId), cancellationSignal(request, response)))
+  }))
+
   app.get('/api/press-downtime/presses/:pressKey', asyncRoute(async (request, response) => {
     const query = parseStopIntelligenceQuery({ ...request.query, pressKey: request.params.pressKey })
     response.status(200).json(await pressDowntime.press(query, String(response.locals.requestId), cancellationSignal(request, response)))

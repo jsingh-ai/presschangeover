@@ -75,7 +75,9 @@ describe('Stop Intelligence fleet overview', () => {
   it('loads lightweight fleet data first and selected-stop detail only on episode selection', () => {
     assert.match(api, /getStopIntelligenceFleet/)
     assert.match(api, /getStopIntelligenceDetail/)
+    assert.match(api, /getStopIntelligenceProductionAttributes/)
     assert.match(api, /\/api\/stop-intelligence\/fleet/)
+    assert.match(api, /\/production-attributes\?\$\{rangeQuery/)
     assert.match(api, /\/stops\/\$\{encodeURIComponent\(input\.stopId\)\}/)
     assert.match(page, /onSelectSegment={openSegmentReview}/)
     assert.match(page, /id="stop-investigation"/)
@@ -83,6 +85,8 @@ describe('Stop Intelligence fleet overview', () => {
     assert.match(api, /if \(input\.includeRaw\) parameters\.set\('includeRaw', 'true'\)/)
     assert.match(page, /Load raw evidence/)
     assert.match(page, /includeRaw: true/)
+    assert.match(page, /Loaded only when opened/)
+    assert.match(page, /getStopIntelligenceProductionAttributes/)
     assert.match(types, /'NOT_LOADED'.*'PARTIAL'/)
   })
 

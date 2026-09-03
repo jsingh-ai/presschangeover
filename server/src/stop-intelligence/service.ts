@@ -328,7 +328,10 @@ export function evidenceSelectors(pressKey: StopIntelligenceRequest['pressKey'],
               : canonicalId.startsWith('register.') ? 6
                 : 7
   for (const capability of selected.sort((left, right) => priority(left.canonicalId) - priority(right.canonicalId) || left.canonicalId.localeCompare(right.canonicalId))) {
-    const changes = identityIds.has(capability.canonicalId) || capability.canonicalId === 'production.roll' || /^(?:deck|register|impression)\./.test(capability.canonicalId) || /^(?:ink\.washup\.state|ink\.pump\.(?:status|sequence)|ink\.viscosity\.(?:mode|status))$/.test(capability.canonicalId) || /(?:setpoint|rated|command)/i.test(capability.canonicalId)
+    // Roll length is a dense counter. Asking for "changes" duplicates each
+    // point with predecessor metadata even though the overview only needs the
+    // observed series. State-like evidence continues to use exact changes.
+    const changes = capability.canonicalId !== 'production.roll.length.actual' && (identityIds.has(capability.canonicalId) || capability.canonicalId === 'production.roll' || /^(?:deck|register|impression)\./.test(capability.canonicalId) || /^(?:ink\.washup\.state|ink\.pump\.(?:status|sequence)|ink\.viscosity\.(?:mode|status))$/.test(capability.canonicalId) || /(?:setpoint|rated|command)/i.test(capability.canonicalId))
     if (capability.deckNumbers.length) for (const deckNumber of capability.deckNumbers) selectors.push({ canonicalId: capability.canonicalId, deckNumber, representation: changes ? 'changes' : 'samples' })
     else selectors.push({ canonicalId: capability.canonicalId, representation: changes ? 'changes' : 'samples' })
   }
@@ -338,6 +341,61 @@ export function evidenceSelectors(pressKey: StopIntelligenceRequest['pressKey'],
   // cap could silently omit impression or deck evidence on supported presses.
   const completeSelectors = [...unique.values()]
   return { selectors: completeSelectors, supportedFamilies: [...new Set(completeSelectors.flatMap((value) => familyFor(value.canonicalId) ?? []))] }
+}
+
+const selectorIdentity = ({ canonicalId, deckNumber }: { canonicalId: string; deckNumber?: number | null }) => `${canonicalId}:${deckNumber ?? ''}`
+const isPumpFrequency = (canonicalId: string) => canonicalId === 'ink.pump.frequency.supply' || canonicalId === 'ink.pump.frequency.return'
+const isDirectPumpState = (canonicalId: string) => /^(?:ink\.pump\.(?:status|sequence)|ink\.viscosity\.(?:mode|status))$/.test(canonicalId)
+
+/**
+ * The fleet overview starts with only what it can display or use as the
+ * cheapest required changeover gate. Broad setup evidence is loaded only for
+ * wash-positive candidates or for a selected investigation.
+ */
+export function overviewEvidenceSelectors(pressKey: StopIntelligenceRequest['pressKey'], capabilities: PressEvidenceCapabilities) {
+  const full = evidenceSelectors(pressKey, capabilities)
+  const identityIds = new Set(stopIdentityDefinitions(pressKey).flatMap((value) => value.canonicalId ?? []))
+  const selectors = full.selectors.filter(({ canonicalId }) => canonicalId === 'machine.speed.actual' || identityIds.has(canonicalId) || STOP_ACTION_CONTEXT_IDS.has(canonicalId) || canonicalId === 'ink.washup.state')
+  return { selectors, supportedFamilies: [...new Set(selectors.flatMap((value) => familyFor(value.canonicalId) ?? []))] }
+}
+
+export function candidateClassificationSelectors(pressKey: StopIntelligenceRequest['pressKey'], capabilities: PressEvidenceCapabilities) {
+  const full = evidenceSelectors(pressKey, capabilities)
+  const selectors = full.selectors.filter(({ canonicalId }) => canonicalId.startsWith('impression.') || isDirectPumpState(canonicalId))
+  return { selectors, supportedFamilies: [...new Set(selectors.flatMap((value) => familyFor(value.canonicalId) ?? []))] }
+}
+
+export function pumpFrequencySelectors(pressKey: StopIntelligenceRequest['pressKey'], capabilities: PressEvidenceCapabilities): TelemetrySemanticSelector[] {
+  return evidenceSelectors(pressKey, capabilities).selectors
+    .filter(({ canonicalId }) => isPumpFrequency(canonicalId))
+    .map((selector) => ({ ...selector, representation: 'samples' }))
+}
+
+function mergeEvidenceSignals(...groups: PressSemanticSignalWithIdentity[][]): PressSemanticSignalWithIdentity[] {
+  const merged = new Map<string, PressSemanticSignalWithIdentity>()
+  const pointKey = (point: TelemetrySample) => `${point.observedAtUtc}:${JSON.stringify(point.value)}`
+  for (const signal of groups.flat()) {
+    const key = selectorIdentity(signal)
+    const existing = merged.get(key)
+    if (!existing) { merged.set(key, signal); continue }
+    const samples = new Map([...existing.samples, ...signal.samples].map((point) => [pointKey(point), point]))
+    const changes = new Map([...existing.changes, ...signal.changes].map((point) => [`${pointKey(point)}:${JSON.stringify(point.previousValue)}`, point]))
+    const seeds = [existing.seed, signal.seed].filter((point): point is TelemetrySample => Boolean(point)).sort((left, right) => Date.parse(left.observedAtUtc) - Date.parse(right.observedAtUtc))
+    merged.set(key, {
+      ...existing,
+      seed: seeds[0] ?? null,
+      samples: [...samples.values()].sort((left, right) => Date.parse(left.observedAtUtc) - Date.parse(right.observedAtUtc)),
+      changes: [...changes.values()].sort((left, right) => Date.parse(left.observedAtUtc) - Date.parse(right.observedAtUtc)),
+      observationState: samples.size || changes.size ? 'SUPPORTED_WITH_OBSERVATIONS' : seeds.length ? 'SUPPORTED_WITH_SEED_ONLY' : existing.observationState,
+    })
+  }
+  return [...merged.values()]
+}
+
+function evidenceIntegrity(segment: ClassifiedStop['physicalSegment']): 'VALID' | 'LIMITED' | 'INVALID' {
+  if (segment.physicalDurationSeconds <= 0) return 'INVALID'
+  if (segment.leftCensorReason && !['RANGE_START', 'RANGE_END'].includes(segment.leftCensorReason) || segment.rightCensorReason && !['RANGE_START', 'RANGE_END'].includes(segment.rightCensorReason)) return 'LIMITED'
+  return 'VALID'
 }
 
 function buildActionSignalContext(signals: PressSemanticSignalWithIdentity[], fromUtc: string, toUtc: string): StopIntelligenceDetail['actionSignalContext'] {
@@ -581,13 +639,16 @@ export class StopIntelligenceService {
   }
 
   async fleet(input: StopIntelligenceRequest, requestId?: string, signal?: AbortSignal): Promise<StopIntelligenceFleetReport> {
-    const [result, operatorCorrections, productionAttributeContext] = await Promise.all([
+    const [result, operatorCorrections] = await Promise.all([
       this.analyzeWithReadData(input, requestId, signal),
       this.corrections.list(input.pressKey, input.fromUtc, input.toUtc),
-      loadProductionAttributeContext(this.telemetry, input.pressKey, input.fromUtc, input.toUtc, requestId, signal),
     ])
-    const press = fleetPress(result.report, fleetSpeedContext(result, input.fromUtc, input.toUtc), result.signals, result.radiusTimeline, productionAttributeContext)
+    const press = fleetPress(result.report, fleetSpeedContext(result, input.fromUtc, input.toUtc), result.signals, result.radiusTimeline, [])
     return { fromUtc: input.fromUtc, toUtc: input.toUtc, algorithmVersion: STOP_INTELLIGENCE_ALGORITHM_VERSION, classificationVersion: STOP_INTELLIGENCE_CLASSIFICATION_VERSION, presses: [press], operatorCorrections, correctionPersistence: this.corrections.persistence }
+  }
+
+  async productionAttributes(input: StopIntelligenceRequest, requestId?: string, signal?: AbortSignal): Promise<StopFleetPressSummary['productionAttributeContext']> {
+    return loadProductionAttributeContext(this.telemetry, input.pressKey, input.fromUtc, input.toUtc, requestId, signal)
   }
 
   async detail(input: StopIntelligenceRequest & { stopId: string; includeRaw?: boolean }, requestId?: string, signal?: AbortSignal): Promise<StopIntelligenceDetail | null> {
@@ -616,7 +677,7 @@ export class StopIntelligenceService {
       : undefined
     const constituentIds = new Set(mergedChangeoverEvent?.constituentStopIds ?? [])
     const constituentStops = result.report.classifiedStops.filter((item) => constituentIds.has(stopIntelligenceStopId(item.physicalSegment)))
-    const analysisStop: ClassifiedStop = changeoverStabilizationPhase && mergedChangeoverEvent ? {
+    let analysisStop: ClassifiedStop = changeoverStabilizationPhase && mergedChangeoverEvent ? {
       ...stop,
       classification: 'CHANGEOVER',
       physicalSegment: {
@@ -634,10 +695,32 @@ export class StopIntelligenceService {
       },
       radius: overlayRadius({ ...stop.physicalSegment, startAt: changeoverStabilizationPhase.startAt, endAt: changeoverStabilizationPhase.endAt, physicalDurationSeconds: mergedChangeoverEvent.eventDurationSeconds ?? stop.physicalSegment.physicalDurationSeconds }, input.toUtc, result.radiusTimeline?.segments),
     } : stop
-    const analysisStops = constituentIds.size ? [...result.report.classifiedStops.filter((item) => !constituentIds.has(stopIntelligenceStopId(item.physicalSegment))), analysisStop] : result.report.classifiedStops
+    let analysisStops = constituentIds.size ? [...result.report.classifiedStops.filter((item) => !constituentIds.has(stopIntelligenceStopId(item.physicalSegment))), analysisStop] : result.report.classifiedStops
     const fromUtc = new Date(Date.parse(analysisStop.physicalSegment.startAt) - STOP_DETAIL_CONTEXT_MS).toISOString()
     const physicalEnd = analysisStop.physicalSegment.endAt ?? input.toUtc
     const toUtc = new Date(Math.min(Date.parse(input.toUtc) + STOP_DETAIL_CONTEXT_MS, Date.parse(physicalEnd) + STOP_DETAIL_CONTEXT_MS)).toISOString()
+    const capabilities = await this.telemetry.capabilities.get(input.pressKey, requestId, signal)
+    const fullSelection = evidenceSelectors(input.pressKey, capabilities)
+    const directPumpAvailable = fullSelection.selectors.some(({ canonicalId }) => isDirectPumpState(canonicalId))
+    const existingSignalKeys = new Set(result.signals.map(selectorIdentity))
+    const missingDetailSelectors = fullSelection.selectors.filter((selector) => {
+      if (existingSignalKeys.has(selectorIdentity(selector))) return false
+      if (selector.canonicalId === 'machine.speed.actual' || STOP_ACTION_CONTEXT_IDS.has(selector.canonicalId) || selector.canonicalId === 'ink.washup.state') return false
+      return !(directPumpAvailable && isPumpFrequency(selector.canonicalId))
+    })
+    let detailSignals = result.signals
+    if (missingDetailSelectors.length && Date.parse(toUtc) > Date.parse(fromUtc)) {
+      const supplemental = await this.telemetry.semanticHistoryWithIdentity(input.pressKey, { fromUtc, toUtc, includeSeed: true, signals: missingDetailSelectors }, requestId, signal)
+      detailSignals = mergeEvidenceSignals(result.signals, supplemental.signals)
+    }
+    const detailedEvidence = buildStopEvidence({ pressKey: input.pressKey, segment: stop.physicalSegment, allSegments: result.report.segments, signals: detailSignals, physicalRangeEndUtc: input.toUtc, identityEvidenceCutoffUtc: result.identityEvidenceCutoffUtc, identityAssociationConfiguration: result.report.identityAssociationConfiguration, supportedFamilies: fullSelection.supportedFamilies })
+    const detailedRequiredActivity = detectRequiredChangeoverActivity({ segment: stop.physicalSegment, signals: detailSignals, rangeEndUtc: input.toUtc, evidenceCutoffUtc: result.identityEvidenceCutoffUtc })
+    const detailedSpeedObservations = result.speedHistory.map((sample) => asObservation(sample))
+    const detailedStop = classifyStop({ segment: stop.physicalSegment, ...detailedEvidence, evidenceIntegrity: evidenceIntegrity(stop.physicalSegment), radius: stop.radius, requiredChangeoverEvidence: { ...detailedRequiredActivity, speedTestReturnedToZero: hasInStopSpeedTest(stop.physicalSegment, detailedSpeedObservations) } })
+    analysisStop = changeoverStabilizationPhase && mergedChangeoverEvent
+      ? { ...detailedStop, classification: 'CHANGEOVER', physicalSegment: analysisStop.physicalSegment, radius: analysisStop.radius }
+      : detailedStop
+    analysisStops = constituentIds.size ? [...result.report.classifiedStops.filter((item) => !constituentIds.has(stopIntelligenceStopId(item.physicalSegment))), analysisStop] : result.report.classifiedStops.map((item) => stopIntelligenceStopId(item.physicalSegment) === input.stopId ? analysisStop : item)
     const ordered = result.speedHistory.filter((item) => validTime(item.observedAtUtc)).sort((left, right) => Date.parse(left.observedAtUtc) - Date.parse(right.observedAtUtc))
     const prior = ordered.filter((item) => Date.parse(item.observedAtUtc) < Date.parse(fromUtc)).at(-1)
     const contextMap = new Map<string, CanonicalSpeedObservation>()
@@ -645,12 +728,12 @@ export class StopIntelligenceService {
     for (const sample of ordered.filter((item) => { const at = Date.parse(item.observedAtUtc); return at >= Date.parse(fromUtc) && at <= Date.parse(toUtc) })) contextMap.set(sample.observedAtUtc, asObservation(sample))
     const bridgedSpeed = bridgeMatchingSpeedStateEvidence({ configuration: result.report.configuration, fromUtc, toUtc, observations: [...contextMap.values()], availabilityIntervals: availabilityIntervals(result.sourceGaps, fromUtc, toUtc) })
     const radiusTimeline = this.radius?.getRawTimeline ? await this.radius.getRawTimeline(input.pressKey, fromUtc, toUtc).catch(() => null) : null
-    const canonicalActions = buildChangeoverActions({ stop: analysisStop, allStops: analysisStops, signals: result.signals, speedSignal: result.signals.find((item) => item.canonicalId === 'machine.speed.actual' && item.deckNumber === null), rangeEndUtc: input.toUtc, evidenceCutoffUtc: result.identityEvidenceCutoffUtc })
+    const canonicalActions = buildChangeoverActions({ stop: analysisStop, allStops: analysisStops, signals: detailSignals, speedSignal: detailSignals.find((item) => item.canonicalId === 'machine.speed.actual' && item.deckNumber === null), rangeEndUtc: input.toUtc, evidenceCutoffUtc: result.identityEvidenceCutoffUtc })
     // Deck state is core stop evidence: it drives the ten deck rows and the
     // Deck Out/Deck In stages. Keep only broad unmapped discovery optional.
     const deckStatusPromise = loadDeckStatusContext(this.telemetry, input.pressKey, fromUtc, toUtc, requestId, signal)
     const rawDiscovery = input.includeRaw ? await loadRawDiscoveries(this.telemetry, input.pressKey, fromUtc, toUtc, requestId, signal) : { results: [], requestedChunkCount: 0 }
-    const canonicallyRepresentedRawIdentities = new Set(result.signals.flatMap((item) => item.rawSignalId ? [item.rawSignalId] : []))
+    const canonicallyRepresentedRawIdentities = new Set(detailSignals.flatMap((item) => item.rawSignalId ? [item.rawSignalId] : []))
     const rawCandidateSelection = selectBoundedRawEvidenceCandidates(rawDiscovery.results.flatMap((item) => item.signals), canonicallyRepresentedRawIdentities)
     const discoveredRawCandidates = rawCandidateSelection.discovered
     const rawCandidates = rawCandidateSelection.selected
@@ -676,13 +759,13 @@ export class StopIntelligenceService {
     const deckStatusContext = await deckStatusPromise
     const stageSpeedObservations = bridgedSpeed.observations
     const displaySpeedObservations = downsampleFleetSpeed(stageSpeedObservations)
-    const changeoverActivityWindows = buildChangeoverActivityWindows({ stop: analysisStop, actions: changeoverActions.actions, signals: result.signals, speedObservations: stageSpeedObservations, deckStatus: deckStatusContext, rangeEndUtc: input.toUtc })
+    const changeoverActivityWindows = buildChangeoverActivityWindows({ stop: analysisStop, actions: changeoverActions.actions, signals: detailSignals, speedObservations: stageSpeedObservations, deckStatus: deckStatusContext, rangeEndUtc: input.toUtc })
     return {
       stopId: input.stopId, displayName: result.report.displayName, rangeFromUtc: input.fromUtc, rangeToUtc: input.toUtc,
       telemetryEvidenceState: result.report.telemetryEvidenceState, identityAssociationConfiguration: result.report.identityAssociationConfiguration, stop: analysisStop, changeoverStabilizationPhase, mergedChangeoverEvent,
       speedContext: { fromUtc, toUtc, unit: result.speedUnit, stopThreshold: result.report.configuration.stopThreshold, recoveryThreshold: result.report.configuration.recoveryThreshold, observations: displaySpeedObservations, unknownIntervals: bridgedSpeed.availabilityIntervals },
       radiusContext: { fromUtc, toUtc, states: (radiusTimeline?.segments ?? []).map((state) => ({ kind: state.kind, startUtc: state.startUtc, endUtc: state.endUtc, eventType: state.eventType, statusCode: state.statusCode, statusDescription: state.statusDescription, isProduction: state.isProduction })), reason: radiusTimeline ? 'Radius states for the complete visual investigation context window.' : 'Radius context was unavailable for this visual investigation window.' },
-      actionSignalContext: [...buildActionSignalContext(actionReferencedSignals(result.signals, canonicalActions), fromUtc, toUtc), ...buildRawActionSignalContext(rawHistories)],
+      actionSignalContext: [...buildActionSignalContext(actionReferencedSignals(detailSignals, canonicalActions), fromUtc, toUtc), ...buildRawActionSignalContext(rawHistories)],
       deckStatusContext,
       changeoverActivityWindows,
       rawUnmappedContext,
@@ -701,7 +784,7 @@ export class StopIntelligenceService {
     const source = await this.telemetry.sources.resolve(input.pressKey, requestId, signal)
 
     const capabilities = await this.telemetry.capabilities.get(input.pressKey, requestId, signal)
-    const selection = evidenceSelectors(input.pressKey, capabilities)
+    const selection = overviewEvidenceSelectors(input.pressKey, capabilities)
     const evidenceFromUtc = new Date(Date.parse(input.fromUtc) - identityAssociationConfiguration.identityContextBeforeSeconds * 1_000).toISOString()
     const requestedEvidenceCutoff = Date.parse(input.toUtc) + identityAssociationConfiguration.identityContextAfterSeconds * 1_000
     const identityEvidenceCutoffUtc = new Date(Math.min(requestedEvidenceCutoff, this.now())).toISOString()
@@ -776,9 +859,46 @@ export class StopIntelligenceService {
     const gaps = availabilityIntervals(history.readDiagnostics?.sourceGaps ?? [], analysisFromUtc, input.toUtc)
     const expandedAnalysis = analyzePhysicalStops({ configuration, fromUtc: analysisFromUtc, toUtc: input.toUtc, observations, availabilityIntervals: gaps })
     const segments = expandedAnalysis.segments.filter((segment) => Date.parse(segment.startAt) < to && Date.parse(segment.endAt ?? input.toUtc) > from)
+    const loadedSupportedFamilies = new Set(selection.supportedFamilies)
+
+    // CHANGEOVER is an AND decision: complete physical evidence, a speed test,
+    // wash, pump/ink, and impression must all be present. Wash is sparse and
+    // inexpensive, so stops that cannot pass that gate never trigger the broad
+    // impression/pump reads.
+    const followupSelection = candidateClassificationSelectors(input.pressKey, capabilities)
+    const washPositiveCandidates = segments.filter((segment) => {
+      if (evidenceIntegrity(segment) !== 'VALID' || segment.leftCensored || segment.rightCensored || !hasInStopSpeedTest(segment, observations)) return false
+      return detectRequiredChangeoverActivity({ segment, signals: history.signals, rangeEndUtc: input.toUtc, evidenceCutoffUtc: identityEvidenceCutoffUtc }).washActivity
+    })
+    const followupHistories: Array<Awaited<ReturnType<TelemetryFoundationService['semanticHistoryWithIdentity']>>> = []
+    if (followupSelection.selectors.length) {
+      for (const segment of washPositiveCandidates) {
+        const candidateFromUtc = new Date(Date.parse(segment.startAt) - STOP_DETAIL_CONTEXT_MS).toISOString()
+        const candidateToUtc = new Date(Math.min(Date.parse(segment.endAt ?? input.toUtc) + STOP_DETAIL_CONTEXT_MS, Date.parse(identityEvidenceCutoffUtc))).toISOString()
+        if (Date.parse(candidateToUtc) > Date.parse(candidateFromUtc)) followupHistories.push(await this.telemetry.semanticHistoryWithIdentity(input.pressKey, { fromUtc: candidateFromUtc, toUtc: candidateToUtc, includeSeed: true, signals: followupSelection.selectors }, requestId, signal))
+      }
+      if (followupHistories.length) followupSelection.supportedFamilies.forEach((family) => loadedSupportedFamilies.add(family))
+    }
+    if (followupHistories.length) history = { ...history, signals: mergeEvidenceSignals(history.signals, ...followupHistories.map(({ signals }) => signals)) }
+
+    // Dense analog pump frequency is a last-resort detector. Direct status,
+    // sequence, and viscosity state are preferred. Only a candidate that has
+    // already passed every other required gate may request frequency samples.
+    const frequencySelection = pumpFrequencySelectors(input.pressKey, capabilities)
+    if (frequencySelection.length) {
+      const frequencyHistories: Array<Awaited<ReturnType<TelemetryFoundationService['semanticHistoryWithIdentity']>>> = []
+      for (const segment of washPositiveCandidates) {
+        const required = detectRequiredChangeoverActivity({ segment, signals: history.signals, rangeEndUtc: input.toUtc, evidenceCutoffUtc: identityEvidenceCutoffUtc })
+        if (!required.washActivity || !required.impressionAdjustment || required.pumpInkActivity) continue
+        const candidateFromUtc = new Date(Date.parse(segment.startAt) - STOP_DETAIL_CONTEXT_MS).toISOString()
+        const candidateToUtc = new Date(Math.min(Date.parse(segment.endAt ?? input.toUtc) + STOP_DETAIL_CONTEXT_MS, Date.parse(identityEvidenceCutoffUtc))).toISOString()
+        if (Date.parse(candidateToUtc) > Date.parse(candidateFromUtc)) frequencyHistories.push(await this.telemetry.semanticHistoryWithIdentity(input.pressKey, { fromUtc: candidateFromUtc, toUtc: candidateToUtc, includeSeed: true, signals: frequencySelection }, requestId, signal))
+      }
+      if (frequencyHistories.length) history = { ...history, signals: mergeEvidenceSignals(history.signals, ...frequencyHistories.map(({ signals }) => signals)) }
+    }
     const classifiedStops = segments.map((segment) => {
-      const evidence = buildStopEvidence({ pressKey: input.pressKey, segment, allSegments: expandedAnalysis.segments, signals: history.signals, physicalRangeEndUtc: input.toUtc, identityEvidenceCutoffUtc, identityAssociationConfiguration, supportedFamilies: selection.supportedFamilies })
-      const integrity = segment.physicalDurationSeconds <= 0 ? 'INVALID' : segment.leftCensorReason && !['RANGE_START', 'RANGE_END'].includes(segment.leftCensorReason) || segment.rightCensorReason && !['RANGE_START', 'RANGE_END'].includes(segment.rightCensorReason) ? 'LIMITED' : 'VALID'
+      const evidence = buildStopEvidence({ pressKey: input.pressKey, segment, allSegments: expandedAnalysis.segments, signals: history.signals, physicalRangeEndUtc: input.toUtc, identityEvidenceCutoffUtc, identityAssociationConfiguration, supportedFamilies: [...loadedSupportedFamilies] })
+      const integrity = evidenceIntegrity(segment)
       const requiredActivity = detectRequiredChangeoverActivity({ segment, signals: history.signals, rangeEndUtc: input.toUtc, evidenceCutoffUtc: identityEvidenceCutoffUtc })
       return classifyStop({ segment, ...evidence, evidenceIntegrity: integrity, radius: overlayRadius(segment, input.toUtc, classificationRadiusTimeline?.segments), requiredChangeoverEvidence: { ...requiredActivity, speedTestReturnedToZero: hasInStopSpeedTest(segment, observations) } })
     })
