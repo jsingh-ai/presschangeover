@@ -646,9 +646,9 @@ export class StopIntelligenceService {
     const bridgedSpeed = bridgeMatchingSpeedStateEvidence({ configuration: result.report.configuration, fromUtc, toUtc, observations: [...contextMap.values()], availabilityIntervals: availabilityIntervals(result.sourceGaps, fromUtc, toUtc) })
     const radiusTimeline = this.radius?.getRawTimeline ? await this.radius.getRawTimeline(input.pressKey, fromUtc, toUtc).catch(() => null) : null
     const canonicalActions = buildChangeoverActions({ stop: analysisStop, allStops: analysisStops, signals: result.signals, speedSignal: result.signals.find((item) => item.canonicalId === 'machine.speed.actual' && item.deckNumber === null), rangeEndUtc: input.toUtc, evidenceCutoffUtc: result.identityEvidenceCutoffUtc })
-    const deckStatusPromise = input.includeRaw
-      ? loadDeckStatusContext(this.telemetry, input.pressKey, fromUtc, toUtc, requestId, signal)
-      : Promise.resolve(unavailableDeckStatus(fromUtc, toUtc, 'Deck-status history is part of the optional on-demand telemetry enrichment.'))
+    // Deck state is core stop evidence: it drives the ten deck rows and the
+    // Deck Out/Deck In stages. Keep only broad unmapped discovery optional.
+    const deckStatusPromise = loadDeckStatusContext(this.telemetry, input.pressKey, fromUtc, toUtc, requestId, signal)
     const rawDiscovery = input.includeRaw ? await loadRawDiscoveries(this.telemetry, input.pressKey, fromUtc, toUtc, requestId, signal) : { results: [], requestedChunkCount: 0 }
     const canonicallyRepresentedRawIdentities = new Set(result.signals.flatMap((item) => item.rawSignalId ? [item.rawSignalId] : []))
     const rawCandidateSelection = selectBoundedRawEvidenceCandidates(rawDiscovery.results.flatMap((item) => item.signals), canonicallyRepresentedRawIdentities)

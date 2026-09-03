@@ -318,7 +318,7 @@ export interface StopIntelligenceDetail {
     toUtc: string
     availability: 'AVAILABLE' | 'PARTIAL' | 'UNAVAILABLE'
     reason: string
-    sourceIdentities: Array<{ role: 'active' | 'deck_out' | 'print_on' | 'print_off'; rawIdentity: string }>
+    sourceIdentities: Array<{ role: 'active' | 'deck_out' | 'print_on' | 'print_off' | 'status' | 'position'; rawIdentity: string }>
     decks: Array<{
       deckNumber: number
       intervals: Array<{ startUtc: string; endUtc: string; state: 'PRINTING' | 'OUT' | 'READY' | 'INACTIVE' | 'UNKNOWN'; active: boolean | null; printing: boolean | null; out: boolean | null }>

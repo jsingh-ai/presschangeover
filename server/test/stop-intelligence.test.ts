@@ -648,9 +648,12 @@ test('builds a lightweight single-press summary and loads bounded detail only fo
         readDiagnostics: { gaps: [], sourceGaps: [{ startUtc: at(5), endUtc: at(8) }] },
       }
     },
-    rawCatalog: async () => [],
+    rawCatalog: async () => Array.from({ length: 10 }, (_, index) => index + 1).flatMap((deckNumber, index) => [
+      { id: index * 2 + 1, sourceId: 1, signalId: `Ruby.Press14.Line14.ProcessData.Color deck ${deckNumber}.Status [0/1]`, displayName: 'Status', sourceUnit: null, valueKind: 'boolean', enabled: true },
+      { id: index * 2 + 2, sourceId: 1, signalId: `Ruby.Press14.Line14.ProcessData.Color deck ${deckNumber}.Position [#]`, displayName: 'Position', sourceUnit: null, valueKind: 'integer', enabled: true },
+    ]),
     rawChanges: async () => { rawDiscoveryReads += 1; throw new Error('RAW_HISTORY_EXPIRED') },
-    rawHistory: async () => { throw new Error('RAW_HISTORY_EXPIRED') },
+    rawHistory: async (_pressKey: string, rawIdentity: string) => rawHistory(rawIdentity, rawIdentity, /\.Status \[0\/1\]$/.test(rawIdentity) ? [[-20, true]] : [[-20, 3]]),
   } as unknown as TelemetryFoundationService
   const radius = { getRawTimeline: async (pressKey: 'press14' | 'press15', fromUtc: string, toUtc: string) => {
     radiusReads.push({ pressKey, fromUtc, toUtc })
@@ -693,7 +696,8 @@ test('builds a lightweight single-press summary and loads bounded detail only fo
   assert.ok(detail!.actionSignalContext.some(({ canonicalId }) => canonicalId === 'machine.speed.actual'))
   assert.ok(detail!.actionSignalContext.some(({ canonicalId }) => canonicalId === 'production.roll'))
   assert.ok(detail!.actionSignalContext.some(({ canonicalId }) => canonicalId === 'ink.pump.frequency.supply'))
-  assert.equal(detail!.deckStatusContext.availability, 'UNAVAILABLE')
+  assert.equal(detail!.deckStatusContext.availability, 'AVAILABLE')
+  assert.deepEqual(detail!.deckStatusContext.decks.map(({ deckNumber }) => deckNumber), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
   assert.equal(detail!.rawUnmappedContext.availability, 'NOT_LOADED')
   assert.equal(rawDiscoveryReads, 0)
   assert.equal(detail!.actionSignalContext.find(({ canonicalId }) => canonicalId === 'production.roll')?.observations[0]?.atUtc, at(-5))
@@ -854,44 +858,48 @@ test('detects each required canonical changeover activity separately and only in
   assert.equal(detectRequiredChangeoverActivity({ segment: fixture.segment, signals: beforeOnly, rangeEndUtc: at(90), evidenceCutoffUtc: at(90) }).washActivity, false)
 })
 
-test('discovers raw deck containers and derives only Decks 1-10 into one status chronology', () => {
-  const catalog = ['active', 'deck_out', 'print_on', 'print_off'].map((displayName, index) => ({ id: index + 1, sourceId: 28, signalId: `P12.PLC.deck.${displayName}`, displayName, sourceUnit: null, valueKind: 'string', enabled: true }))
-  catalog.push({ id: 9, sourceId: 28, signalId: 'P12.PLC.gravure.print_on', displayName: 'print_on', sourceUnit: null, valueKind: 'string', enabled: true })
-  assert.deepEqual(deckStatusRawCandidates(catalog).map(({ role }) => role).sort(), ['active', 'deck_out', 'print_off', 'print_on'])
-  const arrayHistory = (role: 'active' | 'deck_out' | 'print_on' | 'print_off', values: Array<[number, number[]]>): { role: typeof role; history: RawTelemetryHistoryResponse } => ({ role, history: {
-    press: 'press12', displayName: 'Press 12', rawIdentity: `P12.PLC.deck.${role}`, signalDisplayName: role, dataType: 'container', dataKind: 'container', sourceUnit: null, plottable: false, fromUtc: at(-5), toUtc: at(75), historianReadCount: 1, alternateRepresentationCount: 0, alternateRawIdentities: [],
-    observations: values.map(([minute, rawValue]) => ({ timestampUtc: at(minute), receivedAtUtc: at(minute), sourceTimestampUtc: at(minute), qualityState: 'GOOD', dataType: 'container', rawValue })),
-  } })
-  const off = [0, ...Array(10).fill(0), 0, 0]; const on = [0, ...Array(10).fill(1), 0, 0]
-  const context = buildDeckStatusContext([
-    arrayHistory('active', [[-5, on]]), arrayHistory('print_on', [[-5, on], [10, off], [60, on]]),
-    arrayHistory('deck_out', [[-5, off], [10, on], [20, off]]), arrayHistory('print_off', [[-5, off], [10, on], [11, off]]),
-  ], at(0), at(75))
-  assert.equal(context.availability, 'AVAILABLE')
-  assert.deepEqual(context.decks.map(({ deckNumber }) => deckNumber), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
-  assert.deepEqual(context.decks[0]?.intervals.map(({ state }) => state), ['PRINTING', 'OUT', 'READY', 'PRINTING'])
-  assert.deepEqual(context.decks[0]?.events, [{ atUtc: at(10), kind: 'PRINT_OFF_COMMAND', label: 'Print-off command' }])
+test('discovers Press 12 and 13 array deck containers and derives only Decks 1-10', () => {
+  for (const pressNumber of [12, 13]) {
+    const catalog = ['active', 'deck_out', 'print_on', 'print_off'].map((displayName, index) => ({ id: index + 1, sourceId: pressNumber, signalId: `Press${pressNumber}.PLC.deck.${displayName}`, displayName, sourceUnit: null, valueKind: 'string', enabled: true }))
+    catalog.push({ id: 9, sourceId: pressNumber, signalId: `Press${pressNumber}.PLC.gravure.print_on`, displayName: 'print_on', sourceUnit: null, valueKind: 'string', enabled: true })
+    assert.deepEqual(deckStatusRawCandidates(catalog).map(({ role }) => role).sort(), ['active', 'deck_out', 'print_off', 'print_on'])
+    const arrayHistory = (role: 'active' | 'deck_out' | 'print_on' | 'print_off', values: Array<[number, number[]]>): { role: typeof role; history: RawTelemetryHistoryResponse } => ({ role, history: {
+      press: `press${pressNumber}` as 'press12' | 'press13', displayName: `Press ${pressNumber}`, rawIdentity: `Press${pressNumber}.PLC.deck.${role}`, signalDisplayName: role, dataType: 'container', dataKind: 'container', sourceUnit: null, plottable: false, fromUtc: at(-5), toUtc: at(75), historianReadCount: 1, alternateRepresentationCount: 0, alternateRawIdentities: [],
+      observations: values.map(([minute, rawValue]) => ({ timestampUtc: at(minute), receivedAtUtc: at(minute), sourceTimestampUtc: at(minute), qualityState: 'GOOD', dataType: 'container', rawValue })),
+    } })
+    const off = [0, ...Array(10).fill(0), 0, 0]; const on = [0, ...Array(10).fill(1), 0, 0]
+    const context = buildDeckStatusContext([
+      arrayHistory('active', [[-5, on]]), arrayHistory('print_on', [[-5, on], [10, off], [60, on]]),
+      arrayHistory('deck_out', [[-5, off], [10, on], [20, off]]), arrayHistory('print_off', [[-5, off], [10, on], [11, off]]),
+    ], at(0), at(75))
+    assert.equal(context.availability, 'AVAILABLE')
+    assert.deepEqual(context.decks.map(({ deckNumber }) => deckNumber), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    assert.deepEqual(context.decks[0]?.intervals.map(({ state }) => state), ['PRINTING', 'OUT', 'READY', 'PRINTING'])
+    assert.deepEqual(context.decks[0]?.events, [{ atUtc: at(10), kind: 'PRINT_OFF_COMMAND', label: 'Print-off command' }])
+  }
 })
 
 test('normalizes scalar indexed deck status used by presses 3-11 and ignores auxiliary indexes', () => {
-  const catalog = ['active', 'deck_out', 'print_on', 'print_off'].flatMap((role, roleIndex) => Array.from({ length: 13 }, (_, index) => ({
-    id: roleIndex * 20 + index, sourceId: 3, signalId: `DA.BuRServer.Press3.deck_${role}[${index}]`, displayName: `deck_${role}`, sourceUnit: null, valueKind: 'boolean', enabled: true,
-  })))
-  const candidates = deckStatusRawCandidates(catalog)
-  assert.equal(candidates.length, 40)
-  assert.deepEqual([...new Set(candidates.map(({ deckNumber }) => deckNumber))], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
-  const scalarHistory = (role: 'active' | 'deck_out' | 'print_on' | 'print_off', deckNumber: number, values: Array<[number, boolean]>) => ({
-    role, deckNumber, history: rawHistory(`DA.BuRServer.Press3.deck_${role}[${deckNumber}]`, `deck_${role}`, values),
-  })
-  const histories = Array.from({ length: 10 }, (_, index) => index + 1).flatMap((deckNumber) => [
-    scalarHistory('active', deckNumber, [[-5, true]]),
-    scalarHistory('print_on', deckNumber, [[-5, true], [10, false], [60, true]]),
-    scalarHistory('deck_out', deckNumber, [[-5, false], [10, true], [20, false]]),
-    scalarHistory('print_off', deckNumber, [[-5, false], [10, true], [11, false]]),
-  ])
-  const context = buildDeckStatusContext(histories, at(0), at(75))
-  assert.equal(context.availability, 'AVAILABLE')
-  assert.deepEqual(context.decks[9]?.intervals.map(({ state }) => state), ['PRINTING', 'OUT', 'READY', 'PRINTING'])
+  for (const pressNumber of [3, 5, 6, 7, 8, 9, 10, 11]) {
+    const catalog = ['active', 'deck_out', 'print_on', 'print_off'].flatMap((role, roleIndex) => Array.from({ length: 13 }, (_, index) => ({
+      id: roleIndex * 20 + index, sourceId: pressNumber, signalId: `DA.BuRServer.Press${pressNumber}.deck_${role}[${index}]`, displayName: `deck_${role}`, sourceUnit: null, valueKind: 'integer', enabled: true,
+    })))
+    const candidates = deckStatusRawCandidates(catalog)
+    assert.equal(candidates.length, 40)
+    assert.deepEqual([...new Set(candidates.map(({ deckNumber }) => deckNumber))], [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    const scalarHistory = (role: 'active' | 'deck_out' | 'print_on' | 'print_off', deckNumber: number, values: Array<[number, boolean]>) => ({
+      role, deckNumber, history: rawHistory(`DA.BuRServer.Press${pressNumber}.deck_${role}[${deckNumber}]`, `deck_${role}`, values),
+    })
+    const histories = Array.from({ length: 10 }, (_, index) => index + 1).flatMap((deckNumber) => [
+      scalarHistory('active', deckNumber, [[-5, true]]),
+      scalarHistory('print_on', deckNumber, [[-5, true], [10, false], [60, true]]),
+      scalarHistory('deck_out', deckNumber, [[-5, false], [10, true], [20, false]]),
+      scalarHistory('print_off', deckNumber, [[-5, false], [10, true], [11, false]]),
+    ])
+    const context = buildDeckStatusContext(histories, at(0), at(75))
+    assert.equal(context.availability, 'AVAILABLE')
+    assert.deepEqual(context.decks[9]?.intervals.map(({ state }) => state), ['PRINTING', 'OUT', 'READY', 'PRINTING'])
+  }
 })
 
 test('normalizes the validated Ruby Status and Position contract for Presses 14 and 15', () => {
