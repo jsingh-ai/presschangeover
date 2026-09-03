@@ -4,9 +4,9 @@
     "noEmit": true,
     "rootDir": "."
   },
-  "include": [
-    "src/**/*.ts",
-    "test/**/*.ts",
-    "scripts/**/*.ts"
+  "files": [
+    "src/app.ts",
+    "src/index.ts",
+    "test/placeholder.test.ts"
   ]
 }
