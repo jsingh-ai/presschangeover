@@ -1,35 +1,40 @@
 # Process Intelligence
 
-Process Intelligence is an isolated React and Node production application for operational press analysis. IIS serves the React client and proxies `/api` to a localhost-only Node service. Telemetry remains behind TelemetryQueryApi; Radius history is accessed only through an optional, dedicated SELECT-only PostgreSQL boundary.
+Process Intelligence is an isolated React and Node production application for operational press analysis. IIS serves the React client and proxies `/api` to a localhost-only Node service.
+
+Process Intelligence must remain read-only to both Radius and Telemetry. Telemetry stays behind TelemetryQueryApi, and Radius history is accessed only through an optional, dedicated SELECT-only PostgreSQL boundary. The application may persist its own classifications, reviews, corrections, users, and settings only in the separate `processintelligence_db`.
 
 The runtime paths are:
 
     React browser -> IIS -> Process Intelligence Express API -> TelemetryQueryApi
                                                         -> Radius PostgreSQL (optional SELECT-only)
 
-State Classification has a separate, optional writable boundary:
+Application-owned state has a separate, optional writable boundary:
 
     Process Intelligence Express API -> processintelligence_db (optional application data only)
 
-This database is not Radius and is not the telemetry historian. Until `processintelligence_db`, the restricted `processintelligence_app` role, and the reviewed migration are explicitly provisioned, semantic seed mappings are available read-only and administration mutations fail closed. See [docs/state-classification-storage.md](docs/state-classification-storage.md).
+This database is not Radius and is not the telemetry historian. No migration or application write may target either source system. Until `processintelligence_db`, the restricted `processintelligence_app` role, and the reviewed migration are explicitly provisioned, semantic seed mappings are available read-only and administration mutations fail closed. See [docs/state-classification-storage.md](docs/state-classification-storage.md).
 
 The browser uses only relative Process Intelligence /api URLs. It never contacts MARKUSPRODSVR, the telemetry historian, or PostgreSQL directly. See [docs/architecture.md](docs/architecture.md) for the complete boundary and future capability direction.
 
 ## Project layout
 
-- client/ — React, Vite, and TypeScript source
-- server/ — Express and TypeScript source
-- docs/ — architecture and technical documentation
-- worktrees/ — on-demand ignored Git worktrees for isolated validation; absent when unused
-- app/ — currently deployed production output
-- config/ — external production configuration and stable IIS template
-- artifacts/validation/ — disposable local validation output
-- staging/ — temporary release/deployment workspaces
-- releases/ — immutable deployable ZIPs and SHA-256 files
-- backups/ — rollback copies and exceptional recovery archives
-- logs/ — runtime logs
+Reviewed source and tooling:
 
-Source remains in client/ and server/. Reviewed releases publish into app/; production does not run from the source directories.
+- `client/` — React, Vite, and TypeScript
+- `server/` — Express, TypeScript, and application-owned migrations
+- `scripts/` — validation, packaging, deployment, rollback, and bounded cleanup
+- `docs/` — architecture and operating knowledge
+
+Ignored production and generated data:
+
+- `app/` — currently deployed application
+- `config/` and `logs/` — external configuration and runtime logs
+- `staging/` and `artifacts/validation/` — disposable deployment and validation work
+- `releases/` — deployable ZIPs and checksums
+- `backups/` — rollback copies and exceptional recovery material
+
+Production runs from reviewed release content under `app/`, not from the source directories. The current paths remain in place until a separately approved migration updates IIS, NSSM, and the deployment scripts together.
 
 ## Development environment
 
@@ -88,6 +93,10 @@ The resulting ZIP and checksum are written under `releases/`; temporary assembly
 Production deployment uses the dedicated `ProcessIntelligence.Node` service and restores the stable IIS web.config template. Deployment must explicitly name only that service and create a rollback backup.
 
 See [docs/change-and-release-workflow.md](docs/change-and-release-workflow.md) for the directory contract, small-change workflow, release promotion rules, and bounded transient cleanup.
+
+## Project working agreement
+
+The repository-root [AGENTS.md](AGENTS.md) records the safety boundaries and workflow that coding assistants must follow. [docs/full-stack-project-AGENTS.template.md](docs/full-stack-project-AGENTS.template.md) is a small starting point for future projects; adapt it to the project instead of creating unused directories or infrastructure.
 
 ## Current API
 
