@@ -1,4 +1,5 @@
-import { resolve } from 'node:path'
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { loadServerConfig } from '../src/config.js'
 import { localProcessIntelligenceBaseUrl, ProcessIntelligenceExplorerHttpClient, validateRawRadiusOverHttp, validateTelemetryEventsOverHttp } from './explorer-http-validation.js'
 import { writeValidationCheckpoint } from './validation-checkpoint.js'
@@ -6,7 +7,13 @@ import { writeValidationCheckpoint } from './validation-checkpoint.js'
 const argument = (name: string) => { const index = process.argv.indexOf(name); return index >= 0 ? process.argv[index + 1] : undefined }
 const endUtc = argument('--end') ?? new Date().toISOString()
 const startUtc = argument('--start') ?? new Date(Date.parse(endUtc) - 24 * 60 * 60_000).toISOString()
-const artifactPath = resolve(argument('--artifact') ?? 'staging/processintelligence-explorer-validation.json')
+const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
+const validationRoot = resolve(projectRoot, 'artifacts', 'validation')
+const artifactPath = resolve(projectRoot, argument('--artifact') ?? 'artifacts/validation/processintelligence-explorer-validation.json')
+const artifactRelativePath = relative(validationRoot, artifactPath)
+if (!artifactRelativePath || artifactRelativePath === '..' || artifactRelativePath.startsWith(`..${sep}`) || isAbsolute(artifactRelativePath)) {
+  throw new Error(`validation_artifact_must_remain_under_${validationRoot.replaceAll('\\', '_')}`)
+}
 let activePhase = 'startup'
 
 const artifact: {
