@@ -23,8 +23,8 @@ Keep this file short, current, and focused on rules that must survive every chan
 
 ## Git and checkpoints
 
-- The intended reviewed source branch is `main`, but it has not yet been established for this recovered repository. Do not create or move it without an explicit reconciliation task.
-- After `main` exists, use short-lived `feature/`, `fix/`, or `chore/` branches and merge through pull requests.
+- `main` is the permanent reviewed source branch. Never commit directly to it.
+- Use short-lived `feature/`, `fix/`, or `chore/` branches and merge them into `main` through pull requests.
 - Use judgment to create a focused commit when a coherent, meaningful unit is complete and validated, before unrelated or risky work accumulates. Do not commit every edit or knowingly incomplete work.
 - Before committing, inspect status and diffs, stage only exact task paths, and use a concise `feat:`, `fix:`, `chore:`, `docs:`, or `test:` message.
 - Never commit secrets, runtime configuration, logs, dependencies, build output, validation evidence, release packages, or backups.
