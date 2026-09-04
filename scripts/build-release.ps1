@@ -1,7 +1,9 @@
 #Requires -Version 5.1
 [CmdletBinding()]
 param(
-    [string]$ArtifactRoot = 'C:\ProcessIntelligence'
+    [string]$ArtifactRoot = 'C:\ProcessIntelligence',
+
+    [switch]$KeepStaging
 )
 
 Set-StrictMode -Version Latest
@@ -58,7 +60,7 @@ $scriptDirectory = Split-Path -Parent $MyInvocation.MyCommand.Path
 $projectRoot = Get-NormalizedPath (Join-Path $scriptDirectory '..')
 $expectedRoot = Get-NormalizedPath 'C:\ProcessIntelligence'
 $normalizedArtifactRoot = Get-NormalizedPath $ArtifactRoot
-$worktreeRoot = Get-NormalizedPath (Join-Path $expectedRoot '.tmp')
+$worktreeRoot = Get-NormalizedPath (Join-Path $expectedRoot 'worktrees')
 
 if (!$projectRoot.Equals($expectedRoot, [System.StringComparison]::OrdinalIgnoreCase) -and !$projectRoot.StartsWith($worktreeRoot + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "This release script must run from the ProcessIntelligence repository or an isolated worktree under $worktreeRoot"
@@ -70,7 +72,7 @@ if (!$normalizedArtifactRoot.Equals($expectedRoot, [System.StringComparison]::Or
 $clientSource = Join-Path $projectRoot 'client'
 $serverSource = Join-Path $projectRoot 'server'
 $stagingRoot = Join-Path $normalizedArtifactRoot 'staging'
-$packageRoot = Join-Path $normalizedArtifactRoot 'backups\packages'
+$packageRoot = Join-Path $normalizedArtifactRoot 'releases'
 
 foreach ($requiredPath in @(
     $clientSource,
@@ -94,6 +96,15 @@ if ($LASTEXITCODE -ne 0) {
 }
 if ($gitStatus.Count -gt 0) {
     throw 'Release packaging requires a clean Git worktree'
+}
+
+$gitCommit = (& git -C $projectRoot rev-parse --verify HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $gitCommit -notmatch '^[0-9a-fA-F]{40}$') {
+    throw 'Unable to resolve the release source commit'
+}
+$gitBranch = (& git -C $projectRoot branch --show-current).Trim()
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($gitBranch)) {
+    throw 'Release packaging requires an attached Git branch'
 }
 
 $npmCommand = (Get-Command npm.cmd -ErrorAction Stop).Source
@@ -233,29 +244,17 @@ try {
         Remove-Item -LiteralPath $typesScope -Force
     }
 
-    $gitCommit = $null
-    $previousErrorActionPreference = $ErrorActionPreference
-    $ErrorActionPreference = 'SilentlyContinue'
-    try {
-        $commitOutput = & git -C $projectRoot rev-parse --verify HEAD 2>$null
-        $commitExitCode = $LASTEXITCODE
-    }
-    finally {
-        $ErrorActionPreference = $previousErrorActionPreference
-    }
-    if ($commitExitCode -eq 0) {
-        $gitCommit = ($commitOutput | Select-Object -First 1).Trim()
-    }
-
     $manifest = [ordered]@{
+        schemaVersion = 1
         releaseId = $releaseId
         buildUtc = [DateTime]::UtcNow.ToString('o')
+        sourceBranch = $gitBranch
+        gitCommit = $gitCommit
         nodeVersion = (& node --version).Trim()
         npmVersion = (& $npmCommand --version).Trim()
         clientBuildStatus = 'passed'
         serverBuildStatus = 'passed'
         testStatus = 'passed'
-        gitCommit = $gitCommit
     }
     Write-Utf8NoBom -Path (Join-Path $releasePath 'release-manifest.json') -Content ($manifest | ConvertTo-Json -Depth 5)
 
@@ -288,10 +287,20 @@ try {
     Write-Utf8NoBom -Path $hashPath -Content "$hash  $([System.IO.Path]::GetFileName($zipPath))"
     $packageSize = (Get-Item -LiteralPath $zipPath).Length
 
+    if (!$KeepStaging) {
+        Assert-PathWithin -Path $releasePath -Root $stagingRoot
+        Remove-Item -LiteralPath $releasePath -Recurse -Force
+    }
+
     Write-Host ''
     Write-Host 'ProcessIntelligence release package created successfully.'
     Write-Host "Release ID: $releaseId"
-    Write-Host "Staging path: $releasePath"
+    if ($KeepStaging) {
+        Write-Host "Retained staging path: $releasePath"
+    }
+    else {
+        Write-Host 'Temporary staging content: removed'
+    }
     Write-Host "ZIP path: $zipPath"
     Write-Host "SHA-256: $hash"
     Write-Host "Package bytes: $packageSize"

@@ -49,6 +49,12 @@ The application-pool virtual identity has Read & Execute permission on the clien
 
 The deployment script copies the stable template into each prepared release at `client\web.config` before the new `app` directory is activated. The rewrite destination is fixed to localhost and cannot proxy arbitrary hosts.
 
+## Release lifecycle controls
+
+New deployable ZIPs and their adjacent SHA-256 files are created under `C:\ProcessIntelligence\releases`. `staging` is temporary workspace only, while `backups\deployments` contains rollback copies of previously deployed application content. Historical ZIPs under `backups\packages` remain legacy recovery material rather than the input to new deployments.
+
+The deployment script accepts only a ZIP under `releases`, verifies its adjacent SHA-256 before extraction, validates its manifest and source commit, and still requires `-ConfirmDeployment`. It does not accept a mutable staging directory. `-ValidateOnly` performs those package checks and cleans its temporary workspace without inspecting services or changing `app`. See `docs/change-and-release-workflow.md` for the full promotion and proportional-validation workflow.
+
 ## Backend service
 
 - Service: `ProcessIntelligence.Node`

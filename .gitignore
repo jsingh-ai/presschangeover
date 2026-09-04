@@ -7,7 +7,7 @@ build/
 .vite/
 coverage/
 
-# Future deployment and runtime content
+# Deployment and runtime content
 app/*
 !app/.gitkeep
 logs/*
@@ -16,8 +16,15 @@ staging/*
 !staging/.gitkeep
 backups/*
 !backups/.gitkeep
+releases/*
+!releases/.gitkeep
+artifacts/*
+!artifacts/validation/
+artifacts/validation/*
+!artifacts/validation/.gitkeep
+worktrees/
+.tmp/
 exports/
-releases/
 deployment-packages/
 screenshots/
 

@@ -1,8 +1,9 @@
 import { writeFile } from 'node:fs/promises'
+import { resolveValidationOutputPath } from './validation-output-path.mjs'
 
 const debuggerUrl = process.argv[2] ?? 'http://127.0.0.1:9226'
 const applicationUrl = process.argv[3] ?? 'http://127.0.0.1:4174/administration/state-classification'
-const screenshotBase = process.argv[4]
+const screenshotBase = process.argv[4] ? resolveValidationOutputPath(process.argv[4]) : undefined
 const delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
 
 async function pageTarget() {

@@ -20,9 +20,14 @@ The browser uses only relative Process Intelligence /api URLs. It never contacts
 - client/ — React, Vite, and TypeScript source
 - server/ — Express and TypeScript source
 - docs/ — architecture and technical documentation
+- worktrees/ — ignored isolated Git worktrees for concurrent validation
 - app/ — currently deployed production output
 - config/ — external production configuration and stable IIS template
-- logs/, staging/, backups/ — runtime logs, release staging, and packages/deployment backups
+- artifacts/validation/ — disposable local validation output
+- staging/ — temporary release/deployment workspaces
+- releases/ — immutable deployable ZIPs and SHA-256 files
+- backups/ — rollback copies and exceptional recovery archives
+- logs/ — runtime logs
 
 Source remains in client/ and server/. Reviewed releases publish into app/; production does not run from the source directories.
 
@@ -35,7 +40,7 @@ Observed on FORMPRODSVR02:
 
 Install dependencies from the repository root:
 
-    npm install
+    npm ci
 
 Start the API and client in separate terminals:
 
@@ -67,11 +72,22 @@ Use [server/.env.example](server/.env.example) and [config/processintelligence.e
     npm run build:client
     npm run build:server
 
+Run proportional source validation without packaging or deploying:
+
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-change.ps1 -Scope Css
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-change.ps1 -Scope Client
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-change.ps1 -Scope Server
+    powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-change.ps1 -Scope Full
+
 Create a validated, non-deployed release package:
 
     powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-release.ps1
 
+The resulting ZIP and checksum are written under `releases/`; temporary assembly content is removed after successful packaging.
+
 Production deployment uses the dedicated `ProcessIntelligence.Node` service and restores the stable IIS web.config template. Deployment must explicitly name only that service and create a rollback backup.
+
+See [docs/change-and-release-workflow.md](docs/change-and-release-workflow.md) for the directory contract, small-change workflow, release promotion rules, and bounded transient cleanup.
 
 ## Current API
 

@@ -8,7 +8,9 @@ param(
 
     [switch]$SkipServiceControl,
 
-    [switch]$ConfirmDeployment
+    [switch]$ConfirmDeployment,
+
+    [switch]$ValidateOnly
 )
 
 Set-StrictMode -Version Latest
@@ -49,7 +51,7 @@ function Write-Utf8NoBom {
     )
 }
 
-if ($env:COMPUTERNAME -ne 'FORMPRODSVR02') {
+if (!$ValidateOnly -and $env:COMPUTERNAME -ne 'FORMPRODSVR02') {
     throw 'Deployment is allowed only on FORMPRODSVR02'
 }
 
@@ -65,10 +67,10 @@ $configRoot = Join-Path $projectRoot 'config'
 $iisClientConfigPath = Join-Path $configRoot 'iis\ProcessIntelligence.web.config'
 $logsRoot = Join-Path $projectRoot 'logs'
 $stagingRoot = Join-Path $projectRoot 'staging'
-$packagesRoot = Join-Path $projectRoot 'backups\packages'
+$releasesRoot = Join-Path $projectRoot 'releases'
 $deploymentBackupsRoot = Join-Path $projectRoot 'backups\deployments'
 
-foreach ($requiredDirectory in @($appRoot, $configRoot, $logsRoot, $stagingRoot)) {
+foreach ($requiredDirectory in @($appRoot, $configRoot, $logsRoot, $stagingRoot, $releasesRoot)) {
     if (!(Test-Path -LiteralPath $requiredDirectory -PathType Container)) {
         throw "Expected production directory is missing: $requiredDirectory"
     }
@@ -85,26 +87,46 @@ if ($ReleasePath -match '(?i)opc-radius') {
 }
 
 $normalizedReleasePath = Get-NormalizedPath $ReleasePath
-$releaseIsStagedDirectory = Test-Path -LiteralPath $normalizedReleasePath -PathType Container
 $releaseIsPackage = Test-Path -LiteralPath $normalizedReleasePath -PathType Leaf
+if (!$releaseIsPackage -or [System.IO.Path]::GetExtension($normalizedReleasePath) -ne '.zip') {
+    throw 'ReleasePath must be an existing ZIP under releases; mutable staging directories cannot be deployed'
+}
+Assert-PathWithin -Path $normalizedReleasePath -Root $releasesRoot
 
-if ($releaseIsStagedDirectory) {
-    Assert-PathWithin -Path $normalizedReleasePath -Root $stagingRoot
+$hashPath = "$normalizedReleasePath.sha256"
+if (!(Test-Path -LiteralPath $hashPath -PathType Leaf)) {
+    throw "Release checksum is missing: $hashPath"
 }
-elseif ($releaseIsPackage -and [System.IO.Path]::GetExtension($normalizedReleasePath) -eq '.zip') {
-    Assert-PathWithin -Path $normalizedReleasePath -Root $packagesRoot
+Assert-PathWithin -Path $hashPath -Root $releasesRoot
+
+$hashRecord = (Get-Content -LiteralPath $hashPath -Raw).Trim()
+if ($hashRecord -notmatch '^([0-9a-fA-F]{64})\s+(.+)$') {
+    throw "Release checksum file is malformed: $hashPath"
 }
-else {
-    throw 'ReleasePath must be an existing staging directory or ZIP under backups\packages'
+$expectedHash = $Matches[1].ToUpperInvariant()
+$recordedFileName = $Matches[2].Trim()
+$releaseFileName = [System.IO.Path]::GetFileName($normalizedReleasePath)
+if ($recordedFileName -ne $releaseFileName) {
+    throw "Release checksum names a different package: $recordedFileName"
+}
+$actualHash = (Get-FileHash -LiteralPath $normalizedReleasePath -Algorithm SHA256).Hash
+if ($actualHash -ne $expectedHash) {
+    throw 'Release package SHA-256 does not match its checksum file'
 }
 
-if (!$ConfirmDeployment) {
+if ($ValidateOnly -and ($ConfirmDeployment -or $SkipServiceControl -or ![string]::IsNullOrWhiteSpace($ServiceName))) {
+    throw 'ValidateOnly cannot be combined with deployment confirmation or service options'
+}
+if (!$ValidateOnly -and !$ConfirmDeployment) {
     throw 'Deployment is disabled until -ConfirmDeployment is explicitly supplied after review'
 }
 
 $service = $null
 $serviceWasRunning = $false
-if ($SkipServiceControl) {
+if ($ValidateOnly) {
+    # Package validation does not inspect or control services.
+}
+elseif ($SkipServiceControl) {
     if (![string]::IsNullOrWhiteSpace($ServiceName)) {
         throw 'ServiceName cannot be combined with SkipServiceControl'
     }
@@ -126,7 +148,7 @@ else {
 
 $operationId = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss')
 $workingRoot = Join-Path $stagingRoot "deployment-$operationId-$([Guid]::NewGuid().ToString('N'))"
-$releaseRoot = $normalizedReleasePath
+$releaseRoot = Join-Path $workingRoot 'release'
 $preparedApp = Join-Path $workingRoot 'app'
 $backupRoot = Join-Path $deploymentBackupsRoot $operationId
 $backupApp = Join-Path $backupRoot 'app'
@@ -140,13 +162,8 @@ Assert-PathWithin -Path $backupApp -Root $backupRoot
 
 try {
     New-Item -ItemType Directory -Path $workingRoot -Force | Out-Null
-
-    if ($releaseIsPackage) {
-        $expandedRoot = Join-Path $workingRoot 'release'
-        New-Item -ItemType Directory -Path $expandedRoot -Force | Out-Null
-        Expand-Archive -LiteralPath $normalizedReleasePath -DestinationPath $expandedRoot
-        $releaseRoot = $expandedRoot
-    }
+    New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
+    Expand-Archive -LiteralPath $normalizedReleasePath -DestinationPath $releaseRoot
 
     foreach ($requiredReleasePath in @(
         (Join-Path $releaseRoot 'client\index.html'),
@@ -166,6 +183,38 @@ try {
         throw 'Release contains an environment file; deployment is refused'
     }
 
+    $manifestPath = Join-Path $releaseRoot 'release-manifest.json'
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+    foreach ($requiredManifestProperty in @('schemaVersion', 'releaseId', 'sourceBranch', 'gitCommit', 'testStatus')) {
+        if ($requiredManifestProperty -notin $manifest.PSObject.Properties.Name) {
+            throw "Release manifest is missing $requiredManifestProperty"
+        }
+    }
+    if ($manifest.schemaVersion -ne 1) {
+        throw "Unsupported release manifest schema: $($manifest.schemaVersion)"
+    }
+    if ($manifest.gitCommit -notmatch '^[0-9a-fA-F]{40}$') {
+        throw 'Release manifest does not contain a full Git commit SHA'
+    }
+    if ($manifest.testStatus -ne 'passed') {
+        throw 'Release manifest does not record passed validation'
+    }
+    if ($releaseFileName -ne "ProcessIntelligence-$($manifest.releaseId).zip") {
+        throw 'Release filename does not match the manifest release ID'
+    }
+    $commitType = (& git -C $projectRoot cat-file -t $manifest.gitCommit 2>$null | Select-Object -First 1)
+    if ($LASTEXITCODE -ne 0 -or $commitType -ne 'commit') {
+        throw "Release source commit is not available locally: $($manifest.gitCommit)"
+    }
+
+    if ($ValidateOnly) {
+        Write-Host 'Release package validation passed.'
+        Write-Host "Release ID: $($manifest.releaseId)"
+        Write-Host "Git commit: $($manifest.gitCommit)"
+        Write-Host "SHA-256: $actualHash"
+        return
+    }
+
     New-Item -ItemType Directory -Path $preparedApp -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $releaseRoot 'client') -Destination $preparedApp -Recurse
     Copy-Item -LiteralPath (Join-Path $releaseRoot 'server') -Destination $preparedApp -Recurse
@@ -177,6 +226,9 @@ try {
         createdUtc = [DateTime]::UtcNow.ToString('o')
         serviceName = $ServiceName
         sourceRelease = $normalizedReleasePath
+        sourceReleaseSha256 = $actualHash
+        releaseId = $manifest.releaseId
+        gitCommit = $manifest.gitCommit
         previousAppPath = $backupApp
         preservedConfigPath = $configRoot
         preservedLogsPath = $logsRoot

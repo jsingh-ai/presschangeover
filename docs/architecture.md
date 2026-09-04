@@ -30,13 +30,18 @@ The existing Radius/opc-radius production application on FORMPRODSVR02 remains i
 - client/ — React/Vite/TypeScript source
 - server/ — Node/Express/TypeScript source
 - docs/ — project architecture and technical documentation
-- app/ — future published production application
-- config/ — future external production configuration
-- logs/ — future production logs
-- staging/ — future deployment staging
-- backups/ — future rollback packages
+- app/ — published production application
+- config/ — external production configuration
+- logs/ — production logs
+- artifacts/validation/ — disposable local validation output
+- staging/ — temporary packaging and deployment workspaces
+- releases/ — immutable deployable packages and checksums
+- backups/deployments/ — deployment rollback copies
+- backups/ — exceptional recovery archives
 
 Production runs from reviewed release content under app/, not from client/ or server/. The Windows service runs the deployed Node entrypoint and IIS serves the deployed client while preserving a stable site-specific web.config template outside app/.
+
+Source validation, release packaging, deployment, and rollback are separate lifecycle stages. The enforced workflow and retention boundaries are documented in `docs/change-and-release-workflow.md`.
 
 ## Operational episode model
 

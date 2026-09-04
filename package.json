@@ -13,6 +13,10 @@
     "build:client": "npm run build --workspace client",
     "build:server": "npm run build --workspace server",
     "test": "npm run test --workspace server && npm run test --workspace client",
-    "typecheck": "npm run typecheck --workspace server"
+    "typecheck": "npm run typecheck --workspace server",
+    "validate:css": "npm run build:client",
+    "validate:client": "npm run test --workspace client && npm run build:client",
+    "validate:server": "npm run typecheck --workspace server && npm run test --workspace server && npm run build:server",
+    "validate:full": "npm run typecheck && npm run test && npm run build"
   }
 }
