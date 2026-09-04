@@ -20,7 +20,7 @@ The browser uses only relative Process Intelligence /api URLs. It never contacts
 - client/ — React, Vite, and TypeScript source
 - server/ — Express and TypeScript source
 - docs/ — architecture and technical documentation
-- worktrees/ — ignored isolated Git worktrees for concurrent validation
+- worktrees/ — on-demand ignored Git worktrees for isolated validation; absent when unused
 - app/ — currently deployed production output
 - config/ — external production configuration and stable IIS template
 - artifacts/validation/ — disposable local validation output

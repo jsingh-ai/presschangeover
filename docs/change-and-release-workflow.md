@@ -7,7 +7,7 @@ This workflow keeps source changes, validation output, deployable releases, runt
 | Path | Purpose | Retention |
 | --- | --- | --- |
 | `client/`, `server/`, `scripts/`, `docs/` | Reviewed source and operational tooling | Git history |
-| `worktrees/` | Isolated Git worktrees used for concurrent or release validation | Remove through Git when finished; ignored by Git |
+| `worktrees/` | On-demand isolated Git worktrees used for concurrent or release validation | Remove through Git when finished; the directory is absent when unused |
 | `artifacts/validation/` | Disposable screenshots, reports, and other local validation output | Delete after review; ignored by Git |
 | `staging/` | Temporary assembly and deployment workspaces | Automatically cleaned where possible; ignored by Git |
 | `releases/` | Immutable deployable ZIPs and adjacent SHA-256 files | Retain according to the release policy; ignored by Git |
@@ -17,7 +17,7 @@ This workflow keeps source changes, validation output, deployable releases, runt
 | `backups/deployments/` | Rollback copies created during deployment | Recovery retention; ignored by Git |
 | `backups/` | Exceptional recovery archives, including off-machine backup sources | Recovery retention; ignored by Git |
 
-Historical release ZIPs under `backups/packages/` are legacy recovery material. New release packages go to `releases/`, and the deployment script accepts only packages from that directory.
+Historical release ZIPs under `backups/packages/` are legacy recovery material. New release packages go to `releases/`, and the deployment script accepts only packages from that directory. Historical validation reports recovered from the former staging layout are retained under `artifacts/validation/legacy-202608/`.
 
 ## Proportional validation
 
@@ -45,13 +45,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\validate-change.ps1 
 
 These commands validate source only. They do not create a release, write to `app/`, control a service, or deploy anything. A small CSS or logic change therefore does not need a package until it is intentionally promoted for deployment.
 
-Browser screenshots and machine-generated reports belong under a timestamped directory in `artifacts/validation/`. The browser smoke scripts reject screenshot paths outside that boundary. Only conclusions and durable technical documentation should be committed.
+Browser screenshots and machine-generated reports belong under a timestamped directory in `artifacts/validation/`. The browser smoke scripts and live explorer validator reject output paths outside that boundary. Only conclusions and durable technical documentation should be committed.
 
 ## Branch and promotion flow
 
 1. Start a short-lived `fix/`, `feature/`, or `chore/` branch from the verified production source branch. Never develop directly in `app/`.
 2. Make the source change and run proportional validation.
-3. Commit and review the source. Stop here when no deployment is requested.
+3. As soon as a coherent unit passes its proportional validation, inspect the diff, stage only its exact paths, and create a focused conventional commit. Do not let unrelated completed work accumulate into one large checkpoint. Review the committed source and stop here when no deployment is requested.
 4. When deployment is approved, run full release packaging from a clean committed worktree:
 
    ```powershell
@@ -77,7 +77,7 @@ Browser screenshots and machine-generated reports belong under a timestamped dir
 
 7. Perform post-deployment health and browser validation. Roll back only from a reviewed directory under `backups/deployments/`.
 
-Creating a branch preserves intent and review history; creating a release is a separate promotion decision. There is no need to manufacture a release package for every local edit or commit.
+Creating a branch preserves intent, and focused commits preserve the reason and timing of each completed change. Pushing, creating a release, and deploying are separate promotion decisions. There is no need to manufacture a release package for every local edit or commit.
 
 ## Cleanup policy
 
